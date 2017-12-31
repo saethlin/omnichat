@@ -1,0 +1,9 @@
+[package]
+name = "ynit"
+version = "0.1.0"
+authors = ["Ben Kimock <kimockb@gmail.com>"]
+
+[dependencies]
+failure = "0.1.1"
+termion = "1.5.1"
+slack = {path = "/home/ben/slack-rs/"}
