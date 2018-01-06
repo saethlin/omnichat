@@ -39,8 +39,12 @@ impl slack::EventHandler for SlackHandler {
                     .expect("TUI lock poisoned")
                     .add_message(
                         &self.team_name,
-                        self.channels.get_human(channel).unwrap(),
-                        self.users.get_human(user).unwrap(),
+                        self.channels
+                            .get_human(channel)
+                            .expect(&format!("Unknown channel: {}", channel)),
+                        self.users
+                            .get_human(user)
+                            .expect(&format!("Unknown user: {}", user)),
                         text,
                     );
             }
@@ -71,7 +75,7 @@ pub struct SlackConn {
 }
 
 impl Conn for SlackConn {
-    fn new(tui_handle: Arc<Mutex<TUI>>, config: ServerConfig) -> Result<(), Error> {
+    fn new(tui_handle: Arc<Mutex<TUI>>, config: ServerConfig) -> Result<Box<Conn>, Error> {
         let api_key = match config {
             ServerConfig::Slack { token } => token,
             _ => return Err(Error::from(SlackError)),
@@ -118,20 +122,28 @@ impl Conn for SlackConn {
             users: users.clone(),
         };
 
-        // Add the server tab to the TUI
-        let mut tui = tui_handle.lock().expect("TUI lock was poisoned");
-
+        // Clone the sender so we can move the rtmclient
         let sender = rtmclient.sender().clone();
-        // One thread to listen on the websocket for incoming messages
+
         let joinhandle = thread::spawn(move || {
             rtmclient
                 .run(&mut slackhandler)
                 .expect("RtmClient exited with an error")
         });
 
-        // Another thread to listen on the channel for events
+        // TODO
+        // Create a channel
+        // Clone the sender
 
-        let connection = Arc::new(Mutex::new(SlackConn {
+        // Create and split a websocket
+        // Launch a thread that reads from the websocket, and handles events, adding messages to the
+        // TUI
+
+        // Launch another thread that reads from the channel, and handles shutdown and send_message
+        // events using the sender from the websocket
+        
+
+        Ok(Box::new(SlackConn {
             tui_handle: tui_handle.clone(),
             token: api_key.to_owned(),
             client: slack::api::requests::Client::new().unwrap(),
@@ -143,13 +155,7 @@ impl Conn for SlackConn {
             last_message_timestamp: "".to_owned(),
             joinhandle: Some(joinhandle),
             sender: sender,
-        }));
-
-        for channel in channel_names.iter() {
-            tui.add_channel(&team_name, &channel, connection.clone());
-        }
-
-        Ok(())
+        }))
     }
 
     fn handle_cmd(&mut self, cmd: String, args: Vec<String>) {

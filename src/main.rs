@@ -25,7 +25,8 @@ fn api_key() -> String {
 
     let mut file = File::open("/home/ben/slack_api_key").expect("Couldn't find API key");
     let mut api_key = String::with_capacity(128);
-    file.read_to_string(&mut api_key).unwrap();
+    file.read_to_string(&mut api_key)
+        .expect("Unable to read API key");
     api_key.trim().to_owned()
 }
 
@@ -35,14 +36,14 @@ fn main() {
         .expect("Couldn't put stdout into raw mode");
 
     let tui_handle = Arc::new(Mutex::new(TUI::new()));
-    tui_handle.lock().unwrap().draw();
+    tui_handle.lock().expect("Failed to unlock TUI").draw();
 
     let slack_config = conn::ServerConfig::Slack { token: api_key() };
-    SlackConn::new(tui_handle.clone(), slack_config).unwrap();
+    SlackConn::new(tui_handle.clone(), slack_config).expect("Failed to crate slack connection");
 
     for event in std::io::stdin().events() {
-        let event = event.unwrap();
-        let mut tui = tui_handle.lock().unwrap();
+        let event = event.expect("Invalid or unknown terminal event");
+        let mut tui = tui_handle.lock().expect("TUI lock poisoned");
         match event {
             Key(Char('\n')) => {
                 tui.send_message();
@@ -57,8 +58,14 @@ fn main() {
                 // TODO: Move the cursor back to the bottom-left
                 break;
             }
+            Key(Ctrl('p')) => {
+                tui.previous_channel();
+            }
+            Key(Ctrl('n')) => {
+                tui.next_channel();
+            }
             _ => {}
         }
-        tui.draw().unwrap();
+        tui.draw().expect("TUI draw failed");
     }
 }
