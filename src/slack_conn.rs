@@ -1,90 +1,48 @@
-use tui::TUI;
-use std::sync::{Arc, Mutex};
-
-use bimap::{BiMap, BiMapBuilder};
-use conn::{Conn, ServerConfig};
-use conn::ConnError::SlackError;
+use std::sync::mpsc::Sender;
 use std::thread;
-use slack;
+use std::net::TcpStream;
+use bimap::{BiMap, BiMapBuilder};
+use conn::{Conn, Event, Message, ServerConfig};
+use conn::ConnError::SlackError;
+use slack_api;
 use failure::Error;
+use websocket;
+use serde_json;
+use std;
 
-enum WsMessage {
-    Text(String),
-    Close,
-}
-
-struct SlackHandler {
-    tui_handle: Arc<Mutex<TUI>>,
-    team_name: String,
-    channels: BiMap,
-    users: BiMap,
-}
-
-impl slack::EventHandler for SlackHandler {
-    fn on_event(&mut self, _cli: &slack::RtmClient, event: slack::Event) {
-        use slack::Event::{Message, MessageError, MessageSent};
-        use slack::Message::Standard;
-        use slack::api::MessageStandard;
-        // Just handle the plain old messages for now
-        match event {
-            Message(box Standard(MessageStandard {
-                text: Some(ref text),
-                user: Some(ref user),
-                channel: Some(ref channel),
-                ..
-            })) => {
-                // Write the message to the frontend
-                self.tui_handle
-                    .lock()
-                    .expect("TUI lock poisoned")
-                    .add_message(
-                        &self.team_name,
-                        self.channels
-                            .get_human(channel)
-                            .expect(&format!("Unknown channel: {}", channel)),
-                        self.users
-                            .get_human(user)
-                            .expect(&format!("Unknown user: {}", user)),
-                        text,
-                    );
-            }
-            MessageError(_) => self.tui_handle
-                .lock()
-                .expect("TUI lock was poisoned")
-                .add_client_message("Message failed to send"),
-            MessageSent(m) => println!("{:?}", m),
-            _ => {}
-        }
-    }
-    fn on_connect(&mut self, _cli: &slack::RtmClient) {}
-    fn on_close(&mut self, _cli: &slack::RtmClient) {}
+#[derive(Serialize)]
+struct SlackMessage {
+    id: usize,
+    #[serde(rename = "type")] _type: String,
+    channel: String,
+    text: String,
 }
 
 pub struct SlackConn {
-    tui_handle: Arc<Mutex<TUI>>,
     token: String,
-    client: slack::api::requests::Client,
     team_name: String,
     users: BiMap,
     channels: BiMap,
     channel_names: Vec<String>,
-    channel_index: usize,
     last_message_timestamp: String,
-    sender: slack::Sender,
-    joinhandle: Option<thread::JoinHandle<()>>,
+    client: slack_api::requests::Client,
+    websocket: websocket::sync::Client<websocket::stream::sync::TlsStream<std::net::TcpStream>>,
+    message_num: usize,
 }
 
 impl Conn for SlackConn {
-    fn new(tui_handle: Arc<Mutex<TUI>>, config: ServerConfig) -> Result<Box<Conn>, Error> {
+    fn new(config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
+        println!("creating slack conn");
         let api_key = match config {
             ServerConfig::Slack { token } => token,
-            _ => return Err(Error::from(SlackError)),
+            //_ => return Err(Error::from(SlackError)),
         };
 
-        let mut rtmclient = slack::RtmClient::login(&api_key).map_err(|_| SlackError)?;
-        let response = rtmclient.start_response().clone();
+        let client = slack_api::requests::Client::new()?;
+        use slack_api::rtm::StartRequest;
+        let response = slack_api::rtm::start(&client, &api_key, &StartRequest::default())?;
 
-        // We use the server domain as a unique name for the TUI tab and logs
+        // We use the team name as a unique name for the TUI tab and logs
         let team_name = response.team.ok_or(SlackError)?.name.ok_or(SlackError)?;
 
         // Slack users are identified by an internal ID
@@ -104,9 +62,14 @@ impl Conn for SlackConn {
         // We also need a map from channel names to internal ID, so that we can join and leave
         let mut channel_names = Vec::new();
         let mut channel_ids = Vec::new();
-        for channel in response.channels.ok_or(SlackError)? {
-            channel_names.push(channel.name.ok_or(SlackError)?);
-            channel_ids.push(channel.id.ok_or(SlackError)?);
+        for channel in response
+            .channels
+            .ok_or(SlackError)?
+            .iter()
+            .filter(|c| c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true))
+        {
+            channel_names.push(channel.name.clone().ok_or(SlackError)?);
+            channel_ids.push(channel.id.clone().ok_or(SlackError)?);
         }
 
         let channels = BiMap::new(BiMapBuilder {
@@ -115,55 +78,59 @@ impl Conn for SlackConn {
         });
         channel_names.sort();
 
-        let mut slackhandler = SlackHandler {
-            tui_handle: tui_handle.clone(),
-            team_name: team_name.clone(),
-            channels: channels.clone(),
-            users: users.clone(),
-        };
+        let url = response.url.ok_or(SlackError)?;
+        let websocket = websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
+        
+        let connect_response = slack_api::rtm::connect(&client, &api_key)?;
+        let other_url = connect_response.url.ok_or(SlackError)?;
+        let mut thread_websocket = websocket::ClientBuilder::new(&other_url)?.connect_secure(None)?;
 
-        // Clone the sender so we can move the rtmclient
-        let sender = rtmclient.sender().clone();
-
-        let joinhandle = thread::spawn(move || {
-            rtmclient
-                .run(&mut slackhandler)
-                .expect("RtmClient exited with an error")
+        // Spin off a thread that will feed message events back to the TUI
+        thread::spawn(move || {
+            use websocket::OwnedMessage::Text;
+            use slack_api::MessageStandard;
+            use slack_api::Message::Standard;
+            for message in thread_websocket.incoming_messages() {
+                if let Ok(Text(message)) = message {
+                    // parse the message and add it to events
+                    if let Ok(Standard(MessageStandard {
+                        user: Some(user),
+                        text: Some(text),
+                        channel: Some(channel),
+                        ..
+                    })) = serde_json::from_str::<slack_api::Message>(&message)
+                    {
+                        sender
+                            .send(Event::Message(Message {
+                                channel: channel,
+                                sender: user,
+                                contents: text,
+                            }))
+                            .unwrap();
+                    }
+                }
+            }
         });
 
-        // TODO
-        // Create a channel
-        // Clone the sender
-
-        // Create and split a websocket
-        // Launch a thread that reads from the websocket, and handles events, adding messages to the
-        // TUI
-
-        // Launch another thread that reads from the channel, and handles shutdown and send_message
-        // events using the sender from the websocket
-        
-
         Ok(Box::new(SlackConn {
-            tui_handle: tui_handle.clone(),
-            token: api_key.to_owned(),
-            client: slack::api::requests::Client::new().unwrap(),
+            token: api_key,
+            client: client,
             users: users,
             channels: channels,
-            channel_names: channel_names.clone(),
-            channel_index: 0,
-            team_name: team_name.clone(),
+            channel_names: channel_names,
+            team_name: team_name,
             last_message_timestamp: "".to_owned(),
-            joinhandle: Some(joinhandle),
-            sender: sender,
+            websocket,
+            message_num: 0,
         }))
     }
 
     fn handle_cmd(&mut self, cmd: String, args: Vec<String>) {
         match (cmd.as_ref(), args.len()) {
             ("join", 1) => {
-                use slack::api::channels::JoinRequest;
+                use slack_api::channels::JoinRequest;
                 //let channel_id = &self.channels.get(&args[0]).expect("Unknown channel");
-                if let Err(e) = slack::api::channels::join(
+                if let Err(e) = slack_api::channels::join(
                     &self.client,
                     &self.token,
                     &JoinRequest {
@@ -173,13 +140,12 @@ impl Conn for SlackConn {
                 ) {
                     println!("{:#?}", e);
                     panic!("Join request failed");
-                    // Notify tiny
                 };
             }
             ("leave", 1) => {
-                use slack::api::channels::LeaveRequest;
+                use slack_api::channels::LeaveRequest;
                 let channel_id = &self.channels.get_id(&args[0]).expect("Unknown channel");
-                if let Err(e) = slack::api::channels::leave(
+                if let Err(e) = slack_api::channels::leave(
                     &self.client,
                     &self.token,
                     &LeaveRequest {
@@ -192,19 +158,19 @@ impl Conn for SlackConn {
                 }
             }
             ("delete", 0) => {
-                use slack::api::chat::DeleteRequest;
+                use slack_api::chat::DeleteRequest;
                 let request = DeleteRequest {
                     ts: &self.last_message_timestamp,
                     channel: &"".to_owned(), // Get from the TUI?
                     as_user: Some(true),
                 };
-                let response = slack::api::chat::delete(&self.client, &self.token, &request);
+                let response = slack_api::chat::delete(&self.client, &self.token, &request);
                 if let Err(_) = response {
                     // Notify tiny
                 }
             }
             ("update", 1) => {
-                use slack::api::chat::UpdateRequest;
+                use slack_api::chat::UpdateRequest;
                 let request = UpdateRequest {
                     ts: &self.last_message_timestamp,
                     channel: &"".to_owned(), // Get from the TUI?
@@ -215,17 +181,17 @@ impl Conn for SlackConn {
                     as_user: Some(true),
                 };
 
-                let response = slack::api::chat::update(&self.client, &self.token, &request);
+                let response = slack_api::chat::update(&self.client, &self.token, &request);
                 if let Err(_) = response {
                     // Notify tiny
                 }
             }
             ("search", 1) => {
-                use slack::api::search::{MessagesRequest, MessagesResponse,
-                                         MessagesResponseMessages};
+                use slack_api::search::{MessagesRequest, MessagesResponse,
+                                        MessagesResponseMessages};
                 let mut request = MessagesRequest::default();
                 request.query = &args[0];
-                let response = slack::api::search::messages(&self.client, &self.token, &request);
+                let response = slack_api::search::messages(&self.client, &self.token, &request);
                 if let Ok(MessagesResponse {
                     messages:
                         Some(MessagesResponseMessages {
@@ -241,8 +207,8 @@ impl Conn for SlackConn {
                 }
             }
             ("users", 0) => {
-                use slack::api::users::{ListRequest, ListResponse};
-                let request = slack::api::users::list(
+                use slack_api::users::{ListRequest, ListResponse};
+                let request = slack_api::users::list(
                     &self.client,
                     &self.token,
                     &ListRequest {
@@ -272,14 +238,25 @@ impl Conn for SlackConn {
         }
     }
 
-    fn send_channel_message(&self, channel: &str, contents: &str) {
+    fn send_channel_message(&mut self, channel: &str, contents: &str) {
+        println!("{}", channel);
+        use websocket::message::OwnedMessage;
         let channel_id = self.channels.get_id(channel).unwrap();
-        self.sender.send_message(channel_id, contents).unwrap();
-        //self.sender.send_message("slackbots", "slackbots").unwrap();
+        let msg = SlackMessage {
+            id: self.message_num,
+            _type: "message".to_owned(),
+            channel: channel_id.to_owned(),
+            text: contents.to_owned(),
+        };
+        self.message_num += 1;
+        let message_json = serde_json::to_string(&msg).unwrap();
+        self.websocket
+            .send_message(&OwnedMessage::Text(message_json))
+            .unwrap();
     }
 
-    fn channels(&self) -> Vec<String> {
-        self.channel_names.clone()
+    fn channels(&self) -> Vec<&String> {
+        self.channel_names.iter().collect()
     }
 
     fn autocomplete(&self, word: &str) -> Option<String> {
@@ -301,72 +278,7 @@ impl Conn for SlackConn {
         }
     }
 
-    fn name(&self) -> String {
-        self.team_name.clone()
-    }
-}
-
-impl Drop for SlackConn {
-    fn drop(&mut self) {
-        self.sender.shutdown();
-        self.joinhandle.take().unwrap().join();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::File;
-    use std::io::prelude::*;
-    use tempdir::TempDir;
-
-    fn api_key() -> String {
-        let mut file = File::open("/home/ben/slack_api_key").expect("Couldn't find API key");
-        let mut api_key = String::new();
-        file.read_to_string(&mut api_key).unwrap();
-        api_key.trim().to_owned()
-    }
-
-    /*
-    #[test]
-    fn test_leave_cmd() {
-        let tempdir = TempDir::new("tmp_logs").unwrap();
-        CONN.lock().unwrap().handle_cmd(
-            String::from("leave"),
-            vec![String::from("slackbots")],
-            &mut Vec::new(),
-            &mut Logger::new(tempdir.into_path()),
-        );
-    }
-    */
-
-    /*
-#[test]
-    fn test_join_cmd() {
-        let tempdir = TempDir::new("tmp_logs").unwrap();
-        let mut logger = Logger::new(tempdir.into_path());
-        CONN.lock().unwrap().handle_cmd(
-            String::from("leave"),
-            vec![String::from("slackbots")],
-            &mut Vec::new(),
-            &mut logger,
-        );
-        CONN.lock().unwrap().handle_cmd(
-            String::from("join"),
-            vec![String::from("slackbots")],
-            &mut Vec::new(),
-            &mut logger,
-        );
-    }
-*/
-    #[test]
-    fn test_send_message() {
-        let mut conn = SlackConn::new(&api_key()).unwrap();
-        use std::{thread, time};
-        for _ in 0..5 {
-            conn.send_message("slackbots", "slackbots");
-        }
-        // Give slack time to respond with an error?
-        thread::sleep(time::Duration::from_millis(5000));
+    fn name(&self) -> &String {
+        &self.team_name
     }
 }

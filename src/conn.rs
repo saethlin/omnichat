@@ -1,12 +1,11 @@
-use tui::TUI;
-use std::sync::{Arc, Mutex};
 use failure::Error;
+use std::sync::mpsc::Sender;
+use termion;
 
 #[derive(Debug)]
 pub enum ServerConfig {
-    Slack {
-        token: String,
-    },
+    Slack { token: String },
+    /*
     IRC {
         domain: String,
         port: usize,
@@ -15,6 +14,20 @@ pub enum ServerConfig {
         nicks: Vec<String>,
         auto_cmds: Vec<String>,
     },
+    */
+}
+
+#[derive(Debug)]
+pub struct Message {
+    pub channel: String,
+    pub sender: String,
+    pub contents: String,
+}
+
+#[derive(Debug)]
+pub enum Event {
+    Message(Message),
+    Input(termion::event::Event),
 }
 
 #[derive(Debug, Fail)]
@@ -24,17 +37,17 @@ pub enum ConnError {
 }
 
 pub trait Conn: Send {
-    fn new(tui_handle: Arc<Mutex<TUI>>, config: ServerConfig) -> Result<(), Error>
+    fn new(config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error>
     where
         Self: Sized;
 
-    fn name(&self) -> String;
+    fn name(&self) -> &String;
 
     fn handle_cmd(&mut self, cmd: String, args: Vec<String>);
 
-    fn send_channel_message(&self, channel: &str, contents: &str);
+    fn send_channel_message(&mut self, channel: &str, contents: &str);
 
-    fn channels(&self) -> Vec<String>;
+    fn channels(&self) -> Vec<&String>;
 
     fn autocomplete(&self, word: &str) -> Option<String>;
 }

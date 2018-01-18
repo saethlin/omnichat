@@ -1,65 +1,126 @@
 use termion;
 
 use std;
-use std::io::Write;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
+use std::io::{stdin, Write};
+use conn::{Conn, Event, Message};
+
+use termion::input::TermRead;
+use termion::event::Event::*;
+use termion::event::Key::*;
 
 pub struct TUI {
-    channels: Vec<Channel>,
-    current_channel: usize,
+    servers: Vec<Server>,
+    current_server: usize,
     pub message_buffer: String,
+    shutdown: bool,
+    events: Option<Receiver<Event>>,
+    sender: Sender<Event>,
+}
+
+pub struct Server {
+    channels: Vec<Channel>,
+    connection: Option<Box<Conn>>,
+    name: String,
+    current_channel: usize,
 }
 
 pub struct Channel {
     messages: Vec<String>,
-    server_name: String,
-    channel_name: String,
+    name: String,
 }
 
 impl TUI {
     pub fn new() -> Self {
+        let (sender, reciever) = channel();
+        let send = sender.clone();
+        thread::spawn(move || {
+            for event in stdin().events() {
+                if let Ok(ev) = event {
+                    send.send(Event::Input(ev)).expect("IO event sender died");
+                }
+            }
+        });
+
         Self {
-            channels: vec![
-                Channel {
-                    messages: Vec::new(),
-                    server_name: String::from("Client"),
-                    channel_name: String::from("warnings"),
+            servers: vec![
+                Server {
+                    name: String::from("Client"),
+                    channels: vec![
+                        Channel {
+                            name: String::from("warnings"),
+                            messages: Vec::new(),
+                        },
+                    ],
+                    current_channel: 0,
+                    connection: None,
                 },
             ],
-            current_channel: 0,
+            current_server: 0,
             message_buffer: String::new(),
+            shutdown: false,
+            events: Some(reciever),
+            sender: sender,
+        }
+    }
+
+    pub fn sender(&self) -> Sender<Event> {
+        self.sender.clone()
+    }
+
+    pub fn next_server(&mut self) {
+        self.current_server += 1;
+        if self.current_server >= self.servers.len() {
+            self.current_server = 0;
+        }
+    }
+
+    pub fn previous_server(&mut self) {
+        if self.current_server > 0 {
+            self.current_server -= 1;
+        } else {
+            self.current_server = self.servers.len() - 1;
         }
     }
 
     pub fn next_channel(&mut self) {
-        self.current_channel += 1;
-        if self.current_channel >= self.channels.len() {
-            self.current_channel = 0;
+        let server = &mut self.servers[self.current_server];
+        server.current_channel += 1;
+        if server.current_channel >= server.channels.len() {
+            server.current_channel = 0;
         }
     }
 
     pub fn previous_channel(&mut self) {
-        if self.current_channel > 0 {
-            self.current_channel -= 1;
+        let server = &mut self.servers[self.current_server];
+        if server.current_channel > 0 {
+            server.current_channel -= 1;
         } else {
-            self.current_channel = self.channels.len() - 1;
+            server.current_channel = server.channels.len() - 1;
         }
     }
 
     pub fn add_client_message(&mut self, message: &str) {
-        self.channels[0].messages.push(message.to_owned())
+        self.servers[0].channels[0]
+            .messages
+            .push(message.to_owned())
     }
 
-    pub fn add_channel(
-        &mut self,
-        server_name: &str,
-        channel_name: &str,
-    ) {
-        // Change the currently selected channel
-        self.channels.push(Channel {
-            server_name: server_name.to_owned(),
-            channel_name: channel_name.to_owned(),
-            messages: Vec::new(),
-        })
+    pub fn add_server(&mut self, connection: Box<Conn>) {
+        self.servers.push(Server {
+            channels: connection
+                .channels()
+                .iter()
+                .map(|name| Channel {
+                    messages: Vec::new(),
+                    name: name.to_string(),
+                })
+                .collect(),
+            name: connection.name().to_string(),
+            connection: Some(connection),
+            current_channel: 0,
+        });
     }
 
     pub fn add_message(
@@ -69,56 +130,72 @@ impl TUI {
         user: &str,
         message: &str,
     ) {
-        self.channels
+        let server = self.servers
             .iter_mut()
-            .find(|c| c.server_name == server_name && c.channel_name == channel_name)
-            .expect(&format!(
-                "Unknown channel: {} server: {} combination",
-                channel_name, server_name
-            ))
-            .messages
-            .push(format!("{}: {}", user, message));
+            .find(|s| s.name == server_name)
+            .unwrap();
+        let channel = server
+            .channels
+            .iter_mut()
+            .find(|c| c.name == channel_name)
+            .unwrap();
+        channel.messages.push(format!("{}: {}", user, message));
     }
 
     pub fn send_message(&mut self) {
-        self.channels[self.current_channel]
+        let server = &mut self.servers[self.current_server];
+        match server.connection {
+            Some(ref mut conn) => {
+                let current_channel_name = &server.channels[server.current_channel].name;
+                conn.send_channel_message(&current_channel_name, &self.message_buffer);
+            }
+            None => {}
+        }
+        server.channels[server.current_channel]
             .messages
             .push(self.message_buffer.clone());
-
         self.message_buffer.clear();
     }
 
-    pub fn draw(&mut self) -> Result<(), std::io::Error> {
+    pub fn draw(&mut self) {
         use termion::cursor::Goto;
-        //use termion::style::{Bold, NoBold};
-        let chan_width = 15;
-        let (_width, height) = termion::terminal_size()?;
+        use termion::style::{Bold, Reset};
+        let chan_width = 20;
+        let (_width, height) =
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
         print!("{}", termion::clear::All);
 
         for i in 1..height + 1 {
-            print!("{}|", Goto(15, i));
+            print!("{}|", Goto(chan_width, i));
         }
 
-        // Draw all the server names
-        let mut row = 0;
-        let mut last_server = String::new();
-        for channel in self.channels.iter() {
-            if channel.server_name != last_server {
-                print!("{}{}", Goto(1, row + 1 as u16), channel.server_name);
-                row += 1;
-                last_server = channel.server_name.clone();
+        // Draw all the server names across the top
+        let mut server_bar = format!("{}", Goto(21, 1)); // Move to the top-right corner
+        for (s, server) in self.servers.iter().enumerate() {
+            if s == self.current_server {
+                server_bar.extend(format!("{}{}{} ", Bold, server.name, Reset).chars());
+            } else {
+                server_bar.extend(format!("{} ", server.name).chars());
             }
+        }
+        print!("{}", server_bar);
 
-            print!("{}{}", Goto(3, row + 1 as u16), channel.channel_name);
-            row += 1;
+        // Draw all the channels for the current server down the left side
+        let server = &self.servers[self.current_server];
+        for (c, channel) in server.channels.iter().enumerate() {
+            if c == server.current_channel {
+                print!("{}{}{}{}", Goto(1, c as u16 + 1), Bold, channel.name, Reset);
+            } else {
+                print!("{}{}", Goto(1, c as u16 + 1), channel.name);
+            }
         }
 
-        for (m, msg) in self.channels[self.current_channel]
+        for (m, msg) in server.channels[server.current_channel]
             .messages
             .iter()
             .rev()
-            .take(height as usize - 1)
+            .take(height as usize - 2)
             .enumerate()
         {
             print!("{}{}", Goto(chan_width + 1, height - 1 - m as u16), msg);
@@ -127,9 +204,44 @@ impl TUI {
         // Print the message buffer
         print!("{}{}", Goto(chan_width + 1, height), self.message_buffer);
 
-        std::io::stdout().flush();
-        //self.output_handle.flush()?;
+        std::io::stdout().flush().expect("TUI drawing flush failed");
+    }
 
-        Ok(())
+    fn handle_input(&mut self, event: termion::event::Event) {
+        match event {
+            Key(Char('\n')) => self.send_message(),
+            Key(Backspace) => {
+                self.message_buffer.pop();
+            }
+            Key(Ctrl('c')) => self.shutdown = true,
+            Key(Up) => self.previous_channel(),
+            Key(Down) => self.next_channel(),
+            Key(Right) => self.next_server(),
+            Key(Left) => self.previous_server(),
+            Key(Char(c)) => self.message_buffer.push(c),
+            _ => {}
+        }
+    }
+
+    fn handle_message(&mut self, message: Message) {}
+
+    pub fn run(mut self) {
+        let events = self.events.take().unwrap();
+        for event in events {
+            match event {
+                Event::Input(ev) => {
+                    self.add_client_message("Got keyboard input");
+                    self.handle_input(ev);
+                }
+                Event::Message(message) => {
+                    self.add_client_message("Got message");
+                    self.handle_message(message);
+                }
+            }
+            self.draw();
+            if self.shutdown {
+                break;
+            }
+        }
     }
 }

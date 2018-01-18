@@ -1,14 +1,14 @@
 #![feature(box_patterns)]
 #[macro_use]
 extern crate failure;
-extern crate slack;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+extern crate slack_api;
 extern crate termion;
+extern crate websocket;
 
-use std::sync::{Arc, Mutex};
-
-use termion::input::TermRead;
-use termion::event::Event::*;
-use termion::event::Key::*;
 use termion::raw::IntoRawMode;
 
 mod tui;
@@ -31,41 +31,17 @@ fn api_key() -> String {
 }
 
 fn main() {
-    std::io::stdout()
+    let _guard = std::io::stdout()
         .into_raw_mode()
         .expect("Couldn't put stdout into raw mode");
 
-    let tui_handle = Arc::new(Mutex::new(TUI::new()));
-    tui_handle.lock().expect("Failed to unlock TUI").draw();
+    let mut tui = TUI::new();
 
     let slack_config = conn::ServerConfig::Slack { token: api_key() };
-    SlackConn::new(tui_handle.clone(), slack_config).expect("Failed to crate slack connection");
+    let connection =
+        SlackConn::new(slack_config, tui.sender()).expect("Failed to crate slack connection");
+    tui.add_server(connection);
+    tui.draw();
 
-    for event in std::io::stdin().events() {
-        let event = event.expect("Invalid or unknown terminal event");
-        let mut tui = tui_handle.lock().expect("TUI lock poisoned");
-        match event {
-            Key(Char('\n')) => {
-                tui.send_message();
-            }
-            Key(Char(c)) => {
-                tui.message_buffer.push(c);
-            }
-            Key(Backspace) => {
-                tui.message_buffer.pop();
-            }
-            Key(Ctrl('c')) => {
-                // TODO: Move the cursor back to the bottom-left
-                break;
-            }
-            Key(Ctrl('p')) => {
-                tui.previous_channel();
-            }
-            Key(Ctrl('n')) => {
-                tui.next_channel();
-            }
-            _ => {}
-        }
-        tui.draw().expect("TUI draw failed");
-    }
+    tui.run();
 }
