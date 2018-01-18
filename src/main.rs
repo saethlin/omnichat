@@ -18,7 +18,7 @@ mod bimap;
 
 fn api_key() -> String {
     use std::fs::File;
-    use std::io::prelude::*;
+    use std::io::Read;
 
     let mut file = File::open("/home/ben/slack_api_key").expect("Couldn't find API key");
     let mut api_key = String::with_capacity(128);
@@ -33,6 +33,7 @@ fn main() {
         .expect("Couldn't put stdout into raw mode");
 
     let mut tui = TUI::new();
+    tui.draw();
 
     let slack_config = conn::ServerConfig::Slack { token: api_key() };
     let connection =

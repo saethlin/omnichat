@@ -29,12 +29,12 @@ pub struct Message {
 pub enum Event {
     Message(Message),
     Input(termion::event::Event),
+    Error(String),
 }
 
 #[derive(Debug, Fail)]
 pub enum ConnError {
     #[fail(display = "Slack response was damaged")] SlackError,
-    #[fail(display = "Websocket shut down")] WebsocketError,
 }
 
 pub trait Conn: Send {

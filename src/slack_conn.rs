@@ -16,11 +16,11 @@ pub struct SlackConn {
     channel_names: Vec<String>,
     last_message_timestamp: String,
     client: slack_api::requests::Client,
+    sender: Sender<Event>,
 }
 
 impl Conn for SlackConn {
     fn new(config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
-        println!("creating slack conn");
         let api_key = match config {
             ServerConfig::Slack { token } => token,
             //_ => return Err(Error::from(SlackError)),
@@ -69,6 +69,7 @@ impl Conn for SlackConn {
         let url = response.url.ok_or(SlackError)?;
         let mut websocket = websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
 
+        let thread_sender = sender.clone();
         let name = team_name.clone();
         let handler_channels = channels.clone();
         let handler_users = users.clone();
@@ -88,7 +89,7 @@ impl Conn for SlackConn {
                         ..
                     })) = serde_json::from_str::<slack_api::Message>(&message)
                     {
-                        sender
+                        thread_sender
                             .send(Event::Message(Message {
                                 server: name.clone(),
                                 channel: handler_channels
@@ -101,7 +102,11 @@ impl Conn for SlackConn {
                             .unwrap();
                     }
                 } else if let Ok(Ping(data)) = message {
-                    websocket.send_message(&Pong(data));
+                    websocket.send_message(&Pong(data)).unwrap_or_else(|_| {
+                        thread_sender
+                            .send(Event::Error("Failed to Pong".to_string()))
+                            .expect("Sender died")
+                    });
                 }
             }
         });
@@ -114,6 +119,7 @@ impl Conn for SlackConn {
             channel_names: channel_names,
             team_name: team_name,
             last_message_timestamp: "".to_owned(),
+            sender: sender,
         }))
     }
 
@@ -235,8 +241,15 @@ impl Conn for SlackConn {
         request.channel = channel;
         request.text = contents;
         request.as_user = Some(true);
-        slack_api::chat::post_message(&self.client, &self.token, &request).unwrap();
-   }
+        if let Err(_) = slack_api::chat::post_message(&self.client, &self.token, &request) {
+            self.sender
+                .send(Event::Error(format!(
+                    "Failed to send message: {:?}",
+                    contents
+                )))
+                .expect("Sender died");
+        }
+    }
 
     fn channels(&self) -> Vec<&String> {
         self.channel_names.iter().collect()

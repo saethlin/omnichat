@@ -227,12 +227,9 @@ impl TUI {
         let events = self.events.take().unwrap();
         for event in events {
             match event {
-                Event::Input(ev) => {
-                    self.handle_input(ev);
-                }
-                Event::Message(message) => {
-                    self.add_message(&message);
-                }
+                Event::Input(event) => self.handle_input(event),
+                Event::Message(message) => self.add_message(&message),
+                Event::Error(message) => self.add_client_message(&message),
             }
             self.draw();
             if self.shutdown {
