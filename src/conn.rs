@@ -19,6 +19,7 @@ pub enum ServerConfig {
 
 #[derive(Debug)]
 pub struct Message {
+    pub server: String,
     pub channel: String,
     pub sender: String,
     pub contents: String,

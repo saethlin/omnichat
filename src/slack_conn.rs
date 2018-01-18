@@ -1,6 +1,5 @@
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::net::TcpStream;
 use bimap::{BiMap, BiMapBuilder};
 use conn::{Conn, Event, Message, ServerConfig};
 use conn::ConnError::SlackError;
@@ -8,15 +7,6 @@ use slack_api;
 use failure::Error;
 use websocket;
 use serde_json;
-use std;
-
-#[derive(Serialize)]
-struct SlackMessage {
-    id: usize,
-    #[serde(rename = "type")] _type: String,
-    channel: String,
-    text: String,
-}
 
 pub struct SlackConn {
     token: String,
@@ -26,8 +16,6 @@ pub struct SlackConn {
     channel_names: Vec<String>,
     last_message_timestamp: String,
     client: slack_api::requests::Client,
-    websocket: websocket::sync::Client<websocket::stream::sync::TlsStream<std::net::TcpStream>>,
-    message_num: usize,
 }
 
 impl Conn for SlackConn {
@@ -79,18 +67,18 @@ impl Conn for SlackConn {
         channel_names.sort();
 
         let url = response.url.ok_or(SlackError)?;
-        let websocket = websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
-        
-        let connect_response = slack_api::rtm::connect(&client, &api_key)?;
-        let other_url = connect_response.url.ok_or(SlackError)?;
-        let mut thread_websocket = websocket::ClientBuilder::new(&other_url)?.connect_secure(None)?;
+        let mut websocket = websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
 
+        let name = team_name.clone();
+        let handler_channels = channels.clone();
+        let handler_users = users.clone();
         // Spin off a thread that will feed message events back to the TUI
         thread::spawn(move || {
-            use websocket::OwnedMessage::Text;
+            use websocket::OwnedMessage::{Ping, Pong, Text};
             use slack_api::MessageStandard;
             use slack_api::Message::Standard;
-            for message in thread_websocket.incoming_messages() {
+            loop {
+                let message = websocket.recv_message();
                 if let Ok(Text(message)) = message {
                     // parse the message and add it to events
                     if let Ok(Standard(MessageStandard {
@@ -102,12 +90,18 @@ impl Conn for SlackConn {
                     {
                         sender
                             .send(Event::Message(Message {
-                                channel: channel,
-                                sender: user,
+                                server: name.clone(),
+                                channel: handler_channels
+                                    .get_human(&channel)
+                                    .expect(&format!("Unknown channel ID {}", channel))
+                                    .clone(),
+                                sender: handler_users.get_human(&user).unwrap_or(&user).clone(),
                                 contents: text,
                             }))
                             .unwrap();
                     }
+                } else if let Ok(Ping(data)) = message {
+                    websocket.send_message(&Pong(data));
                 }
             }
         });
@@ -120,8 +114,6 @@ impl Conn for SlackConn {
             channel_names: channel_names,
             team_name: team_name,
             last_message_timestamp: "".to_owned(),
-            websocket,
-            message_num: 0,
         }))
     }
 
@@ -239,21 +231,12 @@ impl Conn for SlackConn {
     }
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
-        println!("{}", channel);
-        use websocket::message::OwnedMessage;
-        let channel_id = self.channels.get_id(channel).unwrap();
-        let msg = SlackMessage {
-            id: self.message_num,
-            _type: "message".to_owned(),
-            channel: channel_id.to_owned(),
-            text: contents.to_owned(),
-        };
-        self.message_num += 1;
-        let message_json = serde_json::to_string(&msg).unwrap();
-        self.websocket
-            .send_message(&OwnedMessage::Text(message_json))
-            .unwrap();
-    }
+        let mut request = slack_api::chat::PostMessageRequest::default();
+        request.channel = channel;
+        request.text = contents;
+        request.as_user = Some(true);
+        slack_api::chat::post_message(&self.client, &self.token, &request).unwrap();
+   }
 
     fn channels(&self) -> Vec<&String> {
         self.channel_names.iter().collect()

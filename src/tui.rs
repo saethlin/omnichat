@@ -1,5 +1,4 @@
 use termion;
-
 use std;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
@@ -29,6 +28,7 @@ pub struct Server {
 pub struct Channel {
     messages: Vec<String>,
     name: String,
+    has_unreads: bool,
 }
 
 impl TUI {
@@ -51,6 +51,7 @@ impl TUI {
                         Channel {
                             name: String::from("warnings"),
                             messages: Vec::new(),
+                            has_unreads: false,
                         },
                     ],
                     current_channel: 0,
@@ -115,6 +116,7 @@ impl TUI {
                 .map(|name| Channel {
                     messages: Vec::new(),
                     name: name.to_string(),
+                    has_unreads: false,
                 })
                 .collect(),
             name: connection.name().to_string(),
@@ -123,23 +125,20 @@ impl TUI {
         });
     }
 
-    pub fn add_message(
-        &mut self,
-        server_name: &str,
-        channel_name: &str,
-        user: &str,
-        message: &str,
-    ) {
+    pub fn add_message(&mut self, message: &Message) {
         let server = self.servers
             .iter_mut()
-            .find(|s| s.name == server_name)
-            .unwrap();
+            .find(|s| s.name == message.server)
+            .expect(&format!("Unknown server {}", message.server));
         let channel = server
             .channels
             .iter_mut()
-            .find(|c| c.name == channel_name)
-            .unwrap();
-        channel.messages.push(format!("{}: {}", user, message));
+            .find(|c| c.name == message.channel)
+            .expect(&format!("Unknown channel {}", message.channel));
+        channel
+            .messages
+            .push(format!("{}: {}", message.sender, message.contents));
+        channel.has_unreads = true;
     }
 
     pub fn send_message(&mut self) {
@@ -151,9 +150,6 @@ impl TUI {
             }
             None => {}
         }
-        server.channels[server.current_channel]
-            .messages
-            .push(self.message_buffer.clone());
         self.message_buffer.clear();
     }
 
@@ -182,10 +178,14 @@ impl TUI {
         print!("{}", server_bar);
 
         // Draw all the channels for the current server down the left side
-        let server = &self.servers[self.current_server];
-        for (c, channel) in server.channels.iter().enumerate() {
+        let server = &mut self.servers[self.current_server];
+        for (c, channel) in server.channels.iter_mut().enumerate() {
             if c == server.current_channel {
                 print!("{}{}{}{}", Goto(1, c as u16 + 1), Bold, channel.name, Reset);
+                // Remove unreads marker from current channel
+                channel.has_unreads = false;
+            } else if channel.has_unreads {
+                print!("{}{}+", Goto(1, c as u16 + 1), channel.name);
             } else {
                 print!("{}{}", Goto(1, c as u16 + 1), channel.name);
             }
@@ -223,19 +223,15 @@ impl TUI {
         }
     }
 
-    fn handle_message(&mut self, message: Message) {}
-
     pub fn run(mut self) {
         let events = self.events.take().unwrap();
         for event in events {
             match event {
                 Event::Input(ev) => {
-                    self.add_client_message("Got keyboard input");
                     self.handle_input(ev);
                 }
                 Event::Message(message) => {
-                    self.add_client_message("Got message");
-                    self.handle_message(message);
+                    self.add_message(&message);
                 }
             }
             self.draw();
