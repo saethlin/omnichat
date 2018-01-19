@@ -1,4 +1,3 @@
-#![feature(box_patterns)]
 #[macro_use]
 extern crate failure;
 extern crate itertools;
