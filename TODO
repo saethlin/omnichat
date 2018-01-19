@@ -1,0 +1,11 @@
+TUI:
+Redraw on terminal resize - Does not seem like this is possible with just termios
+Mentions tab
+Server unreads marker
+Better channel unreads marker
+
+Slack-specific:
+Load message history
+>, <, and & rendering
+Reactions
+

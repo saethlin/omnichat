@@ -1,6 +1,6 @@
 [package]
-name = "ynit"
-version = "0.1.0"
+name = "omnichat"
+version = "0.0.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
 
 [dependencies]
@@ -9,4 +9,5 @@ termion = "1.5.1"
 slack_api = "0.19.0"
 websocket = "0.20.2"
 serde_json = "1.0.9"
+itertools = "0.7.3"
 

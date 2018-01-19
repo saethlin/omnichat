@@ -9,6 +9,8 @@ use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
 
+use itertools::Itertools;
+
 pub struct TUI {
     servers: Vec<Server>,
     current_server: usize,
@@ -157,7 +159,7 @@ impl TUI {
         use termion::cursor::Goto;
         use termion::style::{Bold, Reset};
         let chan_width = 20;
-        let (_width, height) =
+        let (width, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
         print!("{}", termion::clear::All);
@@ -191,14 +193,24 @@ impl TUI {
             }
         }
 
-        for (m, msg) in server.channels[server.current_channel]
+        let remaining_width = width - chan_width;
+        let mut m = 0;
+        for msg in server.channels[server.current_channel]
             .messages
             .iter()
             .rev()
-            .take(height as usize - 2)
-            .enumerate()
         {
-            print!("{}{}", Goto(chan_width + 1, height - 1 - m as u16), msg);
+            let chunks = msg.chars().chunks(remaining_width as usize);
+            for line in chunks.into_iter().collect::<Vec<_>>().into_iter().rev() {
+                let line = line.collect::<String>();
+                print!(
+                    "{}{}",
+                    Goto(chan_width + 1, height - 1 - m as u16),
+                    line,
+                );
+                m += 1;
+                //m += line.chars().filter(|x| x == &'\n').count();
+            }
         }
 
         // Print the message buffer

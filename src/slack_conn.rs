@@ -47,6 +47,11 @@ impl Conn for SlackConn {
             id: &user_ids,
         });
 
+        let mut mention_patterns = Vec::new();
+        for (id, human) in user_ids.iter().zip(user_names.iter()) {
+            mention_patterns.push((format!("<@{}>", id), format!("@{}", human)));
+        }
+
         // We also need a map from channel names to internal ID, so that we can join and leave
         let mut channel_names = Vec::new();
         let mut channel_ids = Vec::new();
@@ -66,9 +71,14 @@ impl Conn for SlackConn {
         });
         channel_names.sort();
 
-        let url = response.url.ok_or(SlackError)?;
-        let mut websocket = websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
+        let mut channel_patterns = Vec::new();
+        for (id, human) in channel_ids.iter().zip(channel_names.iter()) {
+            channel_patterns.push((format!("<#{}|{}>", id, human), format!("#{}", human)));
+        }
 
+        let url = response.url.ok_or(SlackError)?;
+
+        let mut websocket = websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
         let thread_sender = sender.clone();
         let name = team_name.clone();
         let handler_channels = channels.clone();
@@ -84,11 +94,19 @@ impl Conn for SlackConn {
                     // parse the message and add it to events
                     if let Ok(Standard(MessageStandard {
                         user: Some(user),
-                        text: Some(text),
+                        text: Some(mut text),
                         channel: Some(channel),
                         ..
                     })) = serde_json::from_str::<slack_api::Message>(&message)
                     {
+                        for &(ref code, ref replacement) in mention_patterns.iter() {
+                            text = text.replace(code, replacement);
+                        }
+
+                        for &(ref code, ref replacement) in channel_patterns.iter() {
+                            text = text.replace(code, replacement);
+                        }
+
                         thread_sender
                             .send(Event::Message(Message {
                                 server: name.clone(),
@@ -237,17 +255,17 @@ impl Conn for SlackConn {
     }
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
+        use slack_api::chat::post_message;
         let mut request = slack_api::chat::PostMessageRequest::default();
         request.channel = channel;
         request.text = contents;
         request.as_user = Some(true);
-        if let Err(_) = slack_api::chat::post_message(&self.client, &self.token, &request) {
-            self.sender
-                .send(Event::Error(format!(
-                    "Failed to send message: {:?}",
-                    contents
-                )))
-                .expect("Sender died");
+        if let Err(_) = post_message(&self.client, &self.token, &request) {
+            if let Err(e) = post_message(&self.client, &self.token, &request) {
+                self.sender
+                    .send(Event::Error(format!("{:?}", e)))
+                    .expect("Sender died");
+            }
         }
     }
 

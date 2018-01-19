@@ -1,6 +1,7 @@
 #![feature(box_patterns)]
 #[macro_use]
 extern crate failure;
+extern crate itertools;
 extern crate serde_json;
 extern crate slack_api;
 extern crate termion;
