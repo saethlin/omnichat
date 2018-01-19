@@ -22,7 +22,7 @@ pub struct TUI {
 
 pub struct Server {
     channels: Vec<Channel>,
-    connection: Option<Box<Conn>>,
+    connection: Box<Conn>,
     name: String,
     current_channel: usize,
 }
@@ -45,27 +45,18 @@ impl TUI {
             }
         });
 
-        Self {
-            servers: vec![
-                Server {
-                    name: String::from("Client"),
-                    channels: vec![
-                        Channel {
-                            name: String::from("warnings"),
-                            messages: Vec::new(),
-                            has_unreads: false,
-                        },
-                    ],
-                    current_channel: 0,
-                    connection: None,
-                },
-            ],
+        let client_conn = ClientConn::new(ServerConfig::Client, sender.clone()).unwrap();
+
+        let mut tui = Self {
+            servers: Vec::new(),
             current_server: 0,
             message_buffer: String::new(),
             shutdown: false,
             events: Some(reciever),
             sender: sender,
-        }
+        };
+        tui.add_server(client_conn);
+        tui
     }
 
     pub fn sender(&self) -> Sender<Event> {
@@ -122,7 +113,7 @@ impl TUI {
                 })
                 .collect(),
             name: connection.name().to_string(),
-            connection: Some(connection),
+            connection: connection,
             current_channel: 0,
         });
     }
@@ -145,13 +136,10 @@ impl TUI {
 
     pub fn send_message(&mut self) {
         let server = &mut self.servers[self.current_server];
-        match server.connection {
-            Some(ref mut conn) => {
-                let current_channel_name = &server.channels[server.current_channel].name;
-                conn.send_channel_message(&current_channel_name, &self.message_buffer);
-            }
-            None => {}
-        }
+        let current_channel_name = &server.channels[server.current_channel].name;
+        server
+            .connection
+            .send_channel_message(&current_channel_name, &self.message_buffer);
         self.message_buffer.clear();
     }
 
@@ -203,11 +191,7 @@ impl TUI {
             let chunks = msg.chars().chunks(remaining_width as usize);
             for line in chunks.into_iter().collect::<Vec<_>>().into_iter().rev() {
                 let line = line.collect::<String>();
-                print!(
-                    "{}{}",
-                    Goto(chan_width + 1, height - 1 - m as u16),
-                    line,
-                );
+                print!("{}{}", Goto(chan_width + 1, height - 1 - m as u16), line,);
                 m += 1;
                 //m += line.chars().filter(|x| x == &'\n').count();
             }
@@ -248,5 +232,48 @@ impl TUI {
                 break;
             }
         }
+    }
+}
+
+use conn::ServerConfig;
+use failure::Error;
+struct ClientConn {
+    name: String,
+    channel_names: Vec<String>,
+    sender: Sender<Event>,
+}
+
+impl Conn for ClientConn {
+    fn new(_config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
+        Ok(Box::new(ClientConn {
+            name: "Client".to_string(),
+            channel_names: vec!["Warnings".to_owned(), "Mentions".to_owned()],
+            sender: sender,
+        }))
+    }
+
+    fn name(&self) -> &String {
+        &self.name
+    }
+
+    fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
+
+    fn send_channel_message(&mut self, channel: &str, contents: &str) {
+        self.sender
+            .send(Event::Message(Message {
+                server: "Client".to_string(),
+                channel: channel.to_string(),
+                contents: contents.to_string(),
+                sender: String::new(),
+            }))
+            .expect("Sender died");
+    }
+
+    fn channels(&self) -> Vec<&String> {
+        self.channel_names.iter().collect()
+    }
+
+    fn autocomplete(&self, _word: &str) -> Option<String> {
+        None
     }
 }

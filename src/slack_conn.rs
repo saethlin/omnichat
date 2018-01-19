@@ -23,7 +23,7 @@ impl Conn for SlackConn {
     fn new(config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
         let api_key = match config {
             ServerConfig::Slack { token } => token,
-            //_ => return Err(Error::from(SlackError)),
+            _ => return Err(Error::from(SlackError)),
         };
 
         let client = slack_api::requests::Client::new()?;

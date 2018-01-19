@@ -4,6 +4,7 @@ use termion;
 
 #[derive(Debug)]
 pub enum ServerConfig {
+    Client,
     Slack { token: String },
     /*
     IRC {
