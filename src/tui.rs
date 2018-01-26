@@ -23,6 +23,7 @@ pub struct Server {
     connection: Box<Conn>,
     name: String,
     current_channel: usize,
+    has_unreads: bool,
 }
 
 pub struct Channel {
@@ -113,6 +114,7 @@ impl TUI {
             name: connection.name().to_string(),
             connection: connection,
             current_channel: 0,
+            has_unreads: false,
         });
     }
 
@@ -130,6 +132,7 @@ impl TUI {
             .messages
             .push(format!("{}: {}", message.sender, message.contents));
         channel.has_unreads = true;
+        server.has_unreads = true;
     }
 
     pub fn send_message(&mut self) {
@@ -141,93 +144,91 @@ impl TUI {
         self.message_buffer.clear();
     }
 
+    #[allow(unused_must_use)]
     pub fn draw(&mut self) {
         use termion::cursor::Goto;
         use termion::style::{Bold, Reset};
+        let out = std::io::stdout();
+        let mut lock = out.lock();
         let chan_width = 20;
         let (width, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-        print!("{}", termion::clear::All);
+        write!(lock, "{}", termion::clear::All);
 
         for i in 1..height + 1 {
-            print!("{}|", Goto(chan_width, i));
+            write!(lock, "{}|", Goto(chan_width, i));
         }
 
         // Draw all the server names across the top
-        let mut server_bar = format!("{}", Goto(21, 1)); // Move to the top-right corner
-        for (s, server) in self.servers.iter().enumerate() {
+        write!(lock, "{}", Goto(21, 1)); // Move to the top-right corner
+        for (s, server) in self.servers.iter_mut().enumerate() {
             if s == self.current_server {
-                server_bar.extend(format!("{}{}{} ", Bold, server.name, Reset).chars());
+                write!(lock, " {}{}{} ", Bold, server.name, Reset);
+                server.has_unreads = false;
+            } else if server.has_unreads {
+                write!(lock, "+{} ", server.name);
             } else {
-                server_bar.extend(format!("{} ", server.name).chars());
+                write!(lock, " {} ", server.name);
             }
         }
-        print!("{}", server_bar);
 
         // Draw all the channels for the current server down the left side
         let server = &mut self.servers[self.current_server];
         for (c, channel) in server.channels.iter_mut().enumerate() {
             if c == server.current_channel {
-                print!("{}{}{}{}", Goto(1, c as u16 + 1), Bold, channel.name, Reset);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    Bold,
+                    channel.name,
+                    Reset
+                );
                 // Remove unreads marker from current channel
                 channel.has_unreads = false;
             } else if channel.has_unreads {
-                print!("{}+{}", Goto(1, c as u16 + 1), channel.name);
+                write!(lock, "{}+{}", Goto(1, c as u16 + 1), channel.name);
             } else {
-                print!("{}{}", Goto(1, c as u16 + 1), channel.name);
+                write!(lock, "{}{}", Goto(1, c as u16 + 1), channel.name);
             }
         }
 
-        let remaining_width = width - chan_width;
+        let remaining_width = (width - chan_width) as usize;
         let mut msg_row = height - 1;
-        let mut buf = Vec::new();
-        let mut line = String::new();
-        'outer: for msg in server.channels[server.current_channel]
+
+        'outer: for message in server.channels[server.current_channel]
             .messages
             .iter()
             .rev()
         {
-            for c in msg.chars().rev() {
-                if c != '\n' {
-                    buf.push(c);
+            for mut line in message.lines().rev() {
+                let mut slices = Vec::new();
+                while line.len() > remaining_width {
+                    let (l, remaining) = line.split_at(remaining_width);
+                    line = remaining;
+                    slices.push(l);
                 }
-
-                if c == '\n' || buf.len() == remaining_width as usize {
-                    line.clear();
-                    line.extend(buf.iter().rev());
-                    buf.clear();
-                    print!(
-                        "{}{}",
-                        Goto(chan_width + 1, msg_row as u16),
-                        line
-                    );
+                slices.push(line);
+                for slice in slices.iter().rev() {
+                    write!(lock, "{}{}", Goto(chan_width + 1, msg_row as u16), slice);
                     msg_row -= 1;
                     if msg_row == 1 {
                         break 'outer;
                     }
                 }
             }
-            // If we have chars left to print, do that too
-            if !buf.is_empty() {
-                line.clear();
-                line.extend(buf.iter().rev());
-                buf.clear();
-                print!(
-                    "{}{}",
-                    Goto(chan_width + 1, msg_row as u16),
-                    line
-                );
-                msg_row -= 1;
-                if msg_row == 1 {
-                    break 'outer;
-                }
-            }
         }
-        // Print the message buffer
-        print!("{}{}", Goto(chan_width + 1, height), self.message_buffer);
 
-        std::io::stdout().flush().expect("TUI drawing flush failed");
+        // Print the message buffer
+        write!(
+            lock,
+            "{}{}",
+            Goto(chan_width + 1, height),
+            self.message_buffer
+        );
+
+        lock.flush().expect("TUI drawing flush failed");
     }
 
     fn handle_input(&mut self, event: &termion::event::Event) {
@@ -253,6 +254,7 @@ impl TUI {
                 Event::Input(event) => self.handle_input(&event),
                 Event::Message(message) => self.add_message(&message),
                 Event::Error(message) => self.add_client_message(&message),
+                Event::Mention(_) => {}
             }
             self.draw();
             if self.shutdown {

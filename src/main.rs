@@ -1,4 +1,5 @@
-#[macro_use] extern crate failure;
+#[macro_use]
+extern crate failure;
 extern crate serde_json;
 extern crate slack_api;
 extern crate termion;

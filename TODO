@@ -1,11 +1,10 @@
 TUI:
 Redraw on terminal resize - Does not seem like this is possible with just termios
 Mentions tab
-Server unreads marker
-Better channel unreads marker
+Remove allocations from draw
 
 Slack-specific:
-Load message history
 >, <, and & rendering
 Reactions
 #no-grills isn't in the known channels
+

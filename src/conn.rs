@@ -6,19 +6,9 @@ use termion;
 pub enum ServerConfig {
     Client,
     Slack { token: String },
-    /*
-    IRC {
-        domain: String,
-        port: usize,
-        hostname: String,
-        realname: String,
-        nicks: Vec<String>,
-        auto_cmds: Vec<String>,
-    },
-    */
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Message {
     pub server: String,
     pub channel: String,
@@ -29,8 +19,10 @@ pub struct Message {
 #[derive(Debug)]
 pub enum Event {
     Message(Message),
+    //HistoryMessage(Message),
     Input(termion::event::Event),
     Error(String),
+    Mention(Message),
 }
 
 #[derive(Debug, Fail)]
