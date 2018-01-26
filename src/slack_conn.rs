@@ -99,11 +99,11 @@ impl Conn for SlackConn {
                         ..
                     })) = serde_json::from_str::<slack_api::Message>(&message)
                     {
-                        for &(ref code, ref replacement) in mention_patterns.iter() {
+                        for &(ref code, ref replacement) in &mention_patterns {
                             text = text.replace(code, replacement);
                         }
 
-                        for &(ref code, ref replacement) in channel_patterns.iter() {
+                        for &(ref code, ref replacement) in &channel_patterns {
                             text = text.replace(code, replacement);
                         }
 
@@ -181,7 +181,7 @@ impl Conn for SlackConn {
                     as_user: Some(true),
                 };
                 let response = slack_api::chat::delete(&self.client, &self.token, &request);
-                if let Err(_) = response {
+                if response.is_err() {
                     // Notify tiny
                 }
             }
@@ -198,7 +198,7 @@ impl Conn for SlackConn {
                 };
 
                 let response = slack_api::chat::update(&self.client, &self.token, &request);
-                if let Err(_) = response {
+                if response.is_err() {
                     // Notify tiny
                 }
             }
@@ -260,7 +260,7 @@ impl Conn for SlackConn {
         request.channel = channel;
         request.text = contents;
         request.as_user = Some(true);
-        if let Err(_) = post_message(&self.client, &self.token, &request) {
+        if post_message(&self.client, &self.token, &request).is_err() {
             if let Err(e) = post_message(&self.client, &self.token, &request) {
                 self.sender
                     .send(Event::Error(format!("{:?}", e)))

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+#[derive(Clone, Copy)]
 pub struct BiMapBuilder<'a> {
     pub id: &'a Vec<String>,
     pub human: &'a Vec<String>,

@@ -9,8 +9,6 @@ use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
 
-use itertools::Itertools;
-
 pub struct TUI {
     servers: Vec<Server>,
     current_server: usize,
@@ -139,7 +137,7 @@ impl TUI {
         let current_channel_name = &server.channels[server.current_channel].name;
         server
             .connection
-            .send_channel_message(&current_channel_name, &self.message_buffer);
+            .send_channel_message(current_channel_name, &self.message_buffer);
         self.message_buffer.clear();
     }
 
@@ -175,36 +173,65 @@ impl TUI {
                 // Remove unreads marker from current channel
                 channel.has_unreads = false;
             } else if channel.has_unreads {
-                print!("{}{}+", Goto(1, c as u16 + 1), channel.name);
+                print!("{}+{}", Goto(1, c as u16 + 1), channel.name);
             } else {
                 print!("{}{}", Goto(1, c as u16 + 1), channel.name);
             }
         }
 
         let remaining_width = width - chan_width;
-        let mut m = 0;
-        for msg in server.channels[server.current_channel]
+        let mut msg_row = height - 1;
+        let mut buf = Vec::new();
+        let mut line = String::new();
+        'outer: for msg in server.channels[server.current_channel]
             .messages
             .iter()
             .rev()
         {
-            let chunks = msg.chars().chunks(remaining_width as usize);
-            for line in chunks.into_iter().collect::<Vec<_>>().into_iter().rev() {
-                let line = line.collect::<String>();
-                print!("{}{}", Goto(chan_width + 1, height - 1 - m as u16), line,);
-                m += 1;
-                //m += line.chars().filter(|x| x == &'\n').count();
+            for c in msg.chars().rev() {
+                if c != '\n' {
+                    buf.push(c);
+                }
+
+                if c == '\n' || buf.len() == remaining_width as usize {
+                    line.clear();
+                    line.extend(buf.iter().rev());
+                    buf.clear();
+                    print!(
+                        "{}{}",
+                        Goto(chan_width + 1, msg_row as u16),
+                        line
+                    );
+                    msg_row -= 1;
+                    if msg_row == 1 {
+                        break 'outer;
+                    }
+                }
+            }
+            // If we have chars left to print, do that too
+            if !buf.is_empty() {
+                line.clear();
+                line.extend(buf.iter().rev());
+                buf.clear();
+                print!(
+                    "{}{}",
+                    Goto(chan_width + 1, msg_row as u16),
+                    line
+                );
+                msg_row -= 1;
+                if msg_row == 1 {
+                    break 'outer;
+                }
             }
         }
-
         // Print the message buffer
         print!("{}{}", Goto(chan_width + 1, height), self.message_buffer);
 
         std::io::stdout().flush().expect("TUI drawing flush failed");
     }
 
-    fn handle_input(&mut self, event: termion::event::Event) {
-        match event {
+    fn handle_input(&mut self, event: &termion::event::Event) {
+        match *event {
             Key(Char('\n')) => self.send_message(),
             Key(Backspace) => {
                 self.message_buffer.pop();
@@ -223,7 +250,7 @@ impl TUI {
         let events = self.events.take().unwrap();
         for event in events {
             match event {
-                Event::Input(event) => self.handle_input(event),
+                Event::Input(event) => self.handle_input(&event),
                 Event::Message(message) => self.add_message(&message),
                 Event::Error(message) => self.add_client_message(&message),
             }

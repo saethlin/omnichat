@@ -1,6 +1,4 @@
-#[macro_use]
-extern crate failure;
-extern crate itertools;
+#[macro_use] extern crate failure;
 extern crate serde_json;
 extern crate slack_api;
 extern crate termion;
@@ -16,7 +14,7 @@ mod slack_conn;
 use slack_conn::SlackConn;
 mod bimap;
 
-fn api_key() -> String {
+fn slack_api_key() -> String {
     use std::fs::File;
     use std::io::Read;
 
@@ -35,11 +33,13 @@ fn main() {
     let mut tui = TUI::new();
     tui.draw();
 
-    let slack_config = conn::ServerConfig::Slack { token: api_key() };
+    let slack_config = conn::ServerConfig::Slack {
+        token: slack_api_key(),
+    };
     let connection =
         SlackConn::new(slack_config, tui.sender()).expect("Failed to crate slack connection");
     tui.add_server(connection);
-    tui.draw();
 
+    tui.draw();
     tui.run();
 }
