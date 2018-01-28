@@ -203,21 +203,18 @@ impl TUI {
             .rev()
         {
             for mut line in message.lines().rev() {
-                let mut slices = Vec::new();
-                while line.len() > remaining_width {
-                    let (l, remaining) = line.split_at(remaining_width);
-                    line = remaining;
-                    slices.push(l);
-                }
-                slices.push(line);
-                for slice in slices.iter().rev() {
-                    write!(lock, "{}{}", Goto(chan_width + 1, msg_row as u16), slice);
+                let num_rows = (line.len() / remaining_width) + 1;
+                for r in (0..num_rows).rev() {
+                    write!(lock, "{}", Goto(chan_width + 1, msg_row as u16));
+                    for c in line.chars().skip(r * remaining_width).take(remaining_width) {
+                        write!(lock, "{}", c);
+                    }
                     msg_row -= 1;
                     if msg_row == 1 {
                         break 'outer;
                     }
                 }
-            }
+           }
         }
 
         // Print the message buffer
