@@ -176,7 +176,7 @@ impl Conn for SlackConn {
                         slackmessage.channel = Some(id.clone());
                         if let Some(omnimessage) = handler.to_omni(slackmessage) {
                             sender
-                                .send(Event::Message(omnimessage))
+                                .send(Event::HistoryMessage(omnimessage))
                                 .expect("Sender died");
                         }
                     }

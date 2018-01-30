@@ -9,12 +9,18 @@ use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
 
+#[derive(Debug, Fail)]
+pub enum TuiError {
+    #[fail(display = "Got a message from an unknown channel")] UnknownChannel,
+    #[fail(display = "Got a message from an unknown server")] UnknownServer,
+}
+
 pub struct TUI {
     servers: Vec<Server>,
     current_server: usize,
     pub message_buffer: String,
     shutdown: bool,
-    events: Option<Receiver<Event>>,
+    events: Receiver<Event>,
     sender: Sender<Event>,
 }
 
@@ -51,7 +57,7 @@ impl TUI {
             current_server: 0,
             message_buffer: String::new(),
             shutdown: false,
-            events: Some(reciever),
+            events: reciever,
             sender: sender,
         };
         tui.add_server(client_conn);
@@ -118,21 +124,25 @@ impl TUI {
         });
     }
 
-    pub fn add_message(&mut self, message: &Message) {
+    pub fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
+        use tui::TuiError::*;
         let server = self.servers
             .iter_mut()
             .find(|s| s.name == message.server)
-            .expect(&format!("Unknown server {}", message.server));
+            .ok_or(UnknownServer)?;
         let channel = server
             .channels
             .iter_mut()
             .find(|c| c.name == message.channel)
-            .expect(&format!("Unknown channel {}", message.channel));
+            .ok_or(UnknownChannel)?;
         channel
             .messages
             .push(format!("{}: {}", message.sender, message.contents));
-        channel.has_unreads = true;
-        server.has_unreads = true;
+        if set_unread {
+            channel.has_unreads = true;
+            server.has_unreads = true;
+        }
+        Ok(())
     }
 
     pub fn send_message(&mut self) {
@@ -214,7 +224,7 @@ impl TUI {
                         break 'outer;
                     }
                 }
-           }
+            }
         }
 
         // Print the message buffer
@@ -245,15 +255,35 @@ impl TUI {
     }
 
     pub fn run(mut self) {
-        let events = self.events.take().unwrap();
-        for event in events {
+        loop {
+            let event = match self.events.recv() {
+                Ok(ev) => ev,
+                Err(_) => break,
+            };
+
             match event {
-                Event::Input(event) => self.handle_input(&event),
-                Event::Message(message) => self.add_message(&message),
-                Event::Error(message) => self.add_client_message(&message),
+                Event::Input(event) => {
+                    self.handle_input(&event);
+                    self.draw();
+                }
+                Event::Message(message) => {
+                    if let Err(e) = self.add_message(&message, true) {
+                        self.add_client_message(&e.to_string());
+                    }
+                    self.draw();
+                }
+                Event::HistoryMessage(message) => {
+                    if let Err(e) = self.add_message(&message, false) {
+                        self.add_client_message(&e.to_string());
+                        self.draw();
+                    }
+                }
+                Event::Error(message) => {
+                    self.add_client_message(&message);
+                    self.draw();
+                }
                 Event::Mention(_) => {}
             }
-            self.draw();
             if self.shutdown {
                 break;
             }

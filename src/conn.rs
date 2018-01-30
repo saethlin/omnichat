@@ -19,7 +19,7 @@ pub struct Message {
 #[derive(Debug)]
 pub enum Event {
     Message(Message),
-    //HistoryMessage(Message),
+    HistoryMessage(Message),
     Input(termion::event::Event),
     Error(String),
     Mention(Message),
