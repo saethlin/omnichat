@@ -8,6 +8,16 @@ use failure::Error;
 use websocket;
 use serde_json;
 
+//use tokio_core::reactor::Core;
+/*
+use futures::future::Future;
+use futures::sink::Sink;
+use futures::stream::Stream;
+use futures::sync::mpsc;
+use websocket::result::WebSocketError;
+use websocket::{ClientBuilder, OwnedMessage};
+use tokio_core::reactor::Handle;
+*/
 #[derive(Clone)]
 struct Handler {
     channels: BiMap,
@@ -35,15 +45,16 @@ impl Handler {
                 text = text.replace(code, replacement);
             }
 
-            Some(Message {
-                server: self.server_name.clone(),
-                channel: self.channels
-                    .get_human(&channel)
-                    .expect(&format!("Unknown channel ID {}", channel))
-                    .clone(),
-                sender: self.users.get_human(&user).unwrap_or(&user).clone(),
-                contents: text,
-            })
+            if let Some(channel) = self.channels.get_human(&channel) {
+                return Some(Message {
+                    server: self.server_name.clone(),
+                    channel: channel.clone(),
+                    sender: self.users.get_human(&user).unwrap_or(&user).clone(),
+                    contents: text,
+                });
+            } else {
+                return None;
+            }
         } else {
             None
         }
@@ -81,9 +92,19 @@ impl Conn for SlackConn {
         let mut user_names = Vec::new();
         let mut user_ids = Vec::new();
         for member in members {
-            user_ids.push(member.id.ok_or(SlackError)?);
-            user_names.push(member.name.ok_or(SlackError)?);
+            if let slack_api::User {
+                id: Some(id),
+                name: Some(name),
+                ..
+            } = member
+            {
+                user_ids.push(id);
+                user_names.push(name);
+            } else {
+                return Err(SlackError.into());
+            }
         }
+
         let users = BiMap::new(BiMapBuilder {
             human: &user_names,
             id: &user_ids,
@@ -132,6 +153,43 @@ impl Conn for SlackConn {
         };
 
         let thread_handler = handler.clone();
+
+        /*
+        use slack_api::Message::Standard;
+        let runner = ClientBuilder::new(&url)
+            .unwrap()
+            .add_protocol("rust-websocket")
+            .async_connect_secure(None, &handle)
+            .and_then(|(duplex, _)| {
+                let (sink, stream) = duplex.split();
+                stream.filter_map(|message| {
+                    match message {
+                        OwnedMessage::Text(t) => {
+                            if let Ok(Standard(slackmessage)) = serde_json::from_str::<slack_api::Message>(&t) {
+                                if let Some(omnimessage) = thread_handler.to_omni(slackmessage) {
+                                    thread_sender
+                                        .send(Event::Message(omnimessage))
+                                        .expect("Sender died");
+                                }
+                            }
+                            None
+                        }
+                        // Close when we're told to
+                        OwnedMessage::Close(e) => Some(OwnedMessage::Close(e)),
+                        // Acknowledge Ping messages to keep the connection alive
+                        OwnedMessage::Ping(d) => Some(OwnedMessage::Pong(d)),
+                        _ => None,
+                    }
+                })
+			    // merges with stdin
+                //.select(stdin_ch.map_err(|_| WebSocketError::NoDataAvailable))
+			    .forward(sink)
+            })
+            .map(|_| ()).map_err(|_| ())
+        ;
+        handle.spawn(runner);
+        */
+
         // Spin off a thread that will feed message events back to the TUI
         thread::spawn(move || {
             use websocket::OwnedMessage::{Ping, Pong, Text};
@@ -165,6 +223,31 @@ impl Conn for SlackConn {
             let handler = handler.clone();
             let client = slack_api::requests::Client::new().unwrap();
             let api_key = api_key.clone();
+
+            /*
+            use slack_api::channels::{history, HistoryRequest};
+            use slack_api::Message::Standard;
+            let mut req = HistoryRequest::default();
+            req.channel = &id;
+            let runner = slack_api::requests::Client::new()
+                .map_err(|e| e.into())
+                .and_then(|client| history(&client, &api_key, &req))
+                .map(|response| response.messages)
+                .map(|messages| {
+                for message in messages.iter().rev().cloned() {
+                    if let Standard(mut slackmessage) = message {
+                        slackmessage.channel = Some(id.clone());
+                        if let Some(omnimessage) = handler.to_omni(slackmessage) {
+                            sender
+                                .send(Event::HistoryMessage(omnimessage))
+                                .expect("Sender died");
+                        }
+                    }
+                }                                             
+            }).map_err(|_| ());
+            handle.spawn(runner);
+            */
+
             thread::spawn(move || {
                 use slack_api::channels::{history, HistoryRequest};
                 use slack_api::Message::Standard;
