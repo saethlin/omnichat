@@ -72,16 +72,11 @@ pub struct SlackConn {
     sender: Sender<Event>,
 }
 
-impl Conn for SlackConn {
-    fn new(config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
-        let api_key = match config {
-            ServerConfig::Slack { token } => token,
-            _ => return Err(Error::from(SlackError)),
-        };
-
+impl SlackConn {
+    pub fn new(token: String, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
         let client = slack_api::requests::Client::new()?;
         use slack_api::rtm::StartRequest;
-        let response = slack_api::rtm::start(&client, &api_key, &StartRequest::default())?;
+        let response = slack_api::rtm::start(&client, &token, &StartRequest::default())?;
 
         // We use the team name as a unique name for the TUI tab and logs
         let team_name = response.team.ok_or(SlackError)?.name.ok_or(SlackError)?;
@@ -222,7 +217,7 @@ impl Conn for SlackConn {
             let sender = sender.clone();
             let handler = handler.clone();
             let client = slack_api::requests::Client::new().unwrap();
-            let api_key = api_key.clone();
+            let token = token.clone();
 
             /*
             use slack_api::channels::{history, HistoryRequest};
@@ -231,7 +226,7 @@ impl Conn for SlackConn {
             req.channel = &id;
             let runner = slack_api::requests::Client::new()
                 .map_err(|e| e.into())
-                .and_then(|client| history(&client, &api_key, &req))
+                .and_then(|client| history(&client, &token, &req))
                 .map(|response| response.messages)
                 .map(|messages| {
                 for message in messages.iter().rev().cloned() {
@@ -253,7 +248,7 @@ impl Conn for SlackConn {
                 use slack_api::Message::Standard;
                 let mut req = HistoryRequest::default();
                 req.channel = &id;
-                let response = history(&client, &api_key, &req).unwrap();
+                let response = history(&client, &token, &req).unwrap();
                 for message in response.messages.unwrap().iter().rev().cloned() {
                     if let Standard(mut slackmessage) = message {
                         slackmessage.channel = Some(id.clone());
@@ -268,7 +263,7 @@ impl Conn for SlackConn {
         }
 
         Ok(Box::new(SlackConn {
-            token: api_key,
+            token: token,
             client: client,
             users: users,
             channels: channels,
@@ -278,7 +273,9 @@ impl Conn for SlackConn {
             sender: sender,
         }))
     }
+}
 
+impl Conn for SlackConn {
     fn handle_cmd(&mut self, cmd: String, args: Vec<String>) {
         match (cmd.as_ref(), args.len()) {
             ("join", 1) => {

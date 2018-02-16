@@ -3,7 +3,9 @@ use std;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::io::{stdin, Write};
-use conn::{Conn, Event, Message};
+use conn::{Conn, Event, Message, ServerConfig};
+
+//use tokio_core::reactor::{Core, Handle};
 
 use termion::input::TermRead;
 use termion::event::Event::*;
@@ -30,6 +32,7 @@ pub struct Server {
     name: String,
     current_channel: usize,
     has_unreads: bool,
+    //user_colors: HashMap<String, Color>,
 }
 
 pub struct Channel {
@@ -50,8 +53,6 @@ impl TUI {
             }
         });
 
-        let client_conn = ClientConn::new(ServerConfig::Client, sender.clone()).unwrap();
-
         let mut tui = Self {
             servers: Vec::new(),
             current_server: 0,
@@ -60,7 +61,7 @@ impl TUI {
             events: reciever,
             sender: sender,
         };
-        tui.add_server(client_conn);
+        tui.add_server(ServerConfig::Client);
         tui
     }
 
@@ -106,7 +107,19 @@ impl TUI {
             .push(message.to_owned())
     }
 
-    pub fn add_server(&mut self, connection: Box<Conn>) {
+    pub fn add_server(&mut self, config: ServerConfig) {
+        use slack_conn::SlackConn;
+        use discord_conn::DiscordConn;
+        let connection = match config {
+            ServerConfig::Slack { token } => SlackConn::new(token, self.sender()).unwrap(),
+            ServerConfig::Discord { token, name } => {
+                DiscordConn::new(token, name, self.sender()).unwrap()
+            }
+            ServerConfig::Client => {
+                ClientConn::new(self.sender()).unwrap()
+            }
+        };
+
         self.servers.push(Server {
             channels: connection
                 .channels()
@@ -206,13 +219,12 @@ impl TUI {
 
         let remaining_width = (width - chan_width) as usize;
         let mut msg_row = height - 1;
-
         'outer: for message in server.channels[server.current_channel]
             .messages
             .iter()
             .rev()
         {
-            for mut line in message.lines().rev() {
+            for line in message.lines().rev() {
                 let num_rows = (line.len() / remaining_width) + 1;
                 for r in (0..num_rows).rev() {
                     write!(lock, "{}", Goto(chan_width + 1, msg_row as u16));
@@ -285,13 +297,13 @@ impl TUI {
                 Event::Mention(_) => {}
             }
             if self.shutdown {
+                print!("\n\r");
                 break;
             }
         }
     }
 }
 
-use conn::ServerConfig;
 use failure::Error;
 struct ClientConn {
     name: String,
@@ -299,15 +311,17 @@ struct ClientConn {
     sender: Sender<Event>,
 }
 
-impl Conn for ClientConn {
-    fn new(_config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
+impl ClientConn {
+    pub fn new(sender: Sender<Event>) -> Result<Box<Conn>, Error> {
         Ok(Box::new(ClientConn {
             name: "Client".to_string(),
-            channel_names: vec!["Warnings".to_owned(), "Mentions".to_owned()],
+            channel_names: vec!["Errors".to_owned(), "Mentions".to_owned()],
             sender: sender,
         }))
     }
+}
 
+impl Conn for ClientConn {
     fn name(&self) -> &String {
         &self.name
     }

@@ -2,10 +2,12 @@ use failure::Error;
 use std::sync::mpsc::Sender;
 use termion;
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum ServerConfig {
     Client,
     Slack { token: String },
+    Discord { token: String, name: String },
 }
 
 #[derive(Debug, Clone)]
@@ -28,13 +30,10 @@ pub enum Event {
 #[derive(Debug, Fail)]
 pub enum ConnError {
     #[fail(display = "Slack response was damaged")] SlackError,
+    #[fail(display = "Discord response was damaged")] DiscordError,
 }
 
 pub trait Conn: Send {
-    fn new(config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error>
-    where
-        Self: Sized;
-
     fn name(&self) -> &String;
 
     fn handle_cmd(&mut self, cmd: String, args: Vec<String>);

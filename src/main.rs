@@ -23,7 +23,6 @@ mod bimap;
 mod discord_conn;
 use discord_conn::DiscordConn;
 
-
 #[derive(Debug, Deserialize)]
 struct Config {
     servers: Vec<conn::ServerConfig>,
@@ -33,13 +32,6 @@ fn main() {
     use std::path::PathBuf;
     use std::fs::File;
     use std::io::Read;
-
-    let _guard = std::io::stdout()
-        .into_raw_mode()
-        .expect("Couldn't put stdout into raw mode");
-
-    let mut tui = TUI::new();
-    tui.draw();
 
     let homedir = std::env::var("HOME").expect("You don't even have a $HOME? :'(");
     let config_path = PathBuf::from(homedir).join(".omnichat.toml");
@@ -51,13 +43,17 @@ fn main() {
 
     let config: Config = toml::from_str(&contents).expect("Config is not valid TOML");
 
+    // The guard must be held in main, so that we cannot fail to drop it if the app crashes in a
+    // threaded environment
+    let _guard = std::io::stdout()
+        .into_raw_mode()
+        .expect("Couldn't put stdout into raw mode");
+
+    let mut tui = TUI::new();
+    tui.draw();
+
     for c in config.servers.into_iter() {
-        let connection = match c {
-            conn::ServerConfig::Slack{..} => SlackConn::new(c, tui.sender()),
-            conn::ServerConfig::Discord{..} => DiscordConn::new(c, tui.sender()),
-            _ => panic!("Unsupported config"),
-        };
-        tui.add_server(connection.unwrap());
+        tui.add_server(c);
     }
     tui.draw();
     tui.run();

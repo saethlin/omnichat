@@ -8,5 +8,11 @@ failure = "0.1.1"
 termion = "1.5.1"
 slack_api = {path = "/home/ben/slack-rs-api"}
 websocket = "0.20.2"
+serde = "1.0"
 serde_json = "1.0.9"
+serde_derive = "1.0"
+futures = "0.1.17"
+tokio-core = "0.1.12"
+discord = {git = "https://github.com/saethlin/discord-rs", branch="async_internals"}
+toml = "0.4.5"
 

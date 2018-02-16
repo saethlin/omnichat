@@ -1,7 +1,9 @@
 TUI:
 Redraw on terminal resize - Does not seem like this is possible with just termios
 Mentions tab
-Remove allocations from draw
+
+Colored usernames
+
 
 Slack-specific:
 >, <, and & rendering

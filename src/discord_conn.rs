@@ -13,25 +13,35 @@ pub struct DiscordConn {
     channels: Vec<String>,
 }
 
-impl Conn for DiscordConn {
-    fn new(config: ServerConfig, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
-        let api_key = match config {
-            ServerConfig::Discord { token, .. } => token,
-            _ => return Err(Error::from(DiscordError)),
-        };
+impl DiscordConn {
+    pub fn new(
+        token: String,
+        server_name: String,
+        sender: Sender<Event>,
+    ) -> Result<Box<Conn>, Error> {
+        use discord::model::PossibleServer::Online;
 
-        let connection = discord::Discord::from_user_token(&api_key)?;
-
-        let servers = connection.get_servers().unwrap();
-        let channels = servers.into_iter().map(|s| s.name).collect::<Vec<_>>();
-
-        Ok(Box::new(DiscordConn {
-            sender: sender,
-            name: "Discord".to_string(),
-            channels: channels,
-        }))
+        let (connection, info) = discord::Discord::from_user_token(&token)?.connect()?;
+        /*
+        for server in &info.servers {
+            if let &Online(ref server) = server {
+                if server.name == name {
+                    let channels: Vec<String> =
+                        server.channels.iter().map(|s| s.name.clone()).collect();
+                    return Ok(Box::new(DiscordConn {
+                        sender: sender,
+                        name: name,
+                        channels: channels,
+                    }));
+                }
+            }
+        }
+        */
+        Err(::failure::Error::from(DiscordError))
     }
+}
 
+impl Conn for DiscordConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {}
 
     fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
