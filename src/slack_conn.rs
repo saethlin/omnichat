@@ -1,7 +1,7 @@
 use std::sync::mpsc::Sender;
 use std::thread;
 use bimap::{BiMap, BiMapBuilder};
-use conn::{Conn, Event, Message, ServerConfig};
+use conn::{Conn, Event, Message};
 use conn::ConnError::SlackError;
 use slack_api;
 use failure::Error;

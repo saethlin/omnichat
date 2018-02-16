@@ -16,12 +16,9 @@ use termion::raw::IntoRawMode;
 mod tui;
 use tui::TUI;
 mod conn;
-use conn::Conn;
 mod slack_conn;
-use slack_conn::SlackConn;
 mod bimap;
 mod discord_conn;
-use discord_conn::DiscordConn;
 
 #[derive(Debug, Deserialize)]
 struct Config {

@@ -1,5 +1,3 @@
-use failure::Error;
-use std::sync::mpsc::Sender;
 use termion;
 
 #[derive(Debug, Deserialize)]

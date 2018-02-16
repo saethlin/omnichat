@@ -115,9 +115,7 @@ impl TUI {
             ServerConfig::Discord { token, name } => {
                 DiscordConn::new(token, name, self.sender()).unwrap()
             }
-            ServerConfig::Client => {
-                ClientConn::new(self.sender()).unwrap()
-            }
+            ServerConfig::Client => ClientConn::new(self.sender()).unwrap(),
         };
 
         self.servers.push(Server {
