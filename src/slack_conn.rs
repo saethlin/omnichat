@@ -20,8 +20,8 @@ use tokio_core::reactor::Handle;
 */
 #[derive(Clone)]
 struct Handler {
-    channels: BiMap,
-    users: BiMap,
+    channels: BiMap<String, String>,
+    users: BiMap<String, String>,
     mention_patterns: Vec<(String, String)>,
     channel_patterns: Vec<(String, String)>,
     server_name: String,
@@ -64,8 +64,8 @@ impl Handler {
 pub struct SlackConn {
     token: String,
     team_name: String,
-    users: BiMap,
-    channels: BiMap,
+    users: BiMap<String, String>,
+    channels: BiMap<String, String>,
     channel_names: Vec<String>,
     last_message_timestamp: String,
     client: slack_api::requests::Client,
@@ -101,8 +101,8 @@ impl SlackConn {
         }
 
         let users = BiMap::new(BiMapBuilder {
-            human: &user_names,
-            id: &user_ids,
+            human: user_names.clone(),
+            id: user_ids.clone(),
         });
 
         let mut mention_patterns = Vec::new();
@@ -124,8 +124,8 @@ impl SlackConn {
         }
 
         let channels = BiMap::new(BiMapBuilder {
-            human: &channel_names,
-            id: &channel_ids,
+            human: channel_names.clone(),
+            id: channel_ids.clone(),
         });
         channel_names.sort();
 
