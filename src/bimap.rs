@@ -41,7 +41,7 @@ where
         self.human_to_id.get(human)
     }
 
-    pub fn iter(&self) -> Iter<I, H > {
+    pub fn iter(&self) -> Iter<I, H> {
         self.id_to_human.iter()
     }
 
@@ -52,5 +52,4 @@ where
     pub fn contains_id(&self, val: &I) -> bool {
         self.id_to_human.contains_key(val)
     }
-
 }

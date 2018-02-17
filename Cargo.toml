@@ -16,3 +16,6 @@ tokio-core = "0.1.12"
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
 toml = "0.4.5"
 
+[profile.release]
+debug = true
+

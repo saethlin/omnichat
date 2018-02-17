@@ -114,7 +114,6 @@ impl DiscordConn {
                                         .clone(),
                                     contents: message.content,
                                     sender: message.author.name,
-                                    // more fields here
                                 }))
                                 .expect("Sender died");
                         }

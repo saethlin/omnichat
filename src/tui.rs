@@ -32,7 +32,7 @@ pub struct Server {
     name: String,
     current_channel: usize,
     has_unreads: bool,
-    //user_colors: HashMap<String, Color>,
+    users: Vec<String>,
 }
 
 pub struct Channel {
@@ -132,11 +132,13 @@ impl TUI {
             connection: connection,
             current_channel: 0,
             has_unreads: false,
+            users: Vec::new(),
         });
     }
 
     pub fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
+
         let server = self.servers
             .iter_mut()
             .find(|s| s.name == message.server)
@@ -146,6 +148,7 @@ impl TUI {
             .iter_mut()
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
+
         channel
             .messages
             .push(format!("{}: {}", message.sender, message.contents));
@@ -168,7 +171,9 @@ impl TUI {
     #[allow(unused_must_use)]
     pub fn draw(&mut self) {
         use termion::cursor::Goto;
-        use termion::style::{Bold, Reset};
+        use termion::color::Fg;
+        use termion::{color, style};
+
         let out = std::io::stdout();
         let mut lock = out.lock();
         let chan_width = 20;
@@ -185,45 +190,71 @@ impl TUI {
         write!(lock, "{}", Goto(21, 1)); // Move to the top-right corner
         for (s, server) in self.servers.iter_mut().enumerate() {
             if s == self.current_server {
-                write!(lock, " {}{}{} ", Bold, server.name, Reset);
+                write!(lock, " {}{}{} ", style::Bold, server.name, style::Reset);
                 server.has_unreads = false;
             } else if server.has_unreads {
-                write!(lock, "+{} ", server.name);
+                write!(
+                    lock,
+                    " {}{}{} ",
+                    Fg(color::Red),
+                    server.name,
+                    Fg(color::Reset)
+                );
             } else {
                 write!(lock, " {} ", server.name);
             }
         }
 
+        use std::iter::FromIterator;
         // Draw all the channels for the current server down the left side
         let server = &mut self.servers[self.current_server];
         for (c, channel) in server.channels.iter_mut().enumerate() {
+            let shortened_name =
+                String::from_iter(channel.name.chars().take((chan_width - 1) as usize));
             if c == server.current_channel {
                 write!(
                     lock,
                     "{}{}{}{}",
                     Goto(1, c as u16 + 1),
-                    Bold,
-                    channel.name,
-                    Reset
+                    style::Bold,
+                    shortened_name,
+                    style::Reset
                 );
                 // Remove unreads marker from current channel
                 channel.has_unreads = false;
             } else if channel.has_unreads {
-                write!(lock, "{}+{}", Goto(1, c as u16 + 1), channel.name);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    Fg(color::Red),
+                    shortened_name,
+                    Fg(color::Reset)
+                );
             } else {
-                write!(lock, "{}{}", Goto(1, c as u16 + 1), channel.name);
+                write!(lock, "{}{}", Goto(1, c as u16 + 1), shortened_name);
             }
         }
 
+        use termion::color::Color;
+        let colors = vec![
+            color::AnsiValue::rgb(5, 0, 0),
+            color::AnsiValue::rgb(0, 5, 0),
+            color::AnsiValue::rgb(0, 0, 5),
+            color::AnsiValue::rgb(5, 5, 0),
+            color::AnsiValue::rgb(0, 5, 5),
+        ];
+
         let remaining_width = (width - chan_width) as usize;
         let mut msg_row = height - 1;
+
         'outer: for message in server.channels[server.current_channel]
             .messages
             .iter()
             .rev()
         {
             for line in message.lines().rev() {
-                let num_rows = (line.len() / remaining_width) + 1;
+                let num_rows = (line.chars().count() / remaining_width) + 1;
                 for r in (0..num_rows).rev() {
                     write!(lock, "{}", Goto(chan_width + 1, msg_row as u16));
                     for c in line.chars().skip(r * remaining_width).take(remaining_width) {
@@ -235,6 +266,23 @@ impl TUI {
                     }
                 }
             }
+            // Overprint the colored name for the user
+            let name = String::from_iter(message.chars().take_while(|c| c != &':'));
+            let color = match server.users.iter().position(|n| n == &name) {
+                Some(i) => colors[i % colors.len()],
+                None => {
+                    server.users.push(name.clone());
+                    colors[server.users.len() % colors.len()]
+                }
+            };
+            write!(
+                lock,
+                "{}{}{}{}",
+                Goto(chan_width + 1, msg_row + 1 as u16),
+                Fg(color),
+                name,
+                Fg(color::Reset)
+            );
         }
 
         // Print the message buffer
