@@ -93,6 +93,9 @@ impl ChanMessage {
                     current_length += next_word_len + 1;
                 }
             }
+            if let Some(' ') = formatted.chars().last() {
+                formatted.pop();
+            }
             formatted.push_str("\n    ");
             current_length = 4;
         }
