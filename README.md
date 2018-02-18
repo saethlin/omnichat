@@ -4,24 +4,24 @@ I really dislike how much my chromebook lags while trying to use Slack, Discord,
 
 ## Platforms
 - [ ] Slack
- - [x] Send/Recieve basic text messages
- - [ ] Send/Recieve channel and user mentions
- - [ ] Commands
+  - [x] Send/Recieve basic text messages
+  - [ ] Send/Recieve channel and user mentions
+  - [ ] Commands
 
 - [ ] Discord
- - [x] Send/Recieve basic text messages
- - [x] Send/Recieve channel and user mentions
- - [ ] Commands
+  - [x] Send/Recieve basic text messages
+  - [ ] Send/Recieve channel and user mentions
+  - [ ] Commands
 
 - [ ] PushBullet
- - [x] Send/Recieve basic text messages
- - [x] Send/Recieve channel and user mentions
- - [ ] Commands
+  - [ ] Send/Recieve basic text messages
+  - [ ] Send/Recieve channel and user mentions
+  - [ ] Commands
 
 - [ ] Facebook Messenger
- - [x] Send/Recieve basic text messages
- - [x] Send/Recieve channel and user mentions
- - [ ] Commands
+  - [ ] Send/Recieve basic text messages
+  - [ ] Send/Recieve channel and user mentions
+  - [ ] Commands
 
 
 ## TUI
