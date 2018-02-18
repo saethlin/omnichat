@@ -43,7 +43,6 @@ impl DiscordConn {
         let my_id = discord::State::new(info).user().id;
 
         use discord::model::ChannelType;
-        use std::collections::HashMap;
         use discord::model::permissions::Permissions;
         let mut channel_names = Vec::new();
         let mut channel_ids = Vec::new();
@@ -69,20 +68,23 @@ impl DiscordConn {
         let t_dis = handle.clone();
 
         // Load message history
-        let server = server.clone();
         let t_sender = sender.clone();
         let serv_name = server_name.clone();
         let t_channels = channels.clone();
         thread::spawn(move || {
             let dis = t_dis.lock().unwrap();
             for (id, name) in t_channels.iter() {
-                let messages = dis.get_messages(*id, discord::GetMessages::MostRecent, None)
+                let mut messages = dis.get_messages(*id, discord::GetMessages::MostRecent, None)
                     .unwrap_or_else(|e| {
                         t_sender
                             .send(Event::Error(format!("{}", e)))
                             .expect("Sender died");
                         Vec::new()
                     });
+
+                // TODO: handle ordering of messages in the frontend
+                messages.sort_by_key(|m| m.timestamp.timestamp());
+
                 for m in messages.into_iter() {
                     t_sender
                         .send(Event::HistoryMessage(Message {
@@ -136,7 +138,7 @@ impl DiscordConn {
 impl Conn for DiscordConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let dis = self.discord.lock().unwrap();
-        if let Err(e) = dis.send_message(
+        if let Err(_) = dis.send_message(
             self.channels
                 .get_id(&String::from(channel))
                 .unwrap()
