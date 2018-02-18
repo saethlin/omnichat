@@ -1,0 +1,8 @@
+[[servers]]
+type = "slack"
+token = "slackusertoken"
+
+[[servers]]
+type = "discord"
+token = "discordusertoken"
+name = "Server Name"
