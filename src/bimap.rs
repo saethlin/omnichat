@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::collections::hash_map::Iter;
+
 #[derive(Clone)]
 pub struct BiMapBuilder<I, H> {
     pub id: Vec<I>,

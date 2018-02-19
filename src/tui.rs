@@ -66,7 +66,6 @@ struct ChanMessage {
     raw: String,
     pub contents: String,
     pub sender: String,
-    current_width: usize,
 }
 
 impl ChanMessage {
@@ -75,7 +74,6 @@ impl ChanMessage {
             raw: contents,
             contents: String::new(),
             sender: sender,
-            current_width: 0,
         }
     }
 
