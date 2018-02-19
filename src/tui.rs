@@ -13,6 +13,24 @@ use termion::event::Event::*;
 use termion::event::Key::*;
 use termion::color::AnsiValue;
 
+lazy_static! {
+    static ref COLORS: Vec<AnsiValue> = {
+        let mut c = Vec::with_capacity(3*3*3);
+        for r in 1..6 {
+            for g in 1..6 {
+                for b in 1..6 {
+                    if r < 2 || g < 2 || g < 2 {
+                        c.push(AnsiValue::rgb(r, g, b));
+                    }
+                }
+            }
+        }
+        use ::rand::Rng;
+        ::rand::thread_rng().shuffle(&mut c);
+        c
+    };
+}
+
 #[derive(Debug, Fail)]
 pub enum TuiError {
     #[fail(display = "Got a message from an unknown channel")] UnknownChannel,
@@ -212,15 +230,6 @@ impl TUI {
 
     pub fn add_message(&mut self, message: Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
-        use termion::color;
-        let colors = vec![
-            color::AnsiValue::rgb(5, 0, 0),
-            color::AnsiValue::rgb(0, 5, 0),
-            color::AnsiValue::rgb(0, 0, 5),
-            color::AnsiValue::rgb(5, 5, 0),
-            color::AnsiValue::rgb(0, 5, 5),
-            color::AnsiValue::rgb(5, 0, 5),
-        ];
 
         let server = self.servers
             .iter_mut()
@@ -232,7 +241,7 @@ impl TUI {
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
 
-        let new_color = colors[server.user_colors.len() % colors.len()];
+        let new_color = COLORS[server.user_colors.len() % COLORS.len()];
         server
             .user_colors
             .entry(message.sender.clone())
@@ -277,20 +286,37 @@ impl TUI {
 
         // Draw all the server names across the top
         write!(lock, "{}", Goto(21, 1)); // Move to the top-right corner
+        let num_servers = self.servers.len();
         for (s, server) in self.servers.iter_mut().enumerate() {
+            let delim = if s == num_servers - 1 { "" } else { " • " };
             if s == self.current_server {
-                write!(lock, " {}{}{} ", style::Bold, server.name, style::Reset);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    style::Bold,
+                    server.name,
+                    style::Reset,
+                    delim
+                );
                 server.has_unreads = false;
             } else if server.has_unreads {
                 write!(
                     lock,
-                    " {}{}{} ",
+                    "{}{}{}{}",
                     Fg(color::Red),
                     server.name,
-                    Fg(color::Reset)
+                    Fg(color::Reset),
+                    delim
                 );
             } else {
-                write!(lock, " {} ", server.name);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Fg(color::AnsiValue::rgb(3, 3, 3)),
+                    server.name,
+                    Fg(color::Reset),
+                    delim
+                );
             }
         }
 

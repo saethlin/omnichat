@@ -3,6 +3,9 @@ extern crate discord;
 extern crate failure;
 extern crate futures;
 #[macro_use]
+extern crate lazy_static;
+extern crate rand;
+#[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
 extern crate slack_api;
