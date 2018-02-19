@@ -2,7 +2,7 @@
 
 I really dislike how much my chromebook lags while trying to use Slack, Discord, and other messaging services. This is my attempt to bring a bunch of messaging services together with a fast interface. That's currently a TUI because cross-platform GUI is hard and I mostly want to send and recieve text.
 
-![omnichat_slack](blob:https://imgur.com/33f3cf91-d7ad-4871-8d74-7320062160fc)
+![omnichat_slack](omni_small.png)
 
 ## Platforms
 - [ ] Slack
