@@ -29,5 +29,5 @@ I really dislike how much my chromebook lags while trying to use Slack, Discord,
 - [x] Unread highlighting
 - [x] Draw messages in a sane way
 - [x] Redraw only the message area when typing (currently causes flickering)
-- [ ] Colored usernames
+- [x] Colored usernames
 - [ ] Multi-line message editing
