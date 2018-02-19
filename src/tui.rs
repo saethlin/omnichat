@@ -212,6 +212,15 @@ impl TUI {
 
     pub fn add_message(&mut self, message: Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
+        use termion::color;
+        let colors = vec![
+            color::AnsiValue::rgb(5, 0, 0),
+            color::AnsiValue::rgb(0, 5, 0),
+            color::AnsiValue::rgb(0, 0, 5),
+            color::AnsiValue::rgb(5, 5, 0),
+            color::AnsiValue::rgb(0, 5, 5),
+            color::AnsiValue::rgb(5, 0, 5),
+        ];
 
         let server = self.servers
             .iter_mut()
@@ -222,6 +231,12 @@ impl TUI {
             .iter_mut()
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
+
+        let new_color = colors[server.user_colors.len() % colors.len()];
+        server
+            .user_colors
+            .entry(message.sender.clone())
+            .or_insert(new_color);
 
         channel
             .messages
@@ -318,51 +333,36 @@ impl TUI {
             }
         }
 
-        let colors = vec![
-            color::AnsiValue::rgb(5, 0, 0),
-            color::AnsiValue::rgb(0, 5, 0),
-            color::AnsiValue::rgb(0, 0, 5),
-            color::AnsiValue::rgb(5, 5, 0),
-            color::AnsiValue::rgb(0, 5, 5),
-            color::AnsiValue::rgb(5, 0, 5),
-        ];
-
         let remaining_width = (width - chan_width) as usize;
-        let mut msg_row = height;
-
-        for message in server.channels[server.current_channel]
+        let mut row = height - 1;
+        'outer: for message in server.channels[server.current_channel]
             .messages
             .iter_mut()
             .rev()
         {
-            // Reformat the message if we need to
             if self.previous_width != width {
                 message.format(remaining_width);
             }
-
-            let num_lines = message.contents.lines().count();
-            if num_lines + 1 >= msg_row as usize {
-                break;
-            }
-            msg_row -= num_lines as u16;
-            for (l, line) in message.contents.lines().enumerate() {
-                write!(lock, "{}", Goto(chan_width + 1, msg_row));
-                msg_row += 1;
-                // First line is special because we have to print the colored username
-                if l == 0 {
-                    let name = message.sender.clone();
-                    let color = if server.user_colors.contains_key(&name) {
-                        server.user_colors[&name]
-                    } else {
-                        let new_color = colors[server.user_colors.len() % colors.len()];
-                        server.user_colors.insert(name.clone(), new_color);
-                        new_color
-                    };
-                    write!(lock, "{}{}{}: ", Fg(color), name, Fg(color::Reset));
+            for (l, line) in message.contents.lines().rev().enumerate() {
+                let num_lines = message.contents.lines().count();
+                write!(lock, "{}", Goto(chan_width + 1, row));
+                row -= 1;
+                if l == num_lines - 1 {
+                    write!(
+                        lock,
+                        "{}{}{}: {}",
+                        Fg(server.user_colors[&message.sender]),
+                        message.sender,
+                        Fg(color::Reset),
+                        line
+                    );
+                } else {
+                    write!(lock, "{}", line);
                 }
-                print!("{}", line);
+                if row == 1 {
+                    break 'outer;
+                }
             }
-            msg_row -= num_lines as u16;
         }
 
         // Print the message buffer
