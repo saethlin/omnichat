@@ -1,12 +1,15 @@
 TUI:
-Redraw on terminal resize - Does not seem like this is possible with just termios
+Replace termios with pancurses
 Mentions tab
-
-Colored usernames
-
+Consistent colors
 
 Slack-specific:
+Fix hack for slack-rs-api slackbot messages
+Add handling for thread update thingers
 >, <, and & rendering
 Reactions
 #no-grills isn't in the known channels
 
+Discord:
+Handle permissions overrides
+Need to keep a global discord connection and pass its events around maybe- sounds like Serenity

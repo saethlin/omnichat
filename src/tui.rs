@@ -3,7 +3,6 @@ use std;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::io::{stdin, Write};
-use std::collections::HashMap;
 use conn::{Conn, Event, Message, ServerConfig};
 
 //use tokio_core::reactor::{Core, Handle};
@@ -25,10 +24,17 @@ lazy_static! {
                 }
             }
         }
-        use ::rand::Rng;
-        ::rand::thread_rng().shuffle(&mut c);
         c
     };
+}
+
+fn djb2(input: &String) -> u64 {
+    let mut hash: u64 = 5381;
+
+    for c in input.bytes() {
+        hash = (hash << 5).wrapping_add(hash).wrapping_add(c as u64);
+    }
+    return hash;
 }
 
 #[derive(Debug, Fail)]
@@ -53,7 +59,6 @@ pub struct Server {
     name: String,
     current_channel: usize,
     has_unreads: bool,
-    user_colors: HashMap<String, AnsiValue>,
 }
 
 pub struct Channel {
@@ -222,7 +227,6 @@ impl TUI {
             connection: connection,
             current_channel: 0,
             has_unreads: false,
-            user_colors: HashMap::new(),
         });
     }
 
@@ -238,12 +242,6 @@ impl TUI {
             .iter_mut()
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
-
-        let new_color = COLORS[server.user_colors.len() % COLORS.len()];
-        server
-            .user_colors
-            .entry(message.sender.clone())
-            .or_insert(new_color);
 
         channel
             .messages
@@ -375,7 +373,7 @@ impl TUI {
                     write!(
                         lock,
                         "{}{}{}: {}",
-                        Fg(server.user_colors[&message.sender]),
+                        Fg(COLORS[djb2(&message.sender) as usize % COLORS.len()]),
                         message.sender,
                         Fg(color::Reset),
                         line
