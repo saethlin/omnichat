@@ -406,10 +406,15 @@ impl TUI {
     #[allow(unused_must_use)]
     fn draw_message_area(&self) {
         use termion::cursor::Goto;
+        let chan_width = self.servers
+            .iter()
+            .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
+            .max()
+            .unwrap() as u16 + 1;
+
         let out = std::io::stdout();
         let mut lock = out.lock();
 
-        let chan_width = 20;
         let (width, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
