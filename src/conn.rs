@@ -19,11 +19,11 @@ pub struct Message {
 #[derive(Debug)]
 pub enum Event {
     Message(Message),
+    Mention(Message),
     HistoryMessage(Message),
     HistoryLoaded { server: String, channel: String },
     Input(termion::event::Event),
     Error(String),
-    //Mention(Message),
 }
 
 #[derive(Debug, Fail)]

@@ -19,5 +19,3 @@ lazy_static = "1.0"
 rand = "0.4.2"
 
 [profile.release]
-lto = true
-

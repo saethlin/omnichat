@@ -226,23 +226,30 @@ impl SlackConn {
                 use slack_api::Message::Standard;
                 let mut req = HistoryRequest::default();
                 req.channel = &id;
-                let response = history(&client, &token, &req).unwrap();
-                for message in response.messages.unwrap().iter().rev().cloned() {
-                    if let Standard(mut slackmessage) = message {
-                        slackmessage.channel = Some(id.clone());
-                        if let Some(omnimessage) = handler.to_omni(slackmessage) {
-                            sender
-                                .send(Event::HistoryMessage(omnimessage))
-                                .expect("Sender died");
+                let response = history(&client, &token, &req);
+                match response {
+                    Err(e) => {
+                        sender.send(Event::Error(format!("{:?}", e))).unwrap();
+                    }
+                    Ok(response) => {
+                        for message in response.messages.unwrap().iter().rev().cloned() {
+                            if let Standard(mut slackmessage) = message {
+                                slackmessage.channel = Some(id.clone());
+                                if let Some(omnimessage) = handler.to_omni(slackmessage) {
+                                    sender
+                                        .send(Event::HistoryMessage(omnimessage))
+                                        .expect("Sender died");
+                                }
+                            }
                         }
+                        sender
+                            .send(Event::HistoryLoaded {
+                                server: server_name,
+                                channel: channel_name,
+                            })
+                            .expect("Sender died");
                     }
                 }
-                sender
-                    .send(Event::HistoryLoaded {
-                        server: server_name,
-                        channel: channel_name,
-                    })
-                    .expect("Sender died");
             });
         }
 

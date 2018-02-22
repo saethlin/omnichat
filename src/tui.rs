@@ -174,6 +174,19 @@ impl TUI {
             let check_index = (server.current_channel + i) % server.channels.len();
             if server.channels[check_index].has_unreads {
                 server.current_channel = check_index;
+                break;
+            }
+        }
+    }
+
+    pub fn previous_channel_unread(&mut self) {
+        let server = &mut self.servers[self.current_server];
+        for i in 0..server.channels.len() {
+            let check_index =
+                (server.current_channel + server.channels.len() - i) % server.channels.len();
+            if server.channels[check_index].has_unreads {
+                server.current_channel = check_index;
+                break;
             }
         }
     }
@@ -267,6 +280,8 @@ impl TUI {
         use termion::cursor::Goto;
         use termion::color::Fg;
         use termion::{color, style};
+
+        // Format the message area text first.
 
         let chan_width = self.servers
             .iter()
@@ -466,6 +481,10 @@ impl TUI {
                 self.next_channel_unread();
                 self.draw();
             }
+            Key(PageUp) => {
+                self.previous_channel_unread();
+                self.draw();
+            }
             _ => {}
         }
     }
@@ -497,7 +516,22 @@ impl TUI {
                     self.add_client_message(&message);
                     self.draw();
                 }
-                //Event::Mention(_) => {}
+                Event::Mention(message) => {
+                    if let Err(e) = self.add_message(message.clone(), true) {
+                        self.add_client_message(&e.to_string());
+                    } else {
+                        self.add_message(
+                            Message {
+                                sender: message.sender,
+                                contents: message.contents,
+                                server: "Client".to_owned(),
+                                channel: "Mentions".to_owned(),
+                            },
+                            true,
+                        ).unwrap_or_else(|e| self.add_client_message(&e.to_string()));
+                    }
+                    self.draw();
+                }
                 // TODO: Optimize
                 Event::HistoryLoaded { .. } => {
                     self.draw();

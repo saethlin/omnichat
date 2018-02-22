@@ -64,6 +64,8 @@ impl DiscordConn {
             id: channel_ids,
         });
 
+        // Collect a vector of the channels we have muted
+
         let handle = Arc::new(RwLock::new(dis));
         // Load message history
         let t_channels = channels.clone();
@@ -108,23 +110,32 @@ impl DiscordConn {
         let h_sender = sender.clone();
         let serv_name = server_name.clone();
         let h_channels = channels.clone();
+        let h_handle = handle.clone();
         // Launch a thread to handle incoming messages
         thread::spawn(move || {
+            // Grab data to identify mentions of the logged in user
+            // TODO: Why can't I ? on the return of .read()
+            let current_user = h_handle.read().unwrap().get_current_user().unwrap();
+            let mut my_mention = format!("{}", current_user.id.mention());
+            my_mention.insert(2, '!');
+
             while let Ok(ev) = connection.recv_event() {
                 match ev {
                     discord::model::Event::MessageCreate(message) => {
                         if h_channels.contains_id(&message.channel_id) {
-                            h_sender
-                                .send(Event::Message(Message {
-                                    server: serv_name.clone(),
-                                    channel: h_channels
-                                        .get_human(&message.channel_id)
-                                        .unwrap()
-                                        .clone(),
-                                    contents: message.content,
-                                    sender: message.author.name,
-                                }))
-                                .expect("Sender died");
+                            let content = message.content.clone();
+                            let event = Message {
+                                server: serv_name.clone(),
+                                channel: h_channels.get_human(&message.channel_id).unwrap().clone(),
+                                contents: message.content,
+                                sender: message.author.name,
+                            };
+
+                            if content.contains(&my_mention) {
+                                h_sender.send(Event::Mention(event)).expect("Sender died");
+                            } else {
+                                h_sender.send(Event::Message(event)).expect("Sender died");
+                            }
                         }
                     }
                     _ => {}
