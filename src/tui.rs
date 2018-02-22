@@ -268,9 +268,14 @@ impl TUI {
         use termion::color::Fg;
         use termion::{color, style};
 
+        let chan_width = self.servers
+            .iter()
+            .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
+            .max()
+            .unwrap() as u16 + 1;
+
         let out = std::io::stdout();
         let mut lock = out.lock();
-        let chan_width = 20;
         let (width, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
@@ -281,7 +286,7 @@ impl TUI {
         }
 
         // Draw all the server names across the top
-        write!(lock, "{}", Goto(21, 1)); // Move to the top-right corner
+        write!(lock, "{}", Goto(chan_width + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
         for (s, server) in self.servers.iter_mut().enumerate() {
             let delim = if s == num_servers - 1 { "" } else { " • " };
