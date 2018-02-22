@@ -487,7 +487,11 @@ impl TUI {
                     self.add_client_message(&message);
                     self.draw();
                 }
-                Event::Mention(_) => {}
+                //Event::Mention(_) => {}
+                // TODO: Optimize
+                Event::HistoryLoaded { .. } => {
+                    self.draw();
+                }
             }
             if self.shutdown {
                 print!("\n\r");

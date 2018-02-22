@@ -218,30 +218,8 @@ impl SlackConn {
             let handler = handler.clone();
             let client = slack_api::requests::Client::new().unwrap();
             let token = token.clone();
-
-            /*
-            use slack_api::channels::{history, HistoryRequest};
-            use slack_api::Message::Standard;
-            let mut req = HistoryRequest::default();
-            req.channel = &id;
-            let runner = slack_api::requests::Client::new()
-                .map_err(|e| e.into())
-                .and_then(|client| history(&client, &token, &req))
-                .map(|response| response.messages)
-                .map(|messages| {
-                for message in messages.iter().rev().cloned() {
-                    if let Standard(mut slackmessage) = message {
-                        slackmessage.channel = Some(id.clone());
-                        if let Some(omnimessage) = handler.to_omni(slackmessage) {
-                            sender
-                                .send(Event::HistoryMessage(omnimessage))
-                                .expect("Sender died");
-                        }
-                    }
-                }                                             
-            }).map_err(|_| ());
-            handle.spawn(runner);
-            */
+            let server_name = team_name.clone();
+            let channel_name = channels.get_human(&id).unwrap().clone();
 
             thread::spawn(move || {
                 use slack_api::channels::{history, HistoryRequest};
@@ -259,6 +237,12 @@ impl SlackConn {
                         }
                     }
                 }
+                sender
+                    .send(Event::HistoryLoaded {
+                        server: server_name,
+                        channel: channel_name,
+                    })
+                    .expect("Sender died");
             });
         }
 

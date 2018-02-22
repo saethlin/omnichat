@@ -20,9 +20,10 @@ pub struct Message {
 pub enum Event {
     Message(Message),
     HistoryMessage(Message),
+    HistoryLoaded { server: String, channel: String },
     Input(termion::event::Event),
     Error(String),
-    Mention(Message),
+    //Mention(Message),
 }
 
 #[derive(Debug, Fail)]

@@ -1,6 +1,6 @@
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use bimap::{BiMap, BiMapBuilder};
 use conn::{Conn, Event, Message};
 use conn::ConnError::DiscordError;
@@ -9,7 +9,7 @@ use discord;
 use discord::model::ChannelId;
 
 pub struct DiscordConn {
-    discord: Arc<Mutex<discord::Discord>>,
+    discord: Arc<RwLock<discord::Discord>>,
     sender: Sender<Event>,
     name: String,
     channels: BiMap<ChannelId, String>,
@@ -64,17 +64,18 @@ impl DiscordConn {
             id: channel_ids,
         });
 
-        let handle = Arc::new(Mutex::new(dis));
-        let t_dis = handle.clone();
-
+        let handle = Arc::new(RwLock::new(dis));
         // Load message history
-        let t_sender = sender.clone();
-        let serv_name = server_name.clone();
         let t_channels = channels.clone();
-        thread::spawn(move || {
-            let dis = t_dis.lock().unwrap();
-            for (id, name) in t_channels.iter() {
-                let mut messages = dis.get_messages(*id, discord::GetMessages::MostRecent, None)
+        for (id, name) in t_channels.into_iter() {
+            let t_dis = handle.clone();
+            let t_sender = sender.clone();
+            let serv_name = server_name.clone();
+            thread::spawn(move || {
+                let mut messages = t_dis
+                    .read()
+                    .unwrap()
+                    .get_messages(id, discord::GetMessages::MostRecent, None)
                     .unwrap_or_else(|e| {
                         t_sender
                             .send(Event::Error(format!("{}", e)))
@@ -95,8 +96,14 @@ impl DiscordConn {
                         }))
                         .expect("Sender died");
                 }
-            }
-        });
+                t_sender
+                    .send(Event::HistoryLoaded {
+                        server: serv_name.clone(),
+                        channel: name.clone(),
+                    })
+                    .expect("sender died");;
+            });
+        }
 
         let h_sender = sender.clone();
         let serv_name = server_name.clone();
@@ -137,7 +144,7 @@ impl DiscordConn {
 
 impl Conn for DiscordConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
-        let dis = self.discord.lock().unwrap();
+        let dis = self.discord.write().unwrap();
         if let Err(_) = dis.send_message(
             self.channels
                 .get_id(&String::from(channel))

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::collections::hash_map::Iter;
 
 #[derive(Clone)]
 pub struct BiMapBuilder<I, H> {
@@ -42,15 +41,21 @@ where
         self.human_to_id.get(human)
     }
 
-    pub fn iter(&self) -> Iter<I, H> {
-        self.id_to_human.iter()
-    }
-
-    pub fn contains_human(&self, val: &H) -> bool {
-        self.human_to_id.contains_key(val)
-    }
-
     pub fn contains_id(&self, val: &I) -> bool {
         self.id_to_human.contains_key(val)
+    }
+}
+
+use std::collections::hash_map::IntoIter;
+impl<I, H> IntoIterator for BiMap<I, H>
+where
+    I: Eq + Hash,
+    H: Eq + Hash,
+{
+    type Item = (I, H);
+    type IntoIter = IntoIter<I, H>;
+
+    fn into_iter(self) -> IntoIter<I, H> {
+        self.id_to_human.into_iter()
     }
 }
