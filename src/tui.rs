@@ -124,6 +124,49 @@ impl ChanMessage {
     }
 }
 
+fn format_message_area(raw: &str, width: usize) -> String {
+    let mut formatted = String::with_capacity(raw.len());
+    let mut current_length = 0;
+    for line in raw.lines() {
+        for next_word in line.split(' ').filter(|word| word.len() > 0) {
+            let next_word_len = next_word.chars().count();
+            // If the word runs over the end of the current line, start a new one
+            if current_length + next_word_len > width {
+                if let Some(' ') = formatted.chars().last() {
+                    formatted.pop();
+                }
+                formatted.push_str("\n");
+                current_length = 0;
+            }
+            // If this word needs to be split (it's a url or something)
+            if next_word_len > (width - 4) {
+                for c in next_word.chars() {
+                    formatted.push(c);
+                    current_length += 1;
+                    if current_length == width {
+                        formatted.push_str("\n");
+                        current_length = 0;
+                    }
+                }
+            } else {
+                // Everything is fine
+                formatted.extend(next_word.chars());
+                formatted.push(' ');
+                current_length += next_word_len + 1;
+            }
+        }
+        if let Some(' ') = formatted.chars().last() {
+            formatted.pop();
+        }
+        formatted.push_str("\n");
+        current_length = 0;
+    }
+    if let Some('\n') = formatted.chars().last() {
+        formatted.pop();
+    }
+    formatted
+}
+
 impl TUI {
     pub fn new() -> Self {
         let (sender, reciever) = channel();
@@ -281,8 +324,6 @@ impl TUI {
         use termion::color::Fg;
         use termion::{color, style};
 
-        // Format the message area text first.
-
         let chan_width = self.servers
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
@@ -295,6 +336,10 @@ impl TUI {
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
         write!(lock, "{}", termion::clear::All);
+
+        // Format the message area text first.
+        let message_area_formatted =
+            format_message_area(&self.message_buffer, (width - chan_width) as usize);
 
         for i in 1..height + 1 {
             write!(lock, "{}|", Goto(chan_width, i));
@@ -375,8 +420,16 @@ impl TUI {
             }
         }
 
+        let message_area_lines = message_area_formatted.lines().count() as u16;
+        let message_area_height = if message_area_lines > 1 {
+            height - message_area_lines + 1
+        } else {
+            height
+        };
+
+        // Draw all the messages by looping over them in reverse
         let remaining_width = (width - chan_width) as usize;
-        let mut row = height - 1;
+        let mut row = message_area_height - 1;
         'outer: for message in server.channels[server.current_channel]
             .messages
             .iter_mut()
@@ -407,42 +460,18 @@ impl TUI {
             }
         }
 
-        // Print the message buffer
-        write!(
-            lock,
-            "{}{}",
-            Goto(chan_width + 1, height),
-            self.message_buffer
-        );
-
-        lock.flush().expect("TUI drawing flush failed");
-    }
-
-    #[allow(unused_must_use)]
-    fn draw_message_area(&self) {
-        use termion::cursor::Goto;
-        let chan_width = self.servers
-            .iter()
-            .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
-            .max()
-            .unwrap() as u16 + 1;
-
-        let out = std::io::stdout();
-        let mut lock = out.lock();
-
-        let (width, height) =
-            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-
-        write!(lock, "{}", Goto(chan_width + 1, height));
-        for _ in chan_width + 1..width + 1 {
-            write!(lock, " ");
+        for (l, line) in message_area_formatted.lines().enumerate() {
+            write!(
+                lock,
+                "{}{}",
+                Goto(chan_width + 1, message_area_height + l as u16),
+                line
+            );
         }
-        write!(
-            lock,
-            "{}{}",
-            Goto(chan_width + 1, height),
-            self.message_buffer
-        );
+        if self.message_buffer.is_empty() {
+            write!(lock, "{}", Goto(chan_width + 1, height));
+        }
+
         lock.flush().expect("TUI drawing flush failed");
     }
 
@@ -450,11 +479,11 @@ impl TUI {
         match *event {
             Key(Char('\n')) => {
                 self.send_message();
-                self.draw_message_area();
+                self.draw();
             }
             Key(Backspace) => {
                 self.message_buffer.pop();
-                self.draw_message_area();
+                self.draw();
             }
             Key(Ctrl('c')) => self.shutdown = true,
             Key(Up) => {
@@ -475,7 +504,7 @@ impl TUI {
             }
             Key(Char(c)) => {
                 self.message_buffer.push(c);
-                self.draw_message_area();
+                self.draw();
             }
             Key(PageDown) => {
                 self.next_channel_unread();
