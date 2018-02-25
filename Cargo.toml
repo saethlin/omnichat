@@ -17,5 +17,6 @@ discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals
 toml = "0.4.5"
 lazy_static = "1.0"
 rand = "0.4.2"
+pancurses = "0.14"
 
 [profile.release]
