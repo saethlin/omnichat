@@ -113,6 +113,49 @@ impl Drop for TUI {
     }
 }
 
+fn format_message_area(raw: &str, width: usize) -> String {
+    let mut formatted = String::with_capacity(raw.len());
+    let mut current_length = 0;
+    for line in raw.lines() {
+        for next_word in line.split(' ').filter(|word| word.len() > 0) {
+            let next_word_len = next_word.chars().count();
+            // If the word runs over the end of the current line, start a new one
+            if current_length + next_word_len > width {
+                if let Some(' ') = formatted.chars().last() {
+                    formatted.pop();
+                }
+                formatted.push_str("\n");
+                current_length = 0;
+            }
+            // If this word needs to be split (it's a url or something)
+            if next_word_len > (width - 4) {
+                for c in next_word.chars() {
+                    formatted.push(c);
+                    current_length += 1;
+                    if current_length == width {
+                        formatted.push_str("\n");
+                        current_length = 0;
+                    }
+                }
+            } else {
+                // Everything is fine
+                formatted.extend(next_word.chars());
+                formatted.push(' ');
+                current_length += next_word_len + 1;
+            }
+        }
+        if let Some(' ') = formatted.chars().last() {
+            formatted.pop();
+        }
+        formatted.push_str("\n");
+        current_length = 0;
+    }
+    if let Some('\n') = formatted.chars().last() {
+        formatted.pop();
+    }
+    formatted
+}
+
 impl TUI {
     pub fn new() -> Self {
         let (sender, reciever) = channel();
@@ -282,7 +325,6 @@ impl TUI {
 
     pub fn draw(&mut self) {
         // Format the message area text first.
-
         let chan_width = self.servers
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
@@ -291,6 +333,9 @@ impl TUI {
 
         let width = self.win.get_max_x();
         let height = self.win.get_max_y();
+
+        let message_area_formatted =
+            format_message_area(&self.message_buffer, width as usize - chan_width as usize);
 
         self.win.clear();
 
@@ -338,8 +383,16 @@ impl TUI {
             }
         }
 
+        let message_area_lines = message_area_formatted.lines().count() as i32;
+        let message_area_height = if message_area_lines > 1 {
+            height - message_area_lines + 1
+        } else {
+            height
+        };
+
+        // Draw all the messages by looping over them in reverse
         let remaining_width = (width - chan_width) as usize;
-        let mut row = height - 2;
+        let mut row = message_area_height - 2;
         'outer: for message in server.channels[server.current_channel]
             .messages
             .iter_mut()
@@ -364,10 +417,14 @@ impl TUI {
                 }
             }
         }
+        for (l, line) in message_area_formatted.lines().enumerate() {
+            self.win
+                .mvaddstr(message_area_height + l as i32 - 1, chan_width + 1, line);
+        }
 
-        // Print the message buffer
-        self.win
-            .mvaddstr(height - 1, chan_width + 1, &self.message_buffer);
+        if self.message_buffer.is_empty() {
+            self.win.mv(height - 1, chan_width + 1);
+        }
 
         self.win.refresh();
     }
