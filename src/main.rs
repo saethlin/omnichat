@@ -2,8 +2,6 @@ extern crate discord;
 #[macro_use]
 extern crate failure;
 extern crate futures;
-#[macro_use]
-extern crate lazy_static;
 extern crate pancurses;
 extern crate rand;
 #[macro_use]

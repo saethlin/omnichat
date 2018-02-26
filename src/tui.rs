@@ -7,27 +7,10 @@ use conn::{Conn, Event, Message, ServerConfig};
 use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
-use termion::color::AnsiValue;
 
 use pancurses::{endwin, initscr};
 
-lazy_static! {
-    static ref COLORS: Vec<AnsiValue> = {
-        let mut c = Vec::with_capacity(3*3*3);
-        for r in 1..6 {
-            for g in 1..6 {
-                for b in 1..6 {
-                    if r < 2 || g < 2 || g < 2 {
-                        c.push(AnsiValue::rgb(r, g, b));
-                    }
-                }
-            }
-        }
-        c
-    };
-}
-
-fn djb2(input: &String) -> u64 {
+fn djb2(input: &str) -> u64 {
     let mut hash: u64 = 5381;
 
     for c in input.bytes() {
@@ -152,7 +135,22 @@ impl TUI {
             previous_width: 0,
             win: initscr(),
         };
+        ::pancurses::start_color();
+        // pancurses black and white aren't actually black and white
+        ::pancurses::init_color(::pancurses::COLOR_BLACK, 0, 0, 0);
+        ::pancurses::init_color(::pancurses::COLOR_WHITE, 1000, 1000, 1000);
+
+        // set up corresponding pairs for all colors
+        for i in 0..256 {
+            ::pancurses::init_pair(i as i16, i as i16, ::pancurses::COLOR_BLACK);
+        }
+
+        ::pancurses::init_pair(0, ::pancurses::COLOR_WHITE, ::pancurses::COLOR_BLACK);
+        ::pancurses::init_pair(1, ::pancurses::COLOR_RED, ::pancurses::COLOR_BLACK);
+        tui.win.attrset(::pancurses::ColorPair(0));
+
         tui.add_server(ServerConfig::Client);
+        tui.add_client_message(&format!("num colors- {}", ::pancurses::COLORS()));
         tui
     }
 
@@ -301,15 +299,19 @@ impl TUI {
         }
 
         // Draw all the server names across the top
-        self.win.mv(0, chan_width);
+        self.win.mv(0, chan_width + 1);
         let num_servers = self.servers.len();
         for (s, server) in self.servers.iter_mut().enumerate() {
-            let delim = if s == num_servers - 1 { "" } else { " | " };
+            let delim = if s == num_servers - 1 { "" } else { " • " };
             if s == self.current_server {
+                self.win.attron(::pancurses::Attribute::Bold);
                 self.win.addstr(&format!("{}{}", server.name, delim));
+                self.win.attroff(::pancurses::Attribute::Bold);
                 server.has_unreads = false;
             } else if server.has_unreads {
+                self.win.color_set(1);
                 self.win.addstr(&format!("{}{}", server.name, delim));
+                self.win.color_set(0);
             } else {
                 self.win.addstr(&format!("{}{}", server.name, delim));
             }
@@ -322,11 +324,15 @@ impl TUI {
             let shortened_name =
                 String::from_iter(channel.name.chars().take((chan_width - 1) as usize));
             if c == server.current_channel {
+                self.win.attron(::pancurses::Attribute::Bold);
                 self.win.mvaddstr(c as i32, 0, &shortened_name);
+                self.win.attroff(::pancurses::Attribute::Bold);
                 // Remove unreads marker from current channel
                 channel.has_unreads = false;
             } else if channel.has_unreads {
+                self.win.color_set(1);
                 self.win.mvaddstr(c as i32, 0, &shortened_name);
+                self.win.color_set(0);
             } else {
                 self.win.mvaddstr(c as i32, 0, &shortened_name);
             }
@@ -347,10 +353,12 @@ impl TUI {
                 self.win.mv(row, chan_width + 1);
                 row -= 1;
                 if l == num_lines - 1 {
-                    self.win.addstr(&format!("{}: {}", message.sender, line));
-                } else {
-                    self.win.addstr(line);
+                    self.win.color_set((djb2(&message.sender) % 256) as i16);
+                    self.win.addstr(&format!("{}", message.sender));
+                    self.win.color_set(0);
+                    self.win.addstr(": ");
                 }
+                self.win.addstr(line);
                 if row == 1 {
                     break 'outer;
                 }
@@ -358,11 +366,8 @@ impl TUI {
         }
 
         // Print the message buffer
-        self.win.mvaddstr(
-            height,
-            chan_width + 1,
-            &format!("> {}", self.message_buffer),
-        );
+        self.win
+            .mvaddstr(height - 1, chan_width + 1, &self.message_buffer);
 
         self.win.refresh();
     }
