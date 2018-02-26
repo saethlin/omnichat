@@ -116,6 +116,10 @@ impl Drop for TUI {
 fn format_message_area(raw: &str, width: usize) -> String {
     let mut formatted = String::with_capacity(raw.len());
     let mut current_length = 0;
+    let ending_spaces: String = raw.chars()
+        .rev()
+        .take_while(|c| c.is_whitespace())
+        .collect();
     for line in raw.lines() {
         for next_word in line.split(' ').filter(|word| word.len() > 0) {
             let next_word_len = next_word.chars().count();
@@ -153,6 +157,7 @@ fn format_message_area(raw: &str, width: usize) -> String {
     if let Some('\n') = formatted.chars().last() {
         formatted.pop();
     }
+    formatted.extend(ending_spaces.chars().rev());
     formatted
 }
 

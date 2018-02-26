@@ -7,7 +7,8 @@ jobs:
       # your own using the Dockerfile provided below
       # and replace here. I put my own image here for
       # the example.
-      - image: abronan/rust-circleci:latest
+      #- image: abronan/rust-circleci:latest
+      - image: saethlin/omnichat:latest
 
     environment:
       # Set your codecov token if your repository is private.
