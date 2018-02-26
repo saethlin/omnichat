@@ -7,8 +7,24 @@ use conn::{Conn, Event, Message};
 use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
+use termion::color::AnsiValue;
+use ::std::io::Write;
 
-use pancurses::{endwin, initscr};
+lazy_static! {
+    static ref COLORS: Vec<AnsiValue> = {
+        let mut c = Vec::with_capacity(3*3*3);
+        for r in 1..6 {
+            for g in 1..6 {
+                for b in 1..6 {
+                    if r < 2 || g < 2 || g < 2 {
+                        c.push(AnsiValue::rgb(r, g, b));
+                    }
+                }
+            }
+        }
+        c
+    };
+}
 
 fn djb2(input: &str) -> u64 {
     let mut hash: u64 = 5381;
@@ -32,8 +48,8 @@ pub struct TUI {
     shutdown: bool,
     events: Receiver<Event>,
     sender: Sender<Event>,
-    previous_width: i32,
-    win: ::pancurses::Window,
+    previous_width: u16,
+    previous_height: u16,
 }
 
 pub struct Server {
@@ -107,12 +123,6 @@ impl ChanMessage {
     }
 }
 
-impl Drop for TUI {
-    fn drop(&mut self) {
-        endwin();
-    }
-}
-
 fn format_message_area(raw: &str, width: usize) -> String {
     let mut formatted = String::with_capacity(raw.len());
     let mut current_length = 0;
@@ -181,23 +191,8 @@ impl TUI {
             events: reciever,
             sender: sender,
             previous_width: 0,
-            win: initscr(),
+            previous_height: 0,
         };
-        ::pancurses::start_color();
-        // pancurses black and white aren't actually black and white
-        ::pancurses::init_color(::pancurses::COLOR_BLACK, 0, 0, 0);
-        ::pancurses::init_color(::pancurses::COLOR_WHITE, 1000, 1000, 1000);
-
-        // set up corresponding pairs for all colors
-        for i in 0..256 {
-            ::pancurses::init_pair(i as i16, i as i16, ::pancurses::COLOR_BLACK);
-        }
-
-        ::pancurses::init_pair(0, ::pancurses::COLOR_WHITE, ::pancurses::COLOR_BLACK);
-        ::pancurses::init_pair(1, ::pancurses::COLOR_RED, ::pancurses::COLOR_BLACK);
-        ::pancurses::init_pair(2, 245, ::pancurses::COLOR_BLACK);
-        tui.win.attrset(::pancurses::ColorPair(0));
-
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender).unwrap());
         tui
@@ -319,47 +314,67 @@ impl TUI {
         self.message_buffer.clear();
     }
 
+
+    #[allow(unused_must_use)]
     pub fn draw(&mut self) {
-        // Format the message area text first.
+        use termion::cursor::Goto;
+        use termion::color::Fg;
+        use termion::{color, style};
+
         let chan_width = self.servers
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
-            .unwrap() as i32;
+            .unwrap() as u16 + 1;
 
-        let width = self.win.get_max_x();
-        let height = self.win.get_max_y();
+        let out = ::std::io::stdout();
+        let mut lock = out.lock();
+        let (width, height) =
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
+        write!(lock, "{}", termion::clear::All);
+
+        // Format the message area text first.
         let message_area_formatted =
-            format_message_area(&self.message_buffer, width as usize - chan_width as usize);
+            format_message_area(&self.message_buffer, (width - chan_width - 1) as usize);
 
-        self.win.clear();
-
-        for i in 0..height {
-            self.win.mvaddch(i as i32, chan_width, '|');
+        for i in 1..height + 1 {
+            write!(lock, "{}|", Goto(chan_width, i));
         }
 
         // Draw all the server names across the top
-        self.win.mv(0, chan_width + 1);
+        write!(lock, "{}", Goto(chan_width + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
         for (s, server) in self.servers.iter_mut().enumerate() {
             let delim = if s == num_servers - 1 { "" } else { " • " };
             if s == self.current_server {
-                self.win.attron(::pancurses::Attribute::Bold);
-                self.win.addstr(&server.name);
-                self.win.attroff(::pancurses::Attribute::Bold);
-                self.win.addstr(&delim);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    style::Bold,
+                    server.name,
+                    style::Reset,
+                    delim
+                );
                 server.has_unreads = false;
             } else if server.has_unreads {
-                self.win.color_set(1);
-                self.win.addstr(&server.name);
-                self.win.color_set(0);
-                self.win.addstr(&delim);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Fg(color::Red),
+                    server.name,
+                    Fg(color::Reset),
+                    delim
+                );
             } else {
-                self.win.color_set(2);
-                self.win.addstr(&server.name);
-                self.win.color_set(0);
-                self.win.addstr(&delim);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Fg(color::AnsiValue::rgb(3, 3, 3)),
+                    server.name,
+                    Fg(color::Reset),
+                    delim
+                );
             }
         }
 
@@ -370,23 +385,39 @@ impl TUI {
             let shortened_name =
                 String::from_iter(channel.name.chars().take((chan_width - 1) as usize));
             if c == server.current_channel {
-                self.win.attron(::pancurses::Attribute::Bold);
-                self.win.mvaddstr(c as i32, 0, &shortened_name);
-                self.win.attroff(::pancurses::Attribute::Bold);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    style::Bold,
+                    shortened_name,
+                    style::Reset
+                );
                 // Remove unreads marker from current channel
                 channel.has_unreads = false;
             } else if channel.has_unreads {
-                self.win.color_set(1);
-                self.win.mvaddstr(c as i32, 0, &shortened_name);
-                self.win.color_set(0);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    Fg(color::Red),
+                    shortened_name,
+                    Fg(color::Reset)
+                );
             } else {
-                self.win.color_set(2);
-                self.win.mvaddstr(c as i32, 0, &shortened_name);
-                self.win.color_set(0);
+                let gray = color::AnsiValue::rgb(3, 3, 3);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    Fg(gray),
+                    shortened_name,
+                    Fg(color::Reset)
+                );
             }
         }
 
-        let message_area_lines = message_area_formatted.lines().count() as i32;
+        let message_area_lines = message_area_formatted.lines().count() as u16;
         let message_area_height = if message_area_lines > 1 {
             height - message_area_lines + 1
         } else {
@@ -395,42 +426,52 @@ impl TUI {
 
         // Draw all the messages by looping over them in reverse
         let remaining_width = (width - chan_width) as usize;
-        let mut row = message_area_height - 2;
+        let mut row = message_area_height - 1;
         'outer: for message in server.channels[server.current_channel]
             .messages
             .iter_mut()
             .rev()
         {
             if self.previous_width != width {
-                message.format(remaining_width - 1);
+                message.format(remaining_width);
             }
             for (l, line) in message.contents.lines().rev().enumerate() {
                 let num_lines = message.contents.lines().count();
-                self.win.mv(row, chan_width + 1);
+                write!(lock, "{}", Goto(chan_width + 1, row));
                 row -= 1;
                 if l == num_lines - 1 {
-                    self.win.color_set((djb2(&message.sender) % 256) as i16);
-                    self.win.addstr(&format!("{}", message.sender));
-                    self.win.color_set(0);
-                    self.win.addstr(": ");
+                    write!(
+                        lock,
+                        "{}{}{}: {}",
+                        Fg(COLORS[djb2(&message.sender) as usize % COLORS.len()]),
+                        message.sender,
+                        Fg(color::Reset),
+                        line
+                    );
+                } else {
+                    write!(lock, "{}", line);
                 }
-                self.win.addstr(line);
                 if row == 1 {
                     break 'outer;
                 }
             }
         }
+
         for (l, line) in message_area_formatted.lines().enumerate() {
-            self.win
-                .mvaddstr(message_area_height + l as i32 - 1, chan_width + 1, line);
+            write!(
+                lock,
+                "{}{}",
+                Goto(chan_width + 1, message_area_height + l as u16),
+                line
+            );
         }
-
         if self.message_buffer.is_empty() {
-            self.win.mv(height - 1, chan_width + 1);
+            write!(lock, "{}", Goto(chan_width + 1, height));
         }
 
-        self.win.refresh();
+        lock.flush().expect("TUI drawing flush failed");
     }
+
 
     fn handle_input(&mut self, event: &termion::event::Event) {
         match *event {

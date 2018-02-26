@@ -1,7 +1,6 @@
 TUI:
-Replace termios with pancurses
 Mentions tab
-Consistent colors
+Retain whitespace when formatting text
 
 Slack-specific:
 Fix hack for slack-rs-api slackbot messages
@@ -13,3 +12,4 @@ Reactions
 Discord:
 Handle permissions overrides
 Need to keep a global discord connection and pass its events around maybe- sounds like Serenity
+

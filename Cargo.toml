@@ -11,11 +11,8 @@ serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
+lazy_static = "1.0"
 slack_api = {git = "https://github.com/saethlin/slack-rs-api"}
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
-
-[dependencies.pancurses]
-version = "0.15"
-features = ["wide"]
 
 [profile.release]

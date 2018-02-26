@@ -1,7 +1,8 @@
 extern crate discord;
 #[macro_use]
 extern crate failure;
-extern crate pancurses;
+#[macro_use]
+extern crate lazy_static;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
@@ -31,6 +32,7 @@ fn main() {
     use tui::ClientConn;
     use conn::ServerConfig;
     use std::thread;
+    use termion::raw::IntoRawMode;
 
     let homedir = std::env::var("HOME").expect("You don't even have a $HOME? :'(");
     let config_path = PathBuf::from(homedir).join(".omnichat.toml");
@@ -41,6 +43,9 @@ fn main() {
         .expect("Couldn't read config file");
 
     let config: Config = toml::from_str(&contents).expect("Config is not valid TOML");
+
+    let _screenguard = termion::screen::AlternateScreen::from(std::io::stdout());
+    let _rawguard = std::io::stdout().into_raw_mode().unwrap();
 
     let mut tui = TUI::new();
     let (conn_sender, conn_recv) = std::sync::mpsc::channel();
