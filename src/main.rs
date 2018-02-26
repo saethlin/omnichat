@@ -1,14 +1,12 @@
 extern crate discord;
 #[macro_use]
 extern crate failure;
-extern crate futures;
 extern crate pancurses;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
 extern crate slack_api;
 extern crate termion;
-extern crate tokio_core;
 extern crate toml;
 extern crate websocket;
 
