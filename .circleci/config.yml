@@ -15,10 +15,10 @@ jobs:
           key: project-cache
       - run:
           name: Stable Build
-          command: cargo +stable build
+          command: cargo build
       - run:
           name: Test
-          command: cargo +stable test
+          command: cargo test
       - save_cache:
           key: project-cache
           paths:

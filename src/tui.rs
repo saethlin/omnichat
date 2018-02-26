@@ -187,6 +187,7 @@ impl TUI {
         // pancurses black and white aren't actually black and white
         ::pancurses::init_color(::pancurses::COLOR_BLACK, 0, 0, 0);
         ::pancurses::init_color(::pancurses::COLOR_WHITE, 1000, 1000, 1000);
+        ::pancurses::init_color(1, 500, 500, 500);
 
         // set up corresponding pairs for all colors
         for i in 0..256 {
@@ -195,6 +196,7 @@ impl TUI {
 
         ::pancurses::init_pair(0, ::pancurses::COLOR_WHITE, ::pancurses::COLOR_BLACK);
         ::pancurses::init_pair(1, ::pancurses::COLOR_RED, ::pancurses::COLOR_BLACK);
+        ::pancurses::init_pair(2, 1, ::pancurses::COLOR_BLACK);
         tui.win.attrset(::pancurses::ColorPair(0));
 
         tui.add_server(ServerConfig::Client);
