@@ -2,7 +2,7 @@ use termion;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::io::stdin;
-use conn::{Conn, Event, Message, ServerConfig};
+use conn::{Conn, Event, Message};
 
 use termion::input::TermRead;
 use termion::event::Event::*;
@@ -199,7 +199,8 @@ impl TUI {
         ::pancurses::init_pair(2, 1, ::pancurses::COLOR_BLACK);
         tui.win.attrset(::pancurses::ColorPair(0));
 
-        tui.add_server(ServerConfig::Client);
+        let sender = tui.sender();
+        tui.add_server(ClientConn::new(sender).unwrap());
         tui.add_client_message(&format!("num colors- {}", ::pancurses::COLORS()));
         tui
     }
@@ -269,17 +270,7 @@ impl TUI {
             .push(ChanMessage::new(String::from("Client"), message.to_owned()));
     }
 
-    pub fn add_server(&mut self, config: ServerConfig) {
-        use slack_conn::SlackConn;
-        use discord_conn::DiscordConn;
-        let connection = match config {
-            ServerConfig::Slack { token } => SlackConn::new(token, self.sender()).unwrap(),
-            ServerConfig::Discord { token, name } => {
-                DiscordConn::new(token, name, self.sender()).unwrap()
-            }
-            ServerConfig::Client => ClientConn::new(self.sender()).unwrap(),
-        };
-
+    pub fn add_server(&mut self, connection: Box<Conn>) {
         let mut channels: Vec<String> = connection.channels().into_iter().cloned().collect();
         channels.sort();
         self.servers.push(Server {
@@ -528,7 +519,7 @@ impl TUI {
 }
 
 use failure::Error;
-struct ClientConn {
+pub struct ClientConn {
     name: String,
     channel_names: Vec<String>,
     sender: Sender<Event>,

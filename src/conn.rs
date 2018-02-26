@@ -1,6 +1,6 @@
 use termion;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum ServerConfig {
     Client,
