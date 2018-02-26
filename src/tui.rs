@@ -187,7 +187,6 @@ impl TUI {
         // pancurses black and white aren't actually black and white
         ::pancurses::init_color(::pancurses::COLOR_BLACK, 0, 0, 0);
         ::pancurses::init_color(::pancurses::COLOR_WHITE, 1000, 1000, 1000);
-        ::pancurses::init_color(1, 500, 500, 500);
 
         // set up corresponding pairs for all colors
         for i in 0..256 {
@@ -196,12 +195,11 @@ impl TUI {
 
         ::pancurses::init_pair(0, ::pancurses::COLOR_WHITE, ::pancurses::COLOR_BLACK);
         ::pancurses::init_pair(1, ::pancurses::COLOR_RED, ::pancurses::COLOR_BLACK);
-        ::pancurses::init_pair(2, 1, ::pancurses::COLOR_BLACK);
+        ::pancurses::init_pair(2, 245, ::pancurses::COLOR_BLACK);
         tui.win.attrset(::pancurses::ColorPair(0));
 
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender).unwrap());
-        tui.add_client_message(&format!("num colors- {}", ::pancurses::COLORS()));
         tui
     }
 
@@ -348,15 +346,20 @@ impl TUI {
             let delim = if s == num_servers - 1 { "" } else { " • " };
             if s == self.current_server {
                 self.win.attron(::pancurses::Attribute::Bold);
-                self.win.addstr(&format!("{}{}", server.name, delim));
+                self.win.addstr(&server.name);
                 self.win.attroff(::pancurses::Attribute::Bold);
+                self.win.addstr(&delim);
                 server.has_unreads = false;
             } else if server.has_unreads {
                 self.win.color_set(1);
-                self.win.addstr(&format!("{}{}", server.name, delim));
+                self.win.addstr(&server.name);
                 self.win.color_set(0);
+                self.win.addstr(&delim);
             } else {
-                self.win.addstr(&format!("{}{}", server.name, delim));
+                self.win.color_set(2);
+                self.win.addstr(&server.name);
+                self.win.color_set(0);
+                self.win.addstr(&delim);
             }
         }
 
@@ -377,7 +380,9 @@ impl TUI {
                 self.win.mvaddstr(c as i32, 0, &shortened_name);
                 self.win.color_set(0);
             } else {
+                self.win.color_set(2);
                 self.win.mvaddstr(c as i32, 0, &shortened_name);
+                self.win.color_set(0);
             }
         }
 
