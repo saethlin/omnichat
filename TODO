@@ -1,6 +1,8 @@
 TUI:
 Mentions tab
+Horizontal scrolling for channel names
 Retain whitespace when formatting text
+Draw only want changes
 
 Slack-specific:
 Fix hack for slack-rs-api slackbot messages

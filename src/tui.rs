@@ -8,7 +8,7 @@ use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
 use termion::color::AnsiValue;
-use ::std::io::Write;
+use std::io::Write;
 
 lazy_static! {
     static ref COLORS: Vec<AnsiValue> = {
@@ -314,7 +314,6 @@ impl TUI {
         self.message_buffer.clear();
     }
 
-
     #[allow(unused_must_use)]
     pub fn draw(&mut self) {
         use termion::cursor::Goto;
@@ -472,7 +471,6 @@ impl TUI {
         lock.flush().expect("TUI drawing flush failed");
     }
 
-
     fn handle_input(&mut self, event: &termion::event::Event) {
         match *event {
             Key(Char('\n')) => {
@@ -515,25 +513,37 @@ impl TUI {
                 Err(_) => break,
             };
 
+            let (server_name, channel_name) = {
+                let server = &self.servers[self.current_server];
+                let server_name = server.name.clone();
+                let channel_name = server.channels[server.current_channel].name.clone();
+                (server_name, channel_name)
+            };
+
             match event {
                 Event::Input(event) => {
                     self.handle_input(&event);
                 }
                 Event::Message(message) => {
+                    let do_draw =
+                        (message.server == server_name) && (message.channel == channel_name);
                     if let Err(e) = self.add_message(message, true) {
                         self.add_client_message(&e.to_string());
                     }
-                    self.draw();
+                    if do_draw {
+                        self.draw();
+                    }
                 }
                 Event::HistoryMessage(message) => {
                     if let Err(e) = self.add_message(message, false) {
                         self.add_client_message(&e.to_string());
-                        self.draw();
                     }
                 }
                 Event::Error(message) => {
                     self.add_client_message(&message);
-                    self.draw();
+                    if &server_name == "Client" && &channel_name == "Errors" {
+                        self.draw();
+                    }
                 }
                 Event::Mention(message) => {
                     if let Err(e) = self.add_message(message.clone(), true) {
@@ -549,11 +559,14 @@ impl TUI {
                             true,
                         ).unwrap_or_else(|e| self.add_client_message(&e.to_string()));
                     }
-                    self.draw();
+                    if &server_name == "Client" && &channel_name == "Mentions" {
+                        self.draw();
+                    }
                 }
-                // TODO: Optimize
-                Event::HistoryLoaded { .. } => {
-                    self.draw();
+                Event::HistoryLoaded { server, channel } => {
+                    if (server == server_name) && (channel == channel_name) {
+                        self.draw();
+                    }
                 }
             }
             if self.shutdown {
