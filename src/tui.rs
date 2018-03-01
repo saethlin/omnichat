@@ -8,7 +8,12 @@ use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
 use termion::color::AnsiValue;
+use termion::cursor::Goto;
+use termion::color::Fg;
+use termion::{color, style};
+
 use std::io::Write;
+use std::iter::FromIterator;
 
 lazy_static! {
     static ref COLORS: Vec<AnsiValue> = {
@@ -282,7 +287,7 @@ impl TUI {
         });
     }
 
-    pub fn add_message(&mut self, message: Message, set_unread: bool) -> Result<(), Error> {
+    pub fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
 
         let server = self.servers
@@ -295,9 +300,10 @@ impl TUI {
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
 
-        channel
-            .messages
-            .push(ChanMessage::new(message.sender, message.contents));
+        channel.messages.push(ChanMessage::new(
+            message.sender.clone(),
+            message.contents.clone(),
+        ));
         if set_unread {
             channel.has_unreads = true;
             server.has_unreads = true;
@@ -316,9 +322,7 @@ impl TUI {
 
     #[allow(unused_must_use)]
     pub fn draw(&mut self) {
-        use termion::cursor::Goto;
-        use termion::color::Fg;
-        use termion::{color, style};
+        self.add_client_message("Full redraw");
 
         let chan_width = self.servers
             .iter()
@@ -326,95 +330,22 @@ impl TUI {
             .max()
             .unwrap() as u16 + 1;
 
-        let out = ::std::io::stdout();
-        let mut lock = out.lock();
         let (width, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-        write!(lock, "{}", termion::clear::All);
+        print!("{}", termion::clear::All);
 
         // Format the message area text first.
         let message_area_formatted =
             format_message_area(&self.message_buffer, (width - chan_width - 1) as usize);
 
         for i in 1..height + 1 {
-            write!(lock, "{}|", Goto(chan_width, i));
+            print!("{}|", Goto(chan_width, i));
         }
 
-        // Draw all the server names across the top
-        write!(lock, "{}", Goto(chan_width + 1, 1)); // Move to the top-right corner
-        let num_servers = self.servers.len();
-        for (s, server) in self.servers.iter_mut().enumerate() {
-            let delim = if s == num_servers - 1 { "" } else { " • " };
-            if s == self.current_server {
-                write!(
-                    lock,
-                    "{}{}{}{}",
-                    style::Bold,
-                    server.name,
-                    style::Reset,
-                    delim
-                );
-                server.has_unreads = false;
-            } else if server.has_unreads {
-                write!(
-                    lock,
-                    "{}{}{}{}",
-                    Fg(color::Red),
-                    server.name,
-                    Fg(color::Reset),
-                    delim
-                );
-            } else {
-                write!(
-                    lock,
-                    "{}{}{}{}",
-                    Fg(color::AnsiValue::rgb(3, 3, 3)),
-                    server.name,
-                    Fg(color::Reset),
-                    delim
-                );
-            }
-        }
+        self.draw_server_names(Some(chan_width));
 
-        use std::iter::FromIterator;
-        // Draw all the channels for the current server down the left side
-        let server = &mut self.servers[self.current_server];
-        for (c, channel) in server.channels.iter_mut().enumerate() {
-            let shortened_name =
-                String::from_iter(channel.name.chars().take((chan_width - 1) as usize));
-            if c == server.current_channel {
-                write!(
-                    lock,
-                    "{}{}{}{}",
-                    Goto(1, c as u16 + 1),
-                    style::Bold,
-                    shortened_name,
-                    style::Reset
-                );
-                // Remove unreads marker from current channel
-                channel.has_unreads = false;
-            } else if channel.has_unreads {
-                write!(
-                    lock,
-                    "{}{}{}{}",
-                    Goto(1, c as u16 + 1),
-                    Fg(color::Red),
-                    shortened_name,
-                    Fg(color::Reset)
-                );
-            } else {
-                let gray = color::AnsiValue::rgb(3, 3, 3);
-                write!(
-                    lock,
-                    "{}{}{}{}",
-                    Goto(1, c as u16 + 1),
-                    Fg(gray),
-                    shortened_name,
-                    Fg(color::Reset)
-                );
-            }
-        }
+        self.draw_channel_names(Some(chan_width));
 
         let message_area_lines = message_area_formatted.lines().count() as u16;
         let message_area_height = if message_area_lines > 1 {
@@ -423,6 +354,9 @@ impl TUI {
             height
         };
 
+        let out = ::std::io::stdout();
+        let mut lock = out.lock();
+        let server = &mut self.servers[self.current_server];
         // Draw all the messages by looping over them in reverse
         let remaining_width = (width - chan_width) as usize;
         let mut row = message_area_height - 1;
@@ -469,6 +403,109 @@ impl TUI {
         }
 
         lock.flush().expect("TUI drawing flush failed");
+    }
+
+    #[allow(unused_must_use)]
+    fn draw_server_names(&mut self, chan_width: Option<u16>) {
+        let out = ::std::io::stdout();
+        let mut lock = out.lock();
+        let chan_width = chan_width.unwrap_or_else(|| {
+            self.servers
+                .iter()
+                .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
+                .max()
+                .unwrap() as u16 + 1
+        });
+        // Draw all the server names across the top
+        write!(lock, "{}", Goto(chan_width + 1, 1)); // Move to the top-right corner
+        let num_servers = self.servers.len();
+        for (s, server) in self.servers.iter_mut().enumerate() {
+            let delim = if s == num_servers - 1 { "" } else { " • " };
+            if s == self.current_server {
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    style::Bold,
+                    server.name,
+                    style::Reset,
+                    delim
+                );
+                server.has_unreads = false;
+            } else if server.has_unreads {
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Fg(color::Red),
+                    server.name,
+                    Fg(color::Reset),
+                    delim
+                );
+            } else {
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Fg(color::AnsiValue::rgb(3, 3, 3)),
+                    server.name,
+                    Fg(color::Reset),
+                    delim
+                );
+            }
+        }
+        lock.flush().unwrap();
+    }
+
+    #[allow(unused_must_use)]
+    fn draw_channel_names(&mut self, chan_width: Option<u16>) {
+        let out = ::std::io::stdout();
+        let mut lock = out.lock();
+        let (_, height) =
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+        let chan_width = chan_width.unwrap_or_else(|| {
+            self.servers
+                .iter()
+                .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
+                .max()
+                .unwrap() as u16 + 1
+        });
+
+        // Draw all the channels for the current server down the left side
+        let server = &mut self.servers[self.current_server];
+        for (c, channel) in server.channels.iter_mut().enumerate().take(height as usize) {
+            let shortened_name =
+                String::from_iter(channel.name.chars().take((chan_width - 1) as usize));
+            if c == server.current_channel {
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    style::Bold,
+                    shortened_name,
+                    style::Reset
+                );
+                // Remove unreads marker from current channel
+                channel.has_unreads = false;
+            } else if channel.has_unreads {
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    Fg(color::Red),
+                    shortened_name,
+                    Fg(color::Reset)
+                );
+            } else {
+                let gray = color::AnsiValue::rgb(3, 3, 3);
+                write!(
+                    lock,
+                    "{}{}{}{}",
+                    Goto(1, c as u16 + 1),
+                    Fg(gray),
+                    shortened_name,
+                    Fg(color::Reset)
+                );
+            }
+        }
+        lock.flush().unwrap();
     }
 
     fn handle_input(&mut self, event: &termion::event::Event) {
@@ -524,18 +561,24 @@ impl TUI {
                 Event::Input(event) => {
                     self.handle_input(&event);
                 }
+                // These optimizations could be substantially improved
+                // Technically we only need to redraw the one server recieving the event
+                // I'm a bit uncomfortable doing that though because it spreads out the logic
+                // a lot and may make refactoring/recoloring this too difficult
                 Event::Message(message) => {
-                    let do_draw =
-                        (message.server == server_name) && (message.channel == channel_name);
-                    if let Err(e) = self.add_message(message, true) {
+                    if let Err(e) = self.add_message(&message, true) {
                         self.add_client_message(&e.to_string());
                     }
-                    if do_draw {
+                    if message.server == server_name && message.channel == channel_name {
                         self.draw();
+                    } else if message.server == server_name {
+                        self.draw_channel_names(None);
+                    } else {
+                        self.draw_server_names(None);
                     }
                 }
                 Event::HistoryMessage(message) => {
-                    if let Err(e) = self.add_message(message, false) {
+                    if let Err(e) = self.add_message(&message, false) {
                         self.add_client_message(&e.to_string());
                     }
                 }
@@ -546,11 +589,11 @@ impl TUI {
                     }
                 }
                 Event::Mention(message) => {
-                    if let Err(e) = self.add_message(message.clone(), true) {
+                    if let Err(e) = self.add_message(&message, true) {
                         self.add_client_message(&e.to_string());
                     } else {
                         self.add_message(
-                            Message {
+                            &Message {
                                 sender: message.sender,
                                 contents: message.contents,
                                 server: "Client".to_owned(),
