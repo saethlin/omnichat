@@ -86,94 +86,17 @@ impl ChanMessage {
         }
     }
 
+    // TODO: Might be easy to cut down the number of allocations here
     pub fn format(&mut self, width: usize) {
-        let mut formatted = String::with_capacity(self.raw.len());
-        // The first line is special because we need to leave space for the sender, plus a ": "
-        let mut current_length = self.sender.chars().count() + 2;
-        for line in self.raw.lines() {
-            for next_word in line.split(' ').filter(|word| word.len() > 0) {
-                let next_word_len = next_word.chars().count();
-                // If the word runs over the end of the current line, start a new one
-                if current_length + next_word_len > width {
-                    if let Some(' ') = formatted.chars().last() {
-                        formatted.pop();
-                    }
-                    formatted.push_str("\n    ");
-                    current_length = 4;
-                }
-                // If this word needs to be split (it's a url or something)
-                if next_word_len > (width - 4) {
-                    for c in next_word.chars() {
-                        formatted.push(c);
-                        current_length += 1;
-                        if current_length == width {
-                            formatted.push_str("\n    ");
-                            current_length = 4;
-                        }
-                    }
-                } else {
-                    // Everything is fine
-                    formatted.extend(next_word.chars());
-                    formatted.push(' ');
-                    current_length += next_word_len + 1;
-                }
-            }
-            if let Some(' ') = formatted.chars().last() {
-                formatted.pop();
-            }
-            formatted.push_str("\n    ");
-            current_length = 4;
-        }
-        self.contents = formatted.trim_right().to_owned();
+        let indent_str = "    ";
+        let tmp = format!("{}: {}", self.sender, self.raw);
+        let lines = ::textwrap::fill(&tmp, width - indent_str.chars().count());
+        let indented = ::textwrap::indent(&lines, indent_str);
+        self.contents = indented
+            .chars()
+            .skip(indent_str.chars().count() + 2 + self.sender.chars().count())
+            .collect();
     }
-}
-
-fn format_message_area(raw: &str, width: usize) -> String {
-    let mut formatted = String::with_capacity(raw.len());
-    let mut current_length = 0;
-    let ending_spaces: String = raw.chars()
-        .rev()
-        .take_while(|c| c.is_whitespace())
-        .collect();
-    for line in raw.lines() {
-        for next_word in line.split(' ').filter(|word| word.len() > 0) {
-            let next_word_len = next_word.chars().count();
-            // If the word runs over the end of the current line, start a new one
-            if current_length + next_word_len > width {
-                if let Some(' ') = formatted.chars().last() {
-                    formatted.pop();
-                }
-                formatted.push_str("\n");
-                current_length = 0;
-            }
-            // If this word needs to be split (it's a url or something)
-            if next_word_len > (width - 4) {
-                for c in next_word.chars() {
-                    formatted.push(c);
-                    current_length += 1;
-                    if current_length == width {
-                        formatted.push_str("\n");
-                        current_length = 0;
-                    }
-                }
-            } else {
-                // Everything is fine
-                formatted.extend(next_word.chars());
-                formatted.push(' ');
-                current_length += next_word_len + 1;
-            }
-        }
-        if let Some(' ') = formatted.chars().last() {
-            formatted.pop();
-        }
-        formatted.push_str("\n");
-        current_length = 0;
-    }
-    if let Some('\n') = formatted.chars().last() {
-        formatted.pop();
-    }
-    formatted.extend(ending_spaces.chars().rev());
-    formatted
 }
 
 impl TUI {
@@ -337,7 +260,7 @@ impl TUI {
 
         // Format the message area text first.
         let message_area_formatted =
-            format_message_area(&self.message_buffer, (width - chan_width - 1) as usize);
+            ::textwrap::fill(&self.message_buffer, (width - chan_width - 1) as usize);
 
         for i in 1..height + 1 {
             print!("{}|", Goto(chan_width, i));

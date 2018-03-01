@@ -8,6 +8,7 @@ extern crate serde_derive;
 extern crate serde_json;
 extern crate slack_api;
 extern crate termion;
+extern crate textwrap;
 extern crate toml;
 extern crate websocket;
 
