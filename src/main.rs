@@ -35,15 +35,27 @@ fn main() {
     use std::thread;
     use termion::raw::IntoRawMode;
 
-    let homedir = std::env::var("HOME").expect("You don't even have a $HOME? :'(");
+    let homedir = std::env::var("HOME").unwrap_or_else(|_| {
+        println!("You don't even have a $HOME? :'(");
+        std::process::exit(1)
+    });
     let config_path = PathBuf::from(homedir).join(".omnichat.toml");
     let mut contents = String::new();
-    File::open(config_path)
-        .expect("No config file found")
+    File::open(&config_path)
+        .unwrap_or_else(|_| {
+            println!("No config file found");
+            std::process::exit(1)
+        })
         .read_to_string(&mut contents)
-        .expect("Couldn't read config file");
+        .unwrap_or_else(|_| {
+            println!("Unable to read config file");
+            std::process::exit(1)
+        });
 
-    let config: Config = toml::from_str(&contents).expect("Config is not valid TOML");
+    let config: Config = toml::from_str(&contents).unwrap_or_else(|_| {
+        println!("Config file {:?} is not valid TOML", &config_path);
+        std::process::exit(1)
+    });
 
     let _screenguard = termion::screen::AlternateScreen::from(std::io::stdout());
     let _rawguard = std::io::stdout().into_raw_mode().unwrap();
