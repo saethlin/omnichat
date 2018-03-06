@@ -70,16 +70,16 @@ impl DiscordConn {
         // Load message history
         let t_channels = channels.clone();
         for (id, name) in t_channels.into_iter() {
-            let t_dis = handle.clone();
-            let t_sender = sender.clone();
-            let serv_name = server_name.clone();
+            let handle = handle.clone();
+            let sender = sender.clone();
+            let server_name = server_name.clone();
             thread::spawn(move || {
-                let mut messages = t_dis
+                let mut messages = handle
                     .read()
                     .unwrap()
                     .get_messages(id, discord::GetMessages::MostRecent, None)
                     .unwrap_or_else(|e| {
-                        t_sender
+                        sender
                             .send(Event::Error(format!("{}", e)))
                             .expect("Sender died");
                         Vec::new()
@@ -89,59 +89,68 @@ impl DiscordConn {
                 messages.sort_by_key(|m| m.timestamp.timestamp());
 
                 for m in messages.into_iter() {
-                    t_sender
+                    sender
                         .send(Event::HistoryMessage(Message {
-                            server: serv_name.clone(),
+                            server: server_name.clone(),
                             channel: name.clone(),
                             sender: m.author.name,
                             contents: m.content,
                         }))
                         .expect("Sender died");
                 }
-                t_sender
+                sender
                     .send(Event::HistoryLoaded {
-                        server: serv_name.clone(),
+                        server: server_name.clone(),
                         channel: name.clone(),
                     })
                     .expect("sender died");;
             });
         }
 
-        let h_sender = sender.clone();
-        let serv_name = server_name.clone();
-        let h_channels = channels.clone();
-        let h_handle = handle.clone();
-        // Launch a thread to handle incoming messages
-        thread::spawn(move || {
-            // Grab data to identify mentions of the logged in user
-            // TODO: Why can't I ? on the return of .read()
-            let current_user = h_handle.read().unwrap().get_current_user().unwrap();
-            let mut my_mention = format!("{}", current_user.id.mention());
-            my_mention.insert(2, '!');
+        {
+            let sender = sender.clone();
+            let server_name = server_name.clone();
+            let channels = channels.clone();
+            let handle = handle.clone();
+            // Launch a thread to handle incoming messages
+            thread::spawn(move || {
+                // Grab data to identify mentions of the logged in user
+                let current_user = handle.read().unwrap().get_current_user().unwrap();
+                let mut my_mention = format!("{}", current_user.id.mention());
+                my_mention.insert(2, '!');
 
-            while let Ok(ev) = connection.recv_event() {
-                match ev {
-                    discord::model::Event::MessageCreate(message) => {
-                        if h_channels.contains_id(&message.channel_id) {
-                            let content = message.content.clone();
-                            let event = Message {
-                                server: serv_name.clone(),
-                                channel: h_channels.get_human(&message.channel_id).unwrap().clone(),
-                                contents: message.content,
-                                sender: message.author.name,
-                            };
+                while let Ok(ev) = connection.recv_event() {
+                    match ev {
+                        discord::model::Event::MessageCreate(message) => {
+                            if channels.contains_id(&message.channel_id) {
+                                let content = message.content.clone();
+                                let event = Message {
+                                    server: server_name.clone(),
+                                    channel: channels
+                                        .get_human(&message.channel_id).map(|c| c.clone())
+                                        .unwrap_or_else(|| {
+                                            sender.send(Event::Error(format!(
+                                                "Unknown discord channel: {}",
+                                                &message.channel_id
+                                            ))).unwrap();
+                                            "unknown_channel".to_owned()
+                                        }),
+                                    contents: message.content,
+                                    sender: message.author.name,
+                                };
 
-                            if content.contains(&my_mention) {
-                                h_sender.send(Event::Mention(event)).expect("Sender died");
-                            } else {
-                                h_sender.send(Event::Message(event)).expect("Sender died");
+                                if content.contains(&my_mention) {
+                                    sender.send(Event::Mention(event)).expect("Sender died");
+                                } else {
+                                    sender.send(Event::Message(event)).expect("Sender died");
+                                }
                             }
                         }
+                        _ => {}
                     }
-                    _ => {}
                 }
-            }
-        });
+            });
+        }
 
         return Ok(Box::new(DiscordConn {
             discord: handle.clone(),
@@ -156,7 +165,7 @@ impl DiscordConn {
 impl Conn for DiscordConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let dis = self.discord.write().unwrap();
-        if let Err(_) = dis.send_message(
+        if dis.send_message(
             self.channels
                 .get_id(&String::from(channel))
                 .unwrap()
@@ -164,7 +173,8 @@ impl Conn for DiscordConn {
             contents,
             "",
             false,
-        ) {
+        ).is_err()
+        {
             self.sender
                 .send(Event::Error("Message failed to send".to_owned()))
                 .expect("Sender died");
