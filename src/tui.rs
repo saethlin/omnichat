@@ -7,9 +7,8 @@ use conn::{Conn, Event, Message};
 use termion::input::TermRead;
 use termion::event::Event::*;
 use termion::event::Key::*;
-use termion::color::AnsiValue;
+use termion::color::{AnsiValue, Fg};
 use termion::cursor::Goto;
-use termion::color::Fg;
 use termion::{color, style};
 
 use std::io::Write;
@@ -53,8 +52,6 @@ pub struct TUI {
     shutdown: bool,
     events: Receiver<Event>,
     sender: Sender<Event>,
-    previous_width: u16,
-    previous_height: u16,
 }
 
 pub struct Server {
@@ -86,16 +83,39 @@ impl ChanMessage {
         }
     }
 
-    // TODO: Might be easy to cut down the number of allocations here
     pub fn format(&mut self, width: usize) {
+        self.contents.clear();
         let indent_str = "    ";
-        let tmp = format!("{}: {}", self.sender, self.raw);
-        let lines = ::textwrap::fill(&tmp, width - indent_str.chars().count());
-        let indented = ::textwrap::indent(&lines, indent_str);
-        self.contents = indented
-            .chars()
-            .skip(indent_str.chars().count() + 2 + self.sender.chars().count())
-            .collect();
+        let sender_spacer = " ".repeat(self.sender.chars().count() + 2);
+        let wrapper = ::textwrap::Wrapper::new(width)
+            .subsequent_indent(indent_str)
+            .initial_indent(indent_str)
+            .break_words(true);
+        let first_line_wrapper = ::textwrap::Wrapper::new(width)
+            .subsequent_indent(indent_str)
+            .initial_indent(&sender_spacer)
+            .break_words(true);
+
+        for (l, line) in self.raw.lines().enumerate() {
+            if l == 0 {
+                for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
+                {
+                    if l == 0 {
+                        self.contents
+                            .extend(wrapped_line.chars().skip_while(|c| c.is_whitespace()));
+                    } else {
+                        self.contents.extend(wrapped_line.chars());
+                    }
+                    self.contents.push('\n');
+                }
+            } else {
+                for wrapped_line in wrapper.wrap_iter(&line) {
+                    self.contents.extend(wrapped_line.chars());
+                    self.contents.push('\n');
+                }
+            }
+        }
+        self.contents.pop();
     }
 }
 
@@ -118,8 +138,6 @@ impl TUI {
             shutdown: false,
             events: reciever,
             sender: sender,
-            previous_width: 0,
-            previous_height: 0,
         };
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender).unwrap());
@@ -245,8 +263,6 @@ impl TUI {
 
     #[allow(unused_must_use)]
     pub fn draw(&mut self) {
-        self.add_client_message("Full redraw");
-
         let chan_width = self.servers
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
@@ -288,9 +304,7 @@ impl TUI {
             .iter_mut()
             .rev()
         {
-            if self.previous_width != width {
-                message.format(remaining_width);
-            }
+            message.format(remaining_width);
             for (l, line) in message.contents.lines().rev().enumerate() {
                 let num_lines = message.contents.lines().count();
                 write!(lock, "{}", Goto(chan_width + 1, row));
@@ -325,7 +339,7 @@ impl TUI {
             write!(lock, "{}", Goto(chan_width + 1, height));
         }
 
-        lock.flush().expect("TUI drawing flush failed");
+        lock.flush().unwrap();
     }
 
     #[allow(unused_must_use)]
