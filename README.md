@@ -9,7 +9,7 @@ I really dislike how much my chromebook lags while trying to use Slack, Discord,
 ## Platforms
 - [ ] Slack
   - [x] Send/Recieve basic text messages
-  - [ ] Send/Recieve channel and user mentions
+  - [x] Send/Recieve channel and user mentions
   - [ ] Commands
 
 - [ ] Discord
