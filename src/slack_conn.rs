@@ -8,16 +8,6 @@ use failure::Error;
 use websocket;
 use serde_json;
 
-//use tokio_core::reactor::Core;
-/*
-use futures::future::Future;
-use futures::sink::Sink;
-use futures::stream::Stream;
-use futures::sync::mpsc;
-use websocket::result::WebSocketError;
-use websocket::{ClientBuilder, OwnedMessage};
-use tokio_core::reactor::Handle;
-*/
 #[derive(Clone)]
 struct Handler {
     channels: BiMap<String, String>,
@@ -59,6 +49,12 @@ impl Handler {
             None
         }
     }
+
+    /*
+    pub fn to_slack(&self, message: &str) -> Message {
+
+    }
+    */
 }
 
 pub struct SlackConn {
@@ -123,6 +119,18 @@ impl SlackConn {
             channel_ids.push(channel.id.clone().ok_or(SlackError)?);
         }
 
+        // Slack private channels are actually groups
+        for group in response
+            .groups
+            .ok_or(SlackError)?
+            .iter()
+            .filter(|g| !g.is_archived.unwrap())
+            .filter(|g| !g.is_mpim.unwrap())
+        {
+            channel_names.push(group.name.clone().ok_or(SlackError)?);
+            channel_ids.push(group.id.clone().ok_or(SlackError)?);
+        }
+
         let channels = BiMap::new(BiMapBuilder {
             human: channel_names.clone(),
             id: channel_ids.clone(),
@@ -148,42 +156,6 @@ impl SlackConn {
         };
 
         let thread_handler = handler.clone();
-
-        /*
-        use slack_api::Message::Standard;
-        let runner = ClientBuilder::new(&url)
-            .unwrap()
-            .add_protocol("rust-websocket")
-            .async_connect_secure(None, &handle)
-            .and_then(|(duplex, _)| {
-                let (sink, stream) = duplex.split();
-                stream.filter_map(|message| {
-                    match message {
-                        OwnedMessage::Text(t) => {
-                            if let Ok(Standard(slackmessage)) = serde_json::from_str::<slack_api::Message>(&t) {
-                                if let Some(omnimessage) = thread_handler.to_omni(slackmessage) {
-                                    thread_sender
-                                        .send(Event::Message(omnimessage))
-                                        .expect("Sender died");
-                                }
-                            }
-                            None
-                        }
-                        // Close when we're told to
-                        OwnedMessage::Close(e) => Some(OwnedMessage::Close(e)),
-                        // Acknowledge Ping messages to keep the connection alive
-                        OwnedMessage::Ping(d) => Some(OwnedMessage::Pong(d)),
-                        _ => None,
-                    }
-                })
-			    // merges with stdin
-                //.select(stdin_ch.map_err(|_| WebSocketError::NoDataAvailable))
-			    .forward(sink)
-            })
-            .map(|_| ()).map_err(|_| ())
-        ;
-        handle.spawn(runner);
-        */
 
         // Spin off a thread that will feed message events back to the TUI
         thread::spawn(move || {
@@ -228,6 +200,35 @@ impl SlackConn {
                 req.channel = &id;
                 let response = history(&client, &token, &req);
                 match response {
+                    // This is a disgusting hack to handle
+                    Err(slack_api::channels::HistoryError::ChannelNotFound) => {
+                        let mut req = slack_api::groups::HistoryRequest::default();
+                        req.channel = &id;
+                        let response = slack_api::groups::history(&client, &token, &req);
+                        match response {
+                            Ok(response) => {
+                                for message in response.messages.unwrap().iter().rev().cloned() {
+                                    if let Standard(mut slackmessage) = message {
+                                        slackmessage.channel = Some(id.clone());
+                                        if let Some(omnimessage) = handler.to_omni(slackmessage) {
+                                            sender
+                                                .send(Event::HistoryMessage(omnimessage))
+                                                .expect("Sender died");
+                                        }
+                                    }
+                                }
+                                sender
+                                    .send(Event::HistoryLoaded {
+                                        server: server_name,
+                                        channel: channel_name,
+                                    })
+                                    .expect("Sender died");
+                            }
+                            Err(e) => {
+                                sender.send(Event::Error(format!("{:?}", e))).unwrap();
+                            }
+                        }
+                    }
                     Err(e) => {
                         sender.send(Event::Error(format!("{:?}", e))).unwrap();
                     }
