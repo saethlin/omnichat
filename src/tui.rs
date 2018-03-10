@@ -274,10 +274,6 @@ impl TUI {
 
         print!("{}", termion::clear::All);
 
-        // Format the message area text first.
-        let message_area_formatted =
-            ::textwrap::fill(&self.message_buffer, (width - chan_width - 1) as usize);
-
         for i in 1..height + 1 {
             print!("{}|", Goto(chan_width, i));
         }
@@ -285,6 +281,10 @@ impl TUI {
         self.draw_server_names(Some(chan_width));
 
         self.draw_channel_names(Some(chan_width));
+
+        // Format the message area text first.
+        let message_area_formatted =
+            ::textwrap::fill(&self.message_buffer, (width - chan_width - 1) as usize);
 
         let message_area_lines = message_area_formatted.lines().count() as u16;
         let message_area_height = if message_area_lines > 1 {
@@ -388,6 +388,44 @@ impl TUI {
                 );
             }
         }
+        lock.flush().unwrap();
+    }
+
+    #[allow(unused_must_use)]
+    fn draw_message_area(&mut self, chan_width: Option<u16>) {
+        let out = ::std::io::stdout();
+        let mut lock = out.lock();
+        let (width, height) =
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+        let chan_width = chan_width.unwrap_or_else(|| {
+            self.servers
+                .iter()
+                .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
+                .max()
+                .unwrap() as u16 + 1
+        });
+
+        let message_area_formatted =
+            ::textwrap::fill(&self.message_buffer, (width - chan_width - 1) as usize);
+        let message_area_lines = message_area_formatted.lines().count() as u16;
+        let message_area_height = if message_area_lines > 1 {
+            height - message_area_lines + 1
+        } else {
+            height
+        };
+
+        for (l, line) in message_area_formatted.lines().enumerate() {
+            write!(
+                lock,
+                "{}{}",
+                Goto(chan_width + 1, message_area_height + l as u16),
+                line
+            );
+        }
+        if self.message_buffer.is_empty() {
+            write!(lock, "{}", Goto(chan_width + 1, height));
+        }
+
         lock.flush().unwrap();
     }
 
@@ -510,8 +548,10 @@ impl TUI {
                         self.draw();
                     } else if message.server == server_name {
                         self.draw_channel_names(None);
+                        self.draw_message_area(None);
                     } else {
                         self.draw_server_names(None);
+                        self.draw_message_area(None);
                     }
                 }
                 Event::HistoryMessage(message) => {
