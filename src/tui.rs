@@ -211,6 +211,7 @@ impl TUI {
         self.servers[0].channels[0]
             .messages
             .push(ChanMessage::new(String::from("Client"), message.to_owned()));
+        self.servers[0].has_unreads = true;
         self.servers[0].channels[0].has_unreads = true;
     }
 
@@ -219,6 +220,7 @@ impl TUI {
             format!("{}@{}:{}", message.sender, message.channel, message.server),
             message.contents,
         ));
+        self.servers[0].has_unreads = true;
         self.servers[0].channels[1].has_unreads = true;
     }
 
@@ -277,6 +279,7 @@ impl TUI {
             .connection
             .send_channel_message(current_channel_name, &self.message_buffer);
         self.message_buffer.clear();
+        self.message_area_formatted.clear();
     }
 
     #[allow(unused_must_use)]

@@ -65,6 +65,8 @@ impl Handler {
 pub struct SlackConn {
     token: String,
     team_name: String,
+    my_name: String,
+    my_id: String,
     users: BiMap<String, String>,
     channels: BiMap<String, String>,
     channel_names: Vec<String>,
@@ -163,10 +165,14 @@ impl SlackConn {
 
         let thread_handler = handler.clone();
 
+        let slf = response.slf.clone().unwrap();
         // Spin off a thread that will feed message events back to the TUI
         thread::spawn(move || {
             use websocket::OwnedMessage::{Ping, Pong, Text};
             use slack_api::Message::Standard;
+            let my_name = slf.name.clone().unwrap();
+            let my_id = slf.name.clone().unwrap();
+            let my_mention = format!("<@{}>", my_id);
             loop {
                 let message = websocket.recv_message();
                 if let Ok(Text(message)) = message {
@@ -175,6 +181,14 @@ impl SlackConn {
                         serde_json::from_str::<slack_api::Message>(&message)
                     {
                         if let Some(omnimessage) = thread_handler.to_omni(slackmessage) {
+                            if omnimessage.contents.contains(&my_mention)
+                                || omnimessage.contents.contains(&my_name)
+                            {
+                                thread_sender
+                                    .send(Event::Mention(omnimessage.clone()))
+                                    .expect("Sender died")
+                            }
+
                             thread_sender
                                 .send(Event::Message(omnimessage))
                                 .expect("Sender died")
@@ -260,6 +274,8 @@ impl SlackConn {
             });
         }
 
+        let slf = response.slf.unwrap();
+
         Ok(Box::new(SlackConn {
             token: token,
             client: client,
@@ -268,6 +284,8 @@ impl SlackConn {
             channel_names: channel_names,
             team_name: team_name,
             last_message_timestamp: "".to_owned(),
+            my_name: slf.name.clone().unwrap(),
+            my_id: slf.id.clone().unwrap(),
             sender: sender,
             handler: handler,
         }))
