@@ -40,7 +40,7 @@ fn djb2(input: &str) -> u64 {
 }
 
 #[derive(Debug, Fail)]
-pub enum TuiError {
+enum TuiError {
     #[fail(display = "Got a message from an unknown channel")] UnknownChannel,
     #[fail(display = "Got a message from an unknown server")] UnknownServer,
 }
@@ -48,7 +48,7 @@ pub enum TuiError {
 pub struct TUI {
     servers: Vec<Server>,
     current_server: usize,
-    pub message_buffer: String,
+    message_buffer: String,
     message_area_formatted: String,
     longest_channel_name: u16,
     shutdown: bool,
@@ -56,7 +56,7 @@ pub struct TUI {
     sender: Sender<Event>,
 }
 
-pub struct Server {
+struct Server {
     channels: Vec<Channel>,
     connection: Box<Conn>,
     name: String,
@@ -64,28 +64,35 @@ pub struct Server {
     has_unreads: bool,
 }
 
-pub struct Channel {
+struct Channel {
     messages: Vec<ChanMessage>,
     name: String,
     pub has_unreads: bool,
 }
 
 struct ChanMessage {
+    formatted_width: Option<usize>,
     raw: String,
     pub contents: String,
     pub sender: String,
 }
 
 impl ChanMessage {
-    pub fn new(sender: String, contents: String) -> Self {
+    fn new(sender: String, contents: String) -> Self {
         ChanMessage {
+            formatted_width: None,
             raw: contents,
             contents: String::new(),
             sender: sender,
         }
     }
 
-    pub fn format(&mut self, width: usize) {
+    fn format(&mut self, width: usize) {
+        if Some(width) == self.formatted_width {
+            return;
+        }
+
+        self.formatted_width = Some(width);
         self.contents.clear();
         let indent_str = "    ";
         let sender_spacer = " ".repeat(self.sender.chars().count() + 2);
@@ -117,6 +124,7 @@ impl ChanMessage {
                 }
             }
         }
+        // Clean trailing whitespace from messages
         while self.contents.ends_with(|p: char| p.is_whitespace()) {
             self.contents.pop();
         }
@@ -154,14 +162,14 @@ impl TUI {
         self.sender.clone()
     }
 
-    pub fn next_server(&mut self) {
+    fn next_server(&mut self) {
         self.current_server += 1;
         if self.current_server >= self.servers.len() {
             self.current_server = 0;
         }
     }
 
-    pub fn previous_server(&mut self) {
+    fn previous_server(&mut self) {
         if self.current_server > 0 {
             self.current_server -= 1;
         } else {
@@ -169,7 +177,7 @@ impl TUI {
         }
     }
 
-    pub fn next_channel_unread(&mut self) {
+    fn next_channel_unread(&mut self) {
         let server = &mut self.servers[self.current_server];
         for i in 0..server.channels.len() {
             let check_index = (server.current_channel + i) % server.channels.len();
@@ -180,7 +188,7 @@ impl TUI {
         }
     }
 
-    pub fn previous_channel_unread(&mut self) {
+    fn previous_channel_unread(&mut self) {
         let server = &mut self.servers[self.current_server];
         for i in 0..server.channels.len() {
             let check_index =
@@ -192,7 +200,7 @@ impl TUI {
         }
     }
 
-    pub fn next_channel(&mut self) {
+    fn next_channel(&mut self) {
         let server = &mut self.servers[self.current_server];
         server.current_channel += 1;
         if server.current_channel >= server.channels.len() {
@@ -200,7 +208,7 @@ impl TUI {
         }
     }
 
-    pub fn previous_channel(&mut self) {
+    fn previous_channel(&mut self) {
         let server = &mut self.servers[self.current_server];
         if server.current_channel > 0 {
             server.current_channel -= 1;
@@ -209,7 +217,7 @@ impl TUI {
         }
     }
 
-    pub fn add_client_message(&mut self, message: &str) {
+    fn add_client_message(&mut self, message: &str) {
         self.servers[0].channels[0]
             .messages
             .push(ChanMessage::new(String::from("Client"), message.to_owned()));
@@ -217,7 +225,7 @@ impl TUI {
         self.servers[0].channels[0].has_unreads = true;
     }
 
-    pub fn add_mention_message(&mut self, message: Message) {
+    fn add_mention_message(&mut self, message: Message) {
         self.servers[0].channels[1].messages.push(ChanMessage::new(
             format!("{}@{}:{}", message.sender, message.channel, message.server),
             message.contents,
@@ -229,6 +237,7 @@ impl TUI {
     pub fn add_server(&mut self, connection: Box<Conn>) {
         let mut channels: Vec<String> = connection.channels().into_iter().cloned().collect();
         channels.sort();
+
         self.servers.push(Server {
             channels: channels
                 .iter()
@@ -243,6 +252,7 @@ impl TUI {
             current_channel: 0,
             has_unreads: false,
         });
+
         self.longest_channel_name = self.servers
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
@@ -250,7 +260,7 @@ impl TUI {
             .unwrap() as u16 + 1;
     }
 
-    pub fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
+    fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
 
         let server = self.servers
@@ -274,7 +284,7 @@ impl TUI {
         Ok(())
     }
 
-    pub fn send_message(&mut self) {
+    fn send_message(&mut self) {
         let server = &mut self.servers[self.current_server];
         let current_channel_name = &server.channels[server.current_channel].name;
         server
@@ -284,8 +294,20 @@ impl TUI {
         self.message_area_formatted.clear();
     }
 
+    fn message_area_height(&self) -> u16 {
+        let (_, height) =
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+
+        let message_area_lines = self.message_area_formatted.lines().count() as u16;
+        if message_area_lines > 1 {
+            height - message_area_lines + 1
+        } else {
+            height
+        }
+    }
+
     #[allow(unused_must_use)]
-    pub fn draw(&mut self) {
+    fn draw(&mut self) {
         let chan_width = self.longest_channel_name + 1;
 
         let (width, height) =
@@ -300,29 +322,26 @@ impl TUI {
         self.draw_server_names();
         self.draw_channel_names();
 
-        // Format the message area text first.
-        let message_area_formatted =
-            ::textwrap::fill(&self.message_buffer, (width - chan_width - 1) as usize);
+        // Reformat all the messages, inside their own block because NLLs
+        {
+            let remaining_width = (width - chan_width) as usize;
+            let server = &mut self.servers[self.current_server];
+            for message in server.channels[server.current_channel].messages.iter_mut() {
+                message.format(remaining_width);
+            }
+        }
 
-        let message_area_lines = message_area_formatted.lines().count() as u16;
-        let message_area_height = if message_area_lines > 1 {
-            height - message_area_lines + 1
-        } else {
-            height
-        };
-
+        let message_area_height = self.message_area_height();
         let out = ::std::io::stdout();
         let mut lock = out.lock();
-        let server = &mut self.servers[self.current_server];
+        let server = &self.servers[self.current_server];
         // Draw all the messages by looping over them in reverse
-        let remaining_width = (width - chan_width) as usize;
         let mut row = message_area_height - 1;
         'outer: for message in server.channels[server.current_channel]
             .messages
-            .iter_mut()
+            .iter()
             .rev()
         {
-            message.format(remaining_width);
             for (l, line) in message.contents.lines().rev().enumerate() {
                 let num_lines = message.contents.lines().count();
                 write!(lock, "{}", Goto(chan_width + 1, row));
@@ -344,20 +363,7 @@ impl TUI {
                 }
             }
         }
-
-        for (l, line) in message_area_formatted.lines().enumerate() {
-            write!(
-                lock,
-                "{}{}",
-                Goto(chan_width + 1, message_area_height + l as u16),
-                line
-            );
-        }
-        if self.message_buffer.is_empty() {
-            write!(lock, "{}", Goto(chan_width + 1, height));
-        }
-
-        lock.flush().unwrap();
+        self.draw_message_area();
     }
 
     #[allow(unused_must_use)]
@@ -404,19 +410,12 @@ impl TUI {
     }
 
     #[allow(unused_must_use)]
-    fn draw_message_area(&mut self) {
+    fn draw_message_area(&self) {
         let out = ::std::io::stdout();
         let mut lock = out.lock();
-        let (_, height) =
-            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
         let chan_width = self.longest_channel_name + 1;
 
-        let message_area_lines = self.message_area_formatted.lines().count() as u16;
-        let message_area_height = if message_area_lines > 1 {
-            height - message_area_lines + 1
-        } else {
-            height
-        };
+        let message_area_height = self.message_area_height();
 
         for (l, line) in self.message_area_formatted.lines().enumerate() {
             write!(
@@ -427,6 +426,8 @@ impl TUI {
             );
         }
         if self.message_buffer.is_empty() {
+            let (_, height) =
+                termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
             write!(lock, "{}", Goto(chan_width + 1, height));
         }
 
@@ -491,6 +492,11 @@ impl TUI {
                 //TODO: It would be great to apply the same anti-flicker optimization,
                 //but properly clearing the message area is tricky
                 self.message_buffer.pop();
+                let (width, _) =
+                    termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+                let chan_width = self.longest_channel_name;
+                self.message_area_formatted =
+                    ::textwrap::fill(&self.message_buffer, (width - chan_width) as usize);
                 self.draw();
             }
             Key(Ctrl('c')) => self.shutdown = true,
@@ -536,7 +542,6 @@ impl TUI {
             }
             _ => {}
         }
-        //self.draw();
     }
 
     pub fn run(mut self) {
@@ -607,7 +612,6 @@ impl TUI {
                 }
             }
             if self.shutdown {
-                print!("\n\r");
                 break;
             }
         }

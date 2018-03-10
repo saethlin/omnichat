@@ -27,6 +27,10 @@ I really dislike how much my chromebook lags while trying to use Slack, Discord,
   - [ ] Send/Recieve channel and user mentions
   - [ ] Commands
 
+- [ ] IRC
+  - [ ] Send/Reieve basic text messages
+  - [ ] Send/Recieve channel and user mentions
+  - [ ] Commands
 
 ## TUI
 - [x] Basic layout
@@ -34,4 +38,7 @@ I really dislike how much my chromebook lags while trying to use Slack, Discord,
 - [x] Draw messages in a sane way
 - [x] Redraw only the message area when typing (currently causes flickering)
 - [x] Colored usernames
-- [ ] Multi-line message editing
+- [x] Multi-line message display
+- [ ] Scrolling channel and server names
+- [ ] Better keybindings that enable more complex message editing
+
