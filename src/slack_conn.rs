@@ -50,11 +50,16 @@ impl Handler {
         }
     }
 
-    /*
-    pub fn to_slack(&self, message: &str) -> Message {
+    pub fn to_slack(&self, mut text: String) -> String {
+        for &(ref code, ref replacement) in &self.mention_patterns {
+            text = text.replace(replacement, code);
+        }
 
+        for &(ref code, ref replacement) in &self.channel_patterns {
+            text = text.replace(replacement, code);
+        }
+        text
     }
-    */
 }
 
 pub struct SlackConn {
@@ -65,6 +70,7 @@ pub struct SlackConn {
     channel_names: Vec<String>,
     last_message_timestamp: String,
     client: slack_api::requests::Client,
+    handler: Handler,
     sender: Sender<Event>,
 }
 
@@ -200,7 +206,7 @@ impl SlackConn {
                 req.channel = &id;
                 let response = history(&client, &token, &req);
                 match response {
-                    // This is a disgusting hack to handle
+                    // This is a disgusting hack to handle how slack treats private channels as groups
                     Err(slack_api::channels::HistoryError::ChannelNotFound) => {
                         let mut req = slack_api::groups::HistoryRequest::default();
                         req.channel = &id;
@@ -263,6 +269,7 @@ impl SlackConn {
             team_name: team_name,
             last_message_timestamp: "".to_owned(),
             sender: sender,
+            handler: handler,
         }))
     }
 }
@@ -382,10 +389,11 @@ impl Conn for SlackConn {
     }
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
+        let contents = self.handler.to_slack(contents.to_string());
         use slack_api::chat::post_message;
         let mut request = slack_api::chat::PostMessageRequest::default();
         request.channel = channel;
-        request.text = contents;
+        request.text = &contents;
         request.as_user = Some(true);
         if post_message(&self.client, &self.token, &request).is_err() {
             if let Err(e) = post_message(&self.client, &self.token, &request) {
