@@ -1,5 +1,4 @@
 TUI:
-Mentions tab
 Horizontal scrolling for channel names
 
 Slack-specific:
@@ -7,7 +6,6 @@ Fix hack for slack-rs-api slackbot messages
 Add handling for thread update thingers
 >, <, and & rendering
 Reactions
-#no-grills isn't in the known channels
 
 Discord:
 Handle permissions overrides

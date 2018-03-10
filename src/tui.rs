@@ -117,7 +117,9 @@ impl ChanMessage {
                 }
             }
         }
-        self.contents.pop();
+        while self.contents.ends_with(|p: char| p.is_whitespace()) {
+            self.contents.pop();
+        }
     }
 }
 
