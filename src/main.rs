@@ -7,6 +7,7 @@ extern crate lazy_static;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate slack_api;
+extern crate spmc;
 extern crate termion;
 extern crate textwrap;
 extern crate toml;
@@ -21,6 +22,7 @@ mod discord_conn;
 
 #[derive(Debug, Deserialize)]
 struct Config {
+    discord_token: String,
     servers: Vec<conn::ServerConfig>,
 }
 
@@ -28,6 +30,7 @@ fn main() {
     use std::path::PathBuf;
     use std::fs::File;
     use std::io::Read;
+    use std::sync::{Arc, RwLock};
     use slack_conn::SlackConn;
     use discord_conn::DiscordConn;
     use tui::ClientConn;
@@ -61,15 +64,34 @@ fn main() {
     let _rawguard = std::io::stdout().into_raw_mode().unwrap();
 
     let mut tui = TUI::new();
+
+    // Discord only permits one connection per user, so we need to redistribute the incoming events
+    let dis = discord::Discord::from_user_token(&config.discord_token).unwrap();
+    let (mut connection, info) = dis.connect().unwrap();
+    let dis = Arc::new(RwLock::new(dis));
+
+    let (discord_sender, discord_reciever) = spmc::channel();
+
+    // Spawn a thread that copies the incoming Discord events out to every omnichat server
+    thread::spawn(move || {
+        while let Ok(ev) = connection.recv_event() {
+            discord_sender.send(ev).unwrap();
+        }
+    });
+
     let (conn_sender, conn_recv) = std::sync::mpsc::channel();
     for c in config.servers.iter().cloned() {
         let sender = tui.sender();
         let conn_sender = conn_sender.clone();
+
+        let info = info.clone();
+        let dis = dis.clone();
+        let discord_reciever = discord_reciever.clone();
         thread::spawn(move || {
             let connection = match c {
                 ServerConfig::Slack { token } => SlackConn::new(token, sender.clone()).unwrap(),
-                ServerConfig::Discord { token, name } => {
-                    DiscordConn::new(token, name, sender.clone()).unwrap()
+                ServerConfig::Discord { name } => {
+                    DiscordConn::new(dis, info, discord_reciever, &name, sender.clone()).unwrap()
                 }
                 ServerConfig::Client => ClientConn::new(sender.clone()).unwrap(),
             };

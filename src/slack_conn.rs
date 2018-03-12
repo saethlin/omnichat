@@ -201,10 +201,10 @@ impl SlackConn {
         });
 
         // Launch threads to populate the message history
-        for (channel_name, channel_id) in channel_ids
+        for (channel_name, channel_id) in channel_names
             .iter()
             .cloned()
-            .zip(channel_names.iter().cloned())
+            .zip(channel_ids.iter().cloned())
         {
             let sender = sender.clone();
             let handler = handler.clone();

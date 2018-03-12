@@ -23,14 +23,13 @@ struct Handler {
 
 impl DiscordConn {
     pub fn new(
-        token: String,
-        server_name: String,
+        discord: Arc<RwLock<::discord::Discord>>,
+        info: ::discord::model::ReadyEvent,
+        event_stream: ::spmc::Receiver<::discord::model::Event>,
+        server_name: &str,
         sender: Sender<Event>,
     ) -> Result<Box<Conn>, Error> {
         use discord::model::PossibleServer::Online;
-
-        let dis = discord::Discord::from_user_token(&token)?;
-        let (mut connection, info) = dis.connect()?;
 
         let server = info.servers
             .iter()
@@ -71,15 +70,14 @@ impl DiscordConn {
 
         // Collect a vector of the channels we have muted
 
-        let handle = Arc::new(RwLock::new(dis));
         let handler = Arc::new(Handler {
-            server_name: server_name,
+            server_name: server_name.to_owned(),
             channels: channels,
         });
 
         // Load message history
         for (id, name) in handler.channels.clone() {
-            let handle = handle.clone();
+            let handle = discord.clone();
             let sender = sender.clone();
             let handler = Arc::clone(&handler);
             thread::spawn(move || {
@@ -113,13 +111,13 @@ impl DiscordConn {
                         server: handler.server_name.clone(),
                         channel: name.clone(),
                     })
-                    .expect("sender died");;
+                    .expect("sender died");
             });
         }
 
         {
             let sender = sender.clone();
-            let handle = handle.clone();
+            let handle = discord.clone();
             let handler = Arc::clone(&handler);
             // Launch a thread to handle incoming messages
             thread::spawn(move || {
@@ -128,7 +126,7 @@ impl DiscordConn {
                 let mut my_mention = format!("{}", current_user.id.mention());
                 my_mention.insert(2, '!');
 
-                while let Ok(ev) = connection.recv_event() {
+                while let Ok(ev) = event_stream.recv() {
                     if let discord::model::Event::MessageCreate(message) = ev {
                         sender
                             .send(Event::Message(Message {
@@ -157,7 +155,7 @@ impl DiscordConn {
         }
 
         return Ok(Box::new(DiscordConn {
-            discord: handle.clone(),
+            discord: discord,
             sender: sender,
             name: handler.server_name.clone(),
             channels: handler.channels.clone(),

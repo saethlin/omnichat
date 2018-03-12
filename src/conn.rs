@@ -5,7 +5,7 @@ use termion;
 pub enum ServerConfig {
     Client,
     Slack { token: String },
-    Discord { token: String, name: String },
+    Discord { name: String },
 }
 
 #[derive(Debug, Clone)]
