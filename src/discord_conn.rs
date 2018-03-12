@@ -16,6 +16,11 @@ pub struct DiscordConn {
     channel_names: Vec<String>,
 }
 
+struct Handler {
+    server_name: String,
+    channels: BiMap<ChannelId, String>,
+}
+
 impl DiscordConn {
     pub fn new(
         token: String,
@@ -67,12 +72,16 @@ impl DiscordConn {
         // Collect a vector of the channels we have muted
 
         let handle = Arc::new(RwLock::new(dis));
+        let handler = Arc::new(Handler {
+            server_name: server_name,
+            channels: channels,
+        });
+
         // Load message history
-        let t_channels = channels.clone();
-        for (id, name) in t_channels.into_iter() {
+        for (id, name) in handler.channels.clone() {
             let handle = handle.clone();
             let sender = sender.clone();
-            let server_name = server_name.clone();
+            let handler = Arc::clone(&handler);
             thread::spawn(move || {
                 let mut messages = handle
                     .read()
@@ -91,16 +100,17 @@ impl DiscordConn {
                 for m in messages.into_iter() {
                     sender
                         .send(Event::HistoryMessage(Message {
-                            server: server_name.clone(),
+                            server: handler.server_name.clone(),
                             channel: name.clone(),
                             sender: m.author.name,
                             contents: m.content,
+                            is_mention: false,
                         }))
                         .expect("Sender died");
                 }
                 sender
                     .send(Event::HistoryLoaded {
-                        server: server_name.clone(),
+                        server: handler.server_name.clone(),
                         channel: name.clone(),
                     })
                     .expect("sender died");;
@@ -109,9 +119,8 @@ impl DiscordConn {
 
         {
             let sender = sender.clone();
-            let server_name = server_name.clone();
-            let channels = channels.clone();
             let handle = handle.clone();
+            let handler = Arc::clone(&handler);
             // Launch a thread to handle incoming messages
             thread::spawn(move || {
                 // Grab data to identify mentions of the logged in user
@@ -120,33 +129,28 @@ impl DiscordConn {
                 my_mention.insert(2, '!');
 
                 while let Ok(ev) = connection.recv_event() {
-                    match ev {
-                        discord::model::Event::MessageCreate(message) => {
-                            if channels.contains_id(&message.channel_id) {
-                                let content = message.content.clone();
-                                let event = Message {
-                                    server: server_name.clone(),
-                                    channel: channels
-                                        .get_human(&message.channel_id).map(|c| c.clone())
-                                        .unwrap_or_else(|| {
-                                            sender.send(Event::Error(format!(
+                    if let discord::model::Event::MessageCreate(message) = ev {
+                        sender
+                            .send(Event::Message(Message {
+                                server: handler.server_name.clone(),
+                                channel: handler
+                                    .channels
+                                    .get_human(&message.channel_id)
+                                    .map(|c| c.clone())
+                                    .unwrap_or_else(|| {
+                                        sender
+                                            .send(Event::Error(format!(
                                                 "Unknown discord channel: {}",
                                                 &message.channel_id
-                                            ))).unwrap();
-                                            "unknown_channel".to_owned()
-                                        }),
-                                    contents: message.content,
-                                    sender: message.author.name,
-                                };
-
-                                if content.contains(&my_mention) {
-                                    sender.send(Event::Mention(event)).expect("Sender died");
-                                } else {
-                                    sender.send(Event::Message(event)).expect("Sender died");
-                                }
-                            }
-                        }
-                        _ => {}
+                                            )))
+                                            .unwrap();
+                                        "unknown_channel".to_owned()
+                                    }),
+                                is_mention: message.content.contains(&my_mention),
+                                contents: message.content,
+                                sender: message.author.name,
+                            }))
+                            .expect("Sender died");
                     }
                 }
             });
@@ -155,8 +159,8 @@ impl DiscordConn {
         return Ok(Box::new(DiscordConn {
             discord: handle.clone(),
             sender: sender,
-            name: server_name.clone(),
-            channels: channels,
+            name: handler.server_name.clone(),
+            channels: handler.channels.clone(),
             channel_names: channel_names,
         }));
     }

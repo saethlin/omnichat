@@ -14,12 +14,12 @@ pub struct Message {
     pub channel: String,
     pub sender: String,
     pub contents: String,
+    pub is_mention: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     Message(Message),
-    Mention(Message),
     HistoryMessage(Message),
     HistoryLoaded { server: String, channel: String },
     Input(termion::event::Event),

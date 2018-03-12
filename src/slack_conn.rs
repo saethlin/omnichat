@@ -15,6 +15,8 @@ struct Handler {
     mention_patterns: Vec<(String, String)>,
     channel_patterns: Vec<(String, String)>,
     server_name: String,
+    my_mention: String,
+    my_name: String,
 }
 
 impl Handler {
@@ -40,6 +42,7 @@ impl Handler {
                     server: self.server_name.clone(),
                     channel: channel.clone(),
                     sender: self.users.get_human(&user).unwrap_or(&user).clone(),
+                    is_mention: text.contains(&self.my_name),
                     contents: text,
                 });
             } else {
@@ -62,17 +65,16 @@ impl Handler {
     }
 }
 
+use std::sync::Arc;
 pub struct SlackConn {
     token: String,
     team_name: String,
-    my_name: String,
-    my_id: String,
     users: BiMap<String, String>,
     channels: BiMap<String, String>,
     channel_names: Vec<String>,
     last_message_timestamp: String,
     client: slack_api::requests::Client,
-    handler: Handler,
+    handler: Arc<Handler>,
     sender: Sender<Event>,
 }
 
@@ -153,26 +155,28 @@ impl SlackConn {
         let url = response.url.ok_or(SlackError)?;
 
         let mut websocket = websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
-        let thread_sender = sender.clone();
 
-        let handler = Handler {
+        let slf = response.slf.clone().unwrap();
+        // TODO: This looks wrong
+        let my_id = slf.name.clone().unwrap();
+
+        let handler = Arc::new(Handler {
             channel_patterns: channel_patterns,
             mention_patterns: mention_patterns,
             channels: channels.clone(),
             users: users.clone(),
             server_name: team_name.clone(),
-        };
+            my_name: slf.name.clone().unwrap(),
+            my_mention: format!("<@{}>", my_id),
+        });
 
-        let thread_handler = handler.clone();
+        let thread_sender = sender.clone();
+        let thread_handler = Arc::clone(&handler);
 
-        let slf = response.slf.clone().unwrap();
         // Spin off a thread that will feed message events back to the TUI
         thread::spawn(move || {
             use websocket::OwnedMessage::{Ping, Pong, Text};
             use slack_api::Message::Standard;
-            let my_name = slf.name.clone().unwrap();
-            let my_id = slf.name.clone().unwrap();
-            let my_mention = format!("<@{}>", my_id);
             loop {
                 let message = websocket.recv_message();
                 if let Ok(Text(message)) = message {
@@ -180,15 +184,7 @@ impl SlackConn {
                     if let Ok(Standard(slackmessage)) =
                         serde_json::from_str::<slack_api::Message>(&message)
                     {
-                        if let Some(omnimessage) = thread_handler.to_omni(slackmessage) {
-                            if omnimessage.contents.contains(&my_mention)
-                                || omnimessage.contents.contains(&my_name)
-                            {
-                                thread_sender
-                                    .send(Event::Mention(omnimessage.clone()))
-                                    .expect("Sender died")
-                            }
-
+                        if let Some(mut omnimessage) = thread_handler.to_omni(slackmessage) {
                             thread_sender
                                 .send(Event::Message(omnimessage))
                                 .expect("Sender died")
@@ -205,31 +201,33 @@ impl SlackConn {
         });
 
         // Launch threads to populate the message history
-        for id in channel_ids.iter().cloned() {
+        for (channel_name, channel_id) in channel_ids
+            .iter()
+            .cloned()
+            .zip(channel_names.iter().cloned())
+        {
             let sender = sender.clone();
             let handler = handler.clone();
             let client = slack_api::requests::Client::new().unwrap();
             let token = token.clone();
             let server_name = team_name.clone();
-            let channel_name = channels.get_human(&id).unwrap().clone();
 
             thread::spawn(move || {
                 use slack_api::channels::{history, HistoryRequest};
                 use slack_api::Message::Standard;
                 let mut req = HistoryRequest::default();
-                req.channel = &id;
+                req.channel = &channel_id;
                 let response = history(&client, &token, &req);
                 match response {
                     // This is a disgusting hack to handle how slack treats private channels as groups
                     Err(slack_api::channels::HistoryError::ChannelNotFound) => {
                         let mut req = slack_api::groups::HistoryRequest::default();
-                        req.channel = &id;
-                        let response = slack_api::groups::history(&client, &token, &req);
-                        match response {
+                        req.channel = &channel_id;
+                        match slack_api::groups::history(&client, &token, &req) {
                             Ok(response) => {
                                 for message in response.messages.unwrap().iter().rev().cloned() {
                                     if let Standard(mut slackmessage) = message {
-                                        slackmessage.channel = Some(id.clone());
+                                        slackmessage.channel = Some(channel_id.clone());
                                         if let Some(omnimessage) = handler.to_omni(slackmessage) {
                                             sender
                                                 .send(Event::HistoryMessage(omnimessage))
@@ -240,7 +238,7 @@ impl SlackConn {
                                 sender
                                     .send(Event::HistoryLoaded {
                                         server: server_name,
-                                        channel: channel_name,
+                                        channel: channel_name.clone(),
                                     })
                                     .expect("Sender died");
                             }
@@ -255,7 +253,7 @@ impl SlackConn {
                     Ok(response) => {
                         for message in response.messages.unwrap().iter().rev().cloned() {
                             if let Standard(mut slackmessage) = message {
-                                slackmessage.channel = Some(id.clone());
+                                slackmessage.channel = Some(channel_id.clone());
                                 if let Some(omnimessage) = handler.to_omni(slackmessage) {
                                     sender
                                         .send(Event::HistoryMessage(omnimessage))
@@ -266,15 +264,13 @@ impl SlackConn {
                         sender
                             .send(Event::HistoryLoaded {
                                 server: server_name,
-                                channel: channel_name,
+                                channel: channel_name.clone(),
                             })
                             .expect("Sender died");
                     }
                 }
             });
         }
-
-        let slf = response.slf.unwrap();
 
         Ok(Box::new(SlackConn {
             token: token,
@@ -284,8 +280,6 @@ impl SlackConn {
             channel_names: channel_names,
             team_name: team_name,
             last_message_timestamp: "".to_owned(),
-            my_name: slf.name.clone().unwrap(),
-            my_id: slf.id.clone().unwrap(),
             sender: sender,
             handler: handler,
         }))

@@ -595,6 +595,7 @@ impl TUI {
                         self.draw_message_area();
                     }
                 }
+                /*
                 Event::Mention(message) => {
                     self.add_mention_message(message);
                     if &server_name == "Client" && &channel_name == "Mentions" {
@@ -605,6 +606,7 @@ impl TUI {
                         self.draw_message_area();
                     }
                 }
+                */
                 Event::HistoryLoaded { server, channel } => {
                     if (server == server_name) && (channel == channel_name) {
                         self.draw();
@@ -649,6 +651,7 @@ impl Conn for ClientConn {
                 channel: channel.to_string(),
                 contents: contents.to_string(),
                 sender: String::new(),
+                is_mention: false,
             }))
             .expect("Sender died");
     }
