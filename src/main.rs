@@ -69,14 +69,10 @@ fn main() {
             std::process::exit(1)
         });
 
-    use std::error::Error;
-    let config: Config = match toml::from_str(&contents) {
-        Ok(config) => config,
-        Err(e) => {
-            println!("{:?} is not a valid omnichat config file", &config_path);
-            std::process::exit(1)
-        }
-    };
+    let config: Config = toml::from_str(&contents).unwrap_or_else(|_| {
+        println!("{:?} is not a valid omnichat config file", &config_path);
+        std::process::exit(1)
+    });
 
     let _screenguard = termion::screen::AlternateScreen::from(std::io::stdout());
     let _rawguard = std::io::stdout().into_raw_mode().unwrap();

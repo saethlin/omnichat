@@ -151,7 +151,7 @@ impl DiscordConn {
                 let mut messages = handle
                     .read()
                     .unwrap()
-                    .get_messages(id, discord::GetMessages::MostRecent, None)
+                    .get_messages(id, discord::GetMessages::MostRecent, Some(100))
                     .unwrap_or_else(|e| {
                         sender
                             .send(Event::Error(format!("{}", e)))

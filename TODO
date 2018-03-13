@@ -1,6 +1,7 @@
 TUI:
 Wrap server names
 Scrolling for channel names
+Scrollback
 
 Slack-specific:
 Fix hack for slack-rs-api slackbot messages

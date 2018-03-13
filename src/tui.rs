@@ -154,7 +154,7 @@ impl TUI {
             sender: sender,
         };
         let sender = tui.sender();
-        tui.add_server(ClientConn::new(sender).unwrap());
+        tui.add_server(ClientConn::new(sender));
         tui
     }
 
@@ -257,7 +257,7 @@ impl TUI {
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
-            .unwrap() as u16 + 1;
+            .unwrap_or(0) as u16 + 1;
     }
 
     fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
@@ -524,7 +524,7 @@ impl TUI {
                     termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
                 let chan_width = self.longest_channel_name;
                 self.message_area_formatted =
-                    ::textwrap::fill(&self.message_buffer, (width - chan_width) as usize);
+                    ::textwrap::fill(&self.message_buffer, (width - chan_width - 1) as usize);
 
                 if previous_num_lines != self.message_area_formatted.lines().count() {
                     self.draw();
@@ -628,12 +628,12 @@ pub struct ClientConn {
 }
 
 impl ClientConn {
-    pub fn new(sender: Sender<Event>) -> Result<Box<Conn>, Error> {
-        Ok(Box::new(ClientConn {
+    pub fn new(sender: Sender<Event>) -> Box<Conn> {
+        Box::new(ClientConn {
             name: "Client".to_string(),
             channel_names: vec!["Errors".to_owned(), "Mentions".to_owned()],
             sender: sender,
-        }))
+        })
     }
 }
 
