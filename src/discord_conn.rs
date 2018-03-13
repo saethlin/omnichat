@@ -39,6 +39,8 @@ impl Handler {
         text
     }
 
+    // TODO: This is incomplete, as I don't have a full listing of users
+    // It's also laughably slow for a big server like progdisc
     pub fn to_discord(&self, mut text: String) -> String {
         for &(ref id, ref human) in self.mention_patterns
             .iter()
@@ -74,14 +76,9 @@ impl DiscordConn {
             .clone();
 
         let mut mention_patterns = Vec::new();
-        sender.send(Event::Error(format!("{} members", server.members.len())));
         for member in &server.members {
             let human = member.display_name();
-            if human.contains("ore") {
-                sender.send(Event::Error(format!("{:?}", human)));
-            }
             mention_patterns.push((format!("{}", member.user.mention()), format!("@{}", human)));
-
             if member.nick.is_some() {
                 let id = &member.user.id;
                 mention_patterns.push((format!("<@!{}>", id), format!("@{}", human)));
@@ -138,8 +135,6 @@ impl DiscordConn {
             id: channel_ids,
         });
 
-        // Information to format user mentions
-
         let handler = Arc::new(Handler {
             server_name: server_name.to_owned(),
             channels: channels,
@@ -195,8 +190,7 @@ impl DiscordConn {
             thread::spawn(move || {
                 // Grab data to identify mentions of the logged in user
                 let current_user = handle.read().unwrap().get_current_user().unwrap();
-                let mut my_mention = format!("{}", current_user.id.mention());
-                my_mention.insert(2, '!');
+                let my_mention = format!("{}", current_user.id.mention());
 
                 while let Ok(ev) = event_stream.recv() {
                     if let discord::model::Event::MessageCreate(message) = ev {
@@ -215,12 +209,14 @@ impl DiscordConn {
                                 }))
                                 .expect("Sender died");
                         } else {
+                            /*
                             sender
                                 .send(Event::Error(format!(
                                     "Got a message from unknown discord channel: {:?}",
                                     &message.channel_id
                                 )))
                                 .unwrap();
+                            */
                         }
                     }
                 }

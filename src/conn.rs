@@ -15,6 +15,7 @@ pub struct Message {
     pub sender: String,
     pub contents: String,
     pub is_mention: bool,
+    //pub timestamp: f32,
 }
 
 #[derive(Debug, Clone)]

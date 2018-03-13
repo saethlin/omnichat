@@ -5,9 +5,7 @@ Slack-specific:
 Fix hack for slack-rs-api slackbot messages
 Add handling for thread update thingers
 >, <, and & rendering
-Reactions
 
 Discord:
-Handle permissions overrides
-Need to keep a global discord connection and pass its events around maybe- sounds like Serenity
+Outgoing user mentions
 
