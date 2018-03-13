@@ -29,6 +29,10 @@ impl Handler {
             ..
         } = message
         {
+            text = text.replace("&amp;", "&");
+            text = text.replace("&lt;", "<");
+            text = text.replace("&gt;", ">");
+
             for &(ref code, ref replacement) in &self.mention_patterns {
                 text = text.replace(code, replacement);
             }
