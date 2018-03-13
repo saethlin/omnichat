@@ -128,27 +128,28 @@ impl DiscordConn {
 
                 while let Ok(ev) = event_stream.recv() {
                     if let discord::model::Event::MessageCreate(message) = ev {
-                        sender
-                            .send(Event::Message(Message {
-                                server: handler.server_name.clone(),
-                                channel: handler
-                                    .channels
-                                    .get_human(&message.channel_id)
-                                    .map(|c| c.clone())
-                                    .unwrap_or_else(|| {
-                                        sender
-                                            .send(Event::Error(format!(
-                                                "Unknown discord channel: {}",
-                                                &message.channel_id
-                                            )))
-                                            .unwrap();
-                                        "unknown_channel".to_owned()
-                                    }),
-                                is_mention: message.content.contains(&my_mention),
-                                contents: message.content,
-                                sender: message.author.name,
-                            }))
-                            .expect("Sender died");
+                        if let Some(channel_name) = handler
+                            .channels
+                            .get_human(&message.channel_id)
+                            .map(|c| c.clone())
+                        {
+                            sender
+                                .send(Event::Message(Message {
+                                    server: handler.server_name.clone(),
+                                    channel: channel_name,
+                                    is_mention: message.content.contains(&my_mention),
+                                    contents: message.content,
+                                    sender: message.author.name,
+                                }))
+                                .expect("Sender died");
+                        } else {
+                            sender
+                                .send(Event::Error(format!(
+                                    "Got a message from unknown discord channel: {:?}",
+                                    &message.channel_id
+                                )))
+                                .unwrap();
+                        }
                     }
                 }
             });
