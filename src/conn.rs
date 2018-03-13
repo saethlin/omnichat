@@ -1,13 +1,5 @@
 use termion;
 
-#[derive(Debug, Deserialize, Clone)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum ServerConfig {
-    Client,
-    Slack { token: String },
-    Discord { name: String },
-}
-
 #[derive(Debug, Clone)]
 pub struct Message {
     pub server: String,

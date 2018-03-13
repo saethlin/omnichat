@@ -1,8 +1,8 @@
-[[servers]]
-type = "slack"
+discord_token = "discordusertoken"
+
+[[slack]]
 token = "slackusertoken"
 
-[[servers]]
-type = "discord"
-token = "discordusertoken"
-name = "Server Name"
+[[discord]]
+name = "DiscordServerName"
+

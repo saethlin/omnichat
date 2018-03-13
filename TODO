@@ -1,5 +1,6 @@
 TUI:
-Horizontal scrolling for channel names
+Wrap server names
+Scrolling for channel names
 
 Slack-specific:
 Fix hack for slack-rs-api slackbot messages
