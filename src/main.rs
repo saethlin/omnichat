@@ -38,6 +38,11 @@ fn main() {
     use std::thread;
     use termion::raw::IntoRawMode;
 
+    // Hack to make static linking openssl work
+    if let Err(std::env::VarError::NotPresent) = std::env::var("SSL_CERT_DIR") {
+        std::env::set_var("SSL_CERT_DIR", "/etc/ssl/certs");
+    }
+
     let homedir = std::env::var("HOME").unwrap_or_else(|_| {
         println!("You don't even have a $HOME? :'(");
         std::process::exit(1)
@@ -73,9 +78,14 @@ fn main() {
     let (discord_sender, discord_reciever) = spmc::channel();
 
     // Spawn a thread that copies the incoming Discord events out to every omnichat server
-    thread::spawn(move || {
-        while let Ok(ev) = connection.recv_event() {
-            discord_sender.send(ev).unwrap();
+    let error_channel = tui.sender();
+    thread::spawn(move || loop {
+        match connection.recv_event() {
+            Ok(ev) => discord_sender.send(ev).unwrap(),
+            Err(discord::Error::Closed(..)) => break,
+            Err(err) => error_channel
+                .send(conn::Event::Error(format!("{:?}", err)))
+                .unwrap(),
         }
     });
 
