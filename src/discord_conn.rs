@@ -14,11 +14,40 @@ pub struct DiscordConn {
     name: String,
     channels: BiMap<ChannelId, String>,
     channel_names: Vec<String>,
+    handler: Arc<Handler>,
 }
 
 struct Handler {
     server_name: String,
     channels: BiMap<ChannelId, String>,
+    mention_patterns: Vec<(String, String)>,
+    channel_patterns: Vec<(String, String)>,
+}
+
+impl Handler {
+    pub fn to_omni(&self, message: &::discord::model::Message) -> String {
+        let mut text = message.content.clone();
+        for &(ref id, ref human) in self.channel_patterns.iter() {
+            text = text.replace(id, human);
+        }
+
+        for user in &message.mentions {
+            text = text.replace(&format!("{}", user.mention()), &format!("@{}", user.name));
+            text = text.replace(&format!("<@!{}>", user.id), &format!("@{}", user.name));
+        }
+
+        text
+    }
+
+    pub fn to_discord(&self, mut text: String) -> String {
+        for &(ref id, ref human) in self.mention_patterns
+            .iter()
+            .chain(self.channel_patterns.iter())
+        {
+            text = text.replace(human, id);
+        }
+        text
+    }
 }
 
 impl DiscordConn {
@@ -44,19 +73,60 @@ impl DiscordConn {
             .ok_or(DiscordError)?
             .clone();
 
+        let mut mention_patterns = Vec::new();
+        sender.send(Event::Error(format!("{} members", server.members.len())));
+        for member in &server.members {
+            let human = member.display_name();
+            if human.contains("ore") {
+                sender.send(Event::Error(format!("{:?}", human)));
+            }
+            mention_patterns.push((format!("{}", member.user.mention()), format!("@{}", human)));
+
+            if member.nick.is_some() {
+                let id = &member.user.id;
+                mention_patterns.push((format!("<@!{}>", id), format!("@{}", human)));
+            }
+        }
+
         let my_id = discord::State::new(info).user().id;
+        let me_as_member = discord
+            .read()
+            .unwrap()
+            .get_member(server.id, my_id)
+            .unwrap();
+        let my_roles = me_as_member.roles.clone();
 
         use discord::model::ChannelType;
         use discord::model::permissions::Permissions;
         let mut channel_names = Vec::new();
         let mut channel_ids = Vec::new();
+        let mut channel_patterns = Vec::new();
         // Build a HashMap of all the channels we're permitted access to
         for channel in &server.channels {
+            channel_patterns.push((format!("<#{}>", channel.id), format!("#{}", channel.name)));
+
             // Check permissions
             let channel_perms = server.permissions_for(channel.id, my_id);
 
-            if channel.kind == ChannelType::Text
-                && channel_perms.contains(Permissions::READ_MESSAGES | Permissions::SEND_MESSAGES)
+            let mut can_see = channel_perms.contains(Permissions::READ_MESSAGES);
+
+            for perm_override in &channel.permission_overwrites {
+                let is_for_me = match perm_override.kind {
+                    ::discord::model::PermissionOverwriteType::Member(user_id) => user_id == my_id,
+                    ::discord::model::PermissionOverwriteType::Role(role_id) => {
+                        my_roles.iter().find(|r| r == &&role_id).is_some()
+                    }
+                };
+                if is_for_me && perm_override.allow.contains(Permissions::READ_MESSAGES) {
+                    can_see = true;
+                } else if is_for_me && perm_override.deny.contains(Permissions::READ_MESSAGES) {
+                    can_see = false;
+                }
+            }
+
+            // Also filter for channels that are not voice or category markers
+            if can_see && channel.kind != ChannelType::Category
+                && channel.kind != ChannelType::Voice
             {
                 channel_names.push(channel.name.clone());
                 channel_ids.push(channel.id);
@@ -68,11 +138,13 @@ impl DiscordConn {
             id: channel_ids,
         });
 
-        // Collect a vector of the channels we have muted
+        // Information to format user mentions
 
         let handler = Arc::new(Handler {
             server_name: server_name.to_owned(),
             channels: channels,
+            mention_patterns: mention_patterns,
+            channel_patterns: channel_patterns,
         });
 
         // Load message history
@@ -100,8 +172,8 @@ impl DiscordConn {
                         .send(Event::HistoryMessage(Message {
                             server: handler.server_name.clone(),
                             channel: name.clone(),
-                            sender: m.author.name,
-                            contents: m.content,
+                            sender: m.author.name.clone(),
+                            contents: handler.to_omni(&m),
                             is_mention: false,
                         }))
                         .expect("Sender died");
@@ -138,7 +210,7 @@ impl DiscordConn {
                                     server: handler.server_name.clone(),
                                     channel: channel_name,
                                     is_mention: message.content.contains(&my_mention),
-                                    contents: message.content,
+                                    contents: handler.to_omni(&message),
                                     sender: message.author.name,
                                 }))
                                 .expect("Sender died");
@@ -161,6 +233,7 @@ impl DiscordConn {
             name: handler.server_name.clone(),
             channels: handler.channels.clone(),
             channel_names: channel_names,
+            handler: handler,
         }));
     }
 }
@@ -168,18 +241,20 @@ impl DiscordConn {
 impl Conn for DiscordConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let dis = self.discord.write().unwrap();
-        if dis.send_message(
+        if let Err(err) = dis.send_message(
             self.channels
                 .get_id(&String::from(channel))
                 .unwrap()
                 .clone(),
-            contents,
+            &self.handler.to_discord(contents.to_string()),
             "",
             false,
-        ).is_err()
-        {
+        ) {
             self.sender
-                .send(Event::Error("Message failed to send".to_owned()))
+                .send(Event::Error(format!(
+                    "Failed to send Discord message: {:?}",
+                    err
+                )))
                 .expect("Sender died");
         }
     }
