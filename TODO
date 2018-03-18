@@ -6,7 +6,6 @@ Scrollback
 Slack-specific:
 Fix hack for slack-rs-api slackbot messages
 Add handling for thread update thingers
->, <, and & rendering
 
 Discord:
 Outgoing user mentions

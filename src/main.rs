@@ -32,9 +32,9 @@ struct DiscordConfig {
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    discord_token: String,
-    slack: Vec<SlackConfig>,
-    discord: Vec<DiscordConfig>,
+    discord_token: Option<String>,
+    slack: Option<Vec<SlackConfig>>,
+    discord: Option<Vec<DiscordConfig>>,
 }
 
 fn main() {
@@ -60,7 +60,7 @@ fn main() {
     let mut contents = String::new();
     File::open(&config_path)
         .unwrap_or_else(|_| {
-            println!("No config file found");
+            println!("No config file found, expected a config file at {:?}", config_path);
             std::process::exit(1)
         })
         .read_to_string(&mut contents)
@@ -79,49 +79,64 @@ fn main() {
 
     let mut tui = TUI::new();
 
-    // Discord only permits one connection per user, so we need to redistribute the incoming events
-    let dis = discord::Discord::from_user_token(&config.discord_token).unwrap();
-    let (mut connection, info) = dis.connect().unwrap();
-    let dis = Arc::new(RwLock::new(dis));
-
-    let (discord_sender, discord_reciever) = spmc::channel();
-
-    // Spawn a thread that copies the incoming Discord events out to every omnichat server
-    let error_channel = tui.sender();
-    thread::spawn(move || loop {
-        match connection.recv_event() {
-            Ok(ev) => discord_sender.send(ev).unwrap(),
-            Err(discord::Error::Closed(..)) => break,
-            Err(err) => error_channel
-                .send(conn::Event::Error(format!("{:?}", err)))
-                .unwrap(),
-        }
-    });
-
     let (conn_sender, conn_recv) = std::sync::mpsc::channel();
-    for c in config.slack.iter().cloned() {
-        let sender = tui.sender();
-        let conn_sender = conn_sender.clone();
-        thread::spawn(move || conn_sender.send(SlackConn::new(c.token, sender)));
-    }
-    for c in config.discord.iter().cloned() {
-        let sender = tui.sender();
-        let info = info.clone();
-        let dis = dis.clone();
-        let discord_reciever = discord_reciever.clone();
-        let conn_sender = conn_sender.clone();
-        thread::spawn(move || {
-            conn_sender.send(DiscordConn::new(
-                dis,
-                info,
-                discord_reciever,
-                &c.name,
-                sender,
-            ))
+
+    // Discord only permits one connection per user, so we need to redistribute the incoming events
+    if let (&Some(ref discord_token), &Some(ref discord)) = (&config.discord_token, &config.discord)
+    {
+        let dis = discord::Discord::from_user_token(&discord_token).unwrap();
+        let (mut connection, info) = dis.connect().unwrap();
+        let dis = Arc::new(RwLock::new(dis));
+
+        let (discord_sender, discord_reciever) = spmc::channel();
+
+        // Spawn a thread that copies the incoming Discord events out to every omnichat server
+        let error_channel = tui.sender();
+        thread::spawn(move || loop {
+            match connection.recv_event() {
+                Ok(ev) => discord_sender.send(ev).unwrap(),
+                Err(discord::Error::Closed(..)) => break,
+                Err(err) => error_channel
+                    .send(conn::Event::Error(format!("{:?}", err)))
+                    .unwrap(),
+            }
         });
+
+        for c in discord.iter().cloned() {
+            let sender = tui.sender();
+            let info = info.clone();
+            let dis = dis.clone();
+            let discord_reciever = discord_reciever.clone();
+            let conn_sender = conn_sender.clone();
+            thread::spawn(move || {
+                conn_sender.send(DiscordConn::new(
+                    dis,
+                    info,
+                    discord_reciever,
+                    &c.name,
+                    sender,
+                )).unwrap();
+            });
+        }
     }
-    for _ in 0..config.slack.len() + config.discord.len() {
-        tui.add_server(conn_recv.recv().unwrap().unwrap());
+
+    if let Some(slack) = config.slack {
+        for c in slack {
+            let sender = tui.sender();
+            let conn_sender = conn_sender.clone();
+            thread::spawn(move || {
+                conn_sender.send(SlackConn::new(c.token, sender)).unwrap();
+            });
+        }
     }
+
+    // When all the threads drop their senders, the below loop will terminate
+    // But we must also drop ours, or it will block forever
+    drop(conn_sender);
+
+    while let Ok(connection) = conn_recv.recv() {
+        tui.add_server(connection.unwrap());
+    }
+
     tui.run();
 }

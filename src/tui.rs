@@ -545,6 +545,7 @@ impl TUI {
     }
 
     pub fn run(mut self) {
+        self.draw();
         loop {
             let event = match self.events.recv() {
                 Ok(ev) => ev,
