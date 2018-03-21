@@ -33,11 +33,19 @@ where
         }
     }
 
-    pub fn get_human(&self, id: &I) -> Option<&H> {
+    pub fn get_human<Q: ?Sized>(&self, id: &Q) -> Option<&H>
+    where
+        I: ::std::borrow::Borrow<Q>,
+        Q: Hash + Eq,
+    {
         self.id_to_human.get(id)
     }
 
-    pub fn get_id(&self, human: &H) -> Option<&I> {
+    pub fn get_id<Q: ?Sized>(&self, human: &Q) -> Option<&I>
+    where
+        H: ::std::borrow::Borrow<Q>,
+        Q: Hash + Eq,
+    {
         self.human_to_id.get(human)
     }
 

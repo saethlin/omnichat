@@ -32,8 +32,12 @@ impl Handler {
         }
 
         for user in &message.mentions {
-            text = text.replace(&format!("{}", user.mention()), &format!("@{}", user.name));
-            text = text.replace(&format!("<@!{}>", user.id), &format!("@{}", user.name));
+            let raw_mention = format!("{}", user.mention());
+            text = if text.as_str().contains(&raw_mention) {
+                text.replace(&raw_mention, &format!("@{}", user.name))
+            } else {
+                text.replace(&format!("<@!{}>", user.id), &format!("@{}", user.name))
+            }
         }
 
         text
@@ -255,17 +259,11 @@ impl Conn for DiscordConn {
         }
     }
 
-    fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
-
-    fn channels(&self) -> Vec<&String> {
-        self.channel_names.iter().collect()
+    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
+        Box::new(self.channel_names.iter().map(|s| s.as_str()))
     }
 
-    fn autocomplete(&self, _word: &str) -> Option<String> {
-        None
-    }
-
-    fn name(&self) -> &String {
+    fn name(&self) -> &str {
         &self.name
     }
 }

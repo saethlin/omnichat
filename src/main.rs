@@ -3,6 +3,7 @@ extern crate discord;
 extern crate failure;
 #[macro_use]
 extern crate lazy_static;
+extern crate regex;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
@@ -60,7 +61,10 @@ fn main() {
     let mut contents = String::new();
     File::open(&config_path)
         .unwrap_or_else(|_| {
-            println!("No config file found, expected a config file at {:?}", config_path);
+            println!(
+                "No config file found, expected a config file at {:?}",
+                config_path
+            );
             std::process::exit(1)
         })
         .read_to_string(&mut contents)
@@ -81,9 +85,23 @@ fn main() {
 
     let (conn_sender, conn_recv) = std::sync::mpsc::channel();
 
+    // Start all the slack connections first, because we can't do the Discord stuff fully async
+    if let Some(slack) = config.slack {
+        for c in slack {
+            let sender = tui.sender();
+            let conn_sender = conn_sender.clone();
+            thread::spawn(move || {
+                conn_sender.send(SlackConn::new(c.token, sender)).unwrap();
+            });
+        }
+    }
+
     // Discord only permits one connection per user, so we need to redistribute the incoming events
     if let (&Some(ref discord_token), &Some(ref discord)) = (&config.discord_token, &config.discord)
     {
+        // This operation is blocking, but is the only I/O required to hook up to Discord, and we
+        // only need to do this operation once per token, and we only permit one token so far so it
+        // doesn't matter
         let dis = discord::Discord::from_user_token(&discord_token).unwrap();
         let (mut connection, info) = dis.connect().unwrap();
         let dis = Arc::new(RwLock::new(dis));
@@ -109,23 +127,15 @@ fn main() {
             let discord_reciever = discord_reciever.clone();
             let conn_sender = conn_sender.clone();
             thread::spawn(move || {
-                conn_sender.send(DiscordConn::new(
-                    dis,
-                    info,
-                    discord_reciever,
-                    &c.name,
-                    sender,
-                )).unwrap();
-            });
-        }
-    }
-
-    if let Some(slack) = config.slack {
-        for c in slack {
-            let sender = tui.sender();
-            let conn_sender = conn_sender.clone();
-            thread::spawn(move || {
-                conn_sender.send(SlackConn::new(c.token, sender)).unwrap();
+                conn_sender
+                    .send(DiscordConn::new(
+                        dis,
+                        info,
+                        discord_reciever,
+                        &c.name,
+                        sender,
+                    ))
+                    .unwrap();
             });
         }
     }

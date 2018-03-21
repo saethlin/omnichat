@@ -26,13 +26,15 @@ pub enum ConnError {
 }
 
 pub trait Conn: Send {
-    fn name(&self) -> &String;
+    fn name(&self) -> &str;
 
-    fn handle_cmd(&mut self, cmd: String, args: Vec<String>);
+    fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
 
-    fn send_channel_message(&mut self, channel: &str, contents: &str);
+    fn send_channel_message(&mut self, _channel: &str, _contents: &str) {}
 
-    fn channels(&self) -> Vec<&String>;
+    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a>;
 
-    fn autocomplete(&self, word: &str) -> Option<String>;
+    fn autocomplete(&self, _word: &str) -> Option<&str> {
+        None
+    }
 }

@@ -7,6 +7,12 @@ use slack_api;
 use failure::Error;
 use websocket;
 use serde_json;
+use regex::Regex;
+
+lazy_static! {
+    pub static ref MENTION_REGEX: Regex = Regex::new(r"<@U[A-Z0-9]{8}>").unwrap();
+    pub static ref CHANNEL_REGEX: Regex = Regex::new(r"<#C[A-Z0-9]{8}\|(?P<n>.*?)>").unwrap();
+}
 
 #[derive(Clone)]
 struct Handler {
@@ -33,13 +39,17 @@ impl Handler {
             text = text.replace("&lt;", "<");
             text = text.replace("&gt;", ">");
 
-            for &(ref code, ref replacement) in &self.mention_patterns {
-                text = text.replace(code, replacement);
-            }
+            text = MENTION_REGEX
+                .replace_all(&text, |caps: &::regex::Captures| {
+                    if let Some(name) = self.users.get_human(&caps[0][2..11]) {
+                        format!("@{}", name)
+                    } else {
+                        format!("@{}", &caps[0][2..11])
+                    }
+                })
+                .into_owned();
 
-            for &(ref code, ref replacement) in &self.channel_patterns {
-                text = text.replace(code, replacement);
-            }
+            text = CHANNEL_REGEX.replace_all(&text, "#$n").into_owned();
 
             if let Some(channel) = self.channels.get_human(&channel) {
                 return Some(Message {
@@ -420,30 +430,11 @@ impl Conn for SlackConn {
         }
     }
 
-    fn channels(&self) -> Vec<&String> {
-        self.channel_names.iter().collect()
+    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
+        Box::new(self.channel_names.iter().map(|s| s.as_str()))
     }
 
-    fn autocomplete(&self, word: &str) -> Option<String> {
-        match word.chars().next() {
-            Some('#') => {
-                // Autocomplete from channels
-                Some(String::from("#channel_auto"))
-            }
-            Some('@') => {
-                // Autocomplete from users
-                Some(String::from("@user_auto"))
-            }
-            Some(':') => {
-                // Autocomplete from emoji
-                Some(String::from(":emoji_auto:"))
-            }
-            Some('+') => Some(String::from("+:emoji_auto:")),
-            _ => None,
-        }
-    }
-
-    fn name(&self) -> &String {
+    fn name(&self) -> &str {
         &self.team_name
     }
 }

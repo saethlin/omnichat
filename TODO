@@ -1,12 +1,14 @@
 TUI:
 Wrap server names
-Scrolling for channel names
 Scrollback
+Unread marker
+Communicate unread cursor to backends
+Send "user is typing" messages
 
 Slack-specific:
 Fix hack for slack-rs-api slackbot messages
 Add handling for thread update thingers
 
 Discord:
-Outgoing user mentions
+Outgoing user mentions- requires progressively loading a full list of the users in a server on startup
 

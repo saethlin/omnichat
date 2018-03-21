@@ -54,6 +54,7 @@ pub struct TUI {
     shutdown: bool,
     events: Receiver<Event>,
     sender: Sender<Event>,
+    server_scroll_offset: usize,
 }
 
 struct Server {
@@ -62,12 +63,13 @@ struct Server {
     name: String,
     current_channel: usize,
     has_unreads: bool,
+    channel_scroll_offset: usize,
 }
 
 struct Channel {
     messages: Vec<ChanMessage>,
     name: String,
-    pub has_unreads: bool,
+    has_unreads: bool,
 }
 
 struct ChanMessage {
@@ -152,6 +154,7 @@ impl TUI {
             shutdown: false,
             events: reciever,
             sender: sender,
+            server_scroll_offset: 0,
         };
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender));
@@ -225,17 +228,8 @@ impl TUI {
         self.servers[0].channels[0].has_unreads = true;
     }
 
-    fn add_mention_message(&mut self, message: Message) {
-        self.servers[0].channels[1].messages.push(ChanMessage::new(
-            format!("{}@{}:{}", message.sender, message.channel, message.server),
-            message.contents,
-        ));
-        self.servers[0].has_unreads = true;
-        self.servers[0].channels[1].has_unreads = true;
-    }
-
     pub fn add_server(&mut self, connection: Box<Conn>) {
-        let mut channels: Vec<String> = connection.channels().into_iter().cloned().collect();
+        let mut channels: Vec<String> = connection.channels().map(|s| s.to_string()).collect();
         channels.sort();
 
         self.servers.push(Server {
@@ -251,6 +245,7 @@ impl TUI {
             connection: connection,
             current_channel: 0,
             has_unreads: false,
+            channel_scroll_offset: 0,
         });
 
         self.longest_channel_name = self.servers
@@ -273,14 +268,23 @@ impl TUI {
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
 
+        if set_unread {
+            /*
+            if !channel.has_unreads {
+                channel.messages.push(ChanMessage::new(
+                    "".to_string(),
+                    "UNREAD_MARKER".to_string(),
+                ));
+            }
+            */
+            channel.has_unreads = true;
+            server.has_unreads = true;
+        }
+
         channel.messages.push(ChanMessage::new(
             message.sender.clone(),
             message.contents.clone(),
         ));
-        if set_unread {
-            channel.has_unreads = true;
-            server.has_unreads = true;
-        }
         Ok(())
     }
 
@@ -371,40 +375,76 @@ impl TUI {
         let out = ::std::io::stdout();
         let mut lock = out.lock();
         let chan_width = self.longest_channel_name + 1;
+        let (width, _) =
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+
+        let width = width - chan_width;
+        // If the end of the current server name does not appear on the screen, increase until it
+        // does
+        loop {
+            let chars_to_name_end = self.servers
+                .iter()
+                .skip(self.server_scroll_offset)
+                .map(|s| s.name.chars().count())
+                .take(self.current_server + 1)
+                .sum::<usize>()
+                + 3 * (self.current_server - self.server_scroll_offset);
+            if chars_to_name_end < width as usize {
+                break;
+            } else {
+                self.server_scroll_offset += 1;
+            }
+        }
+        // If the beginning of the current server name does not appear on the screen, set scroll
+        // index to its
+        if self.current_server < self.server_scroll_offset {
+            self.server_scroll_offset = self.current_server
+        }
+        /*
+        let chars_to_name_start = self.servers
+            .iter()
+            .skip(self.server_scroll_offset)
+            .map(|s| s.name.chars().count())
+            .take(self.current_server)
+            .sum::<usize>()
+            + 3 * self.current_server;
+
+        if chars_to_name_start > width as usize {
+            self.server_scroll_offset = self.current_server;
+        }
+        */
+
+        self.servers[self.current_server].has_unreads = false;
+
         // Draw all the server names across the top
         write!(lock, "{}", Goto(chan_width + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
-        for (s, server) in self.servers.iter_mut().enumerate() {
+        for (s, server) in self.servers
+            .iter()
+            .enumerate()
+            .skip(self.server_scroll_offset)
+        {
             let delim = if s == num_servers - 1 { "" } else { " • " };
             if s == self.current_server {
-                write!(
-                    lock,
-                    "{}{}{}{}",
-                    style::Bold,
-                    server.name,
-                    style::Reset,
-                    delim
-                );
-                server.has_unreads = false;
+                write!(lock, "{}{}{}", style::Bold, server.name, style::Reset,);
             } else if server.has_unreads {
                 write!(
                     lock,
-                    "{}{}{}{}",
+                    "{}{}{}",
                     Fg(color::Red),
                     server.name,
                     Fg(color::Reset),
-                    delim
                 );
             } else {
                 write!(
                     lock,
-                    "{}{}{}{}",
+                    "{}{}{}",
                     Fg(color::AnsiValue::rgb(3, 3, 3)),
                     server.name,
                     Fg(color::Reset),
-                    delim
                 );
             }
+            write!(lock, "{}", delim);
         }
         lock.flush().unwrap();
     }
@@ -444,14 +484,29 @@ impl TUI {
 
         // Draw all the channels for the current server down the left side
         let server = &mut self.servers[self.current_server];
-        for (c, channel) in server.channels.iter_mut().enumerate().take(height as usize) {
+        {
+            let height = height as usize;
+            if server.current_channel > height + server.channel_scroll_offset {
+                server.channel_scroll_offset = server.current_channel - height + 1
+            } else if server.current_channel < server.channel_scroll_offset {
+                server.channel_scroll_offset = server.current_channel;
+            }
+        }
+
+        for (c, channel) in server
+            .channels
+            .iter_mut()
+            .enumerate()
+            .skip(server.channel_scroll_offset)
+            .take(height as usize)
+        {
             let shortened_name =
                 String::from_iter(channel.name.chars().take((chan_width - 1) as usize));
             if c == server.current_channel {
                 write!(
                     lock,
                     "{}{}{}{}",
-                    Goto(1, c as u16 + 1),
+                    Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
                     style::Bold,
                     shortened_name,
                     style::Reset
@@ -462,7 +517,7 @@ impl TUI {
                 write!(
                     lock,
                     "{}{}{}{}",
-                    Goto(1, c as u16 + 1),
+                    Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
                     Fg(color::Red),
                     shortened_name,
                     Fg(color::Reset)
@@ -472,7 +527,7 @@ impl TUI {
                 write!(
                     lock,
                     "{}{}{}{}",
-                    Goto(1, c as u16 + 1),
+                    Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
                     Fg(gray),
                     shortened_name,
                     Fg(color::Reset)
@@ -485,8 +540,10 @@ impl TUI {
     fn handle_input(&mut self, event: &termion::event::Event) {
         match *event {
             Key(Char('\n')) => {
-                self.send_message();
-                self.draw();
+                if !self.message_buffer.is_empty() {
+                    self.send_message();
+                    self.draw();
+                }
             }
             Key(Backspace) => {
                 //TODO: It would be great to apply the same anti-flicker optimization,
@@ -494,7 +551,7 @@ impl TUI {
                 self.message_buffer.pop();
                 let (width, _) =
                     termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-                let chan_width = self.longest_channel_name;
+                let chan_width = self.longest_channel_name + 1;
                 self.message_area_formatted =
                     ::textwrap::fill(&self.message_buffer, (width - chan_width) as usize);
                 self.draw();
@@ -639,11 +696,9 @@ impl ClientConn {
 }
 
 impl Conn for ClientConn {
-    fn name(&self) -> &String {
+    fn name(&self) -> &str {
         &self.name
     }
-
-    fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         self.sender
@@ -657,11 +712,7 @@ impl Conn for ClientConn {
             .expect("Sender died");
     }
 
-    fn channels(&self) -> Vec<&String> {
-        self.channel_names.iter().collect()
-    }
-
-    fn autocomplete(&self, _word: &str) -> Option<String> {
-        None
+    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
+        Box::new(self.channel_names.iter().map(|s| s.as_str()))
     }
 }
