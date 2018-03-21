@@ -17,7 +17,3 @@ spmc = "0.2"
 regex = "0.2"
 slack_api = {git = "https://github.com/saethlin/slack-rs-api"}
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
-
-[profile.release]
-debug = true
-
