@@ -1,3 +1,4 @@
+extern crate backoff;
 extern crate discord;
 #[macro_use]
 extern crate failure;
@@ -69,7 +70,7 @@ fn main() {
         })
         .read_to_string(&mut contents)
         .unwrap_or_else(|_| {
-            println!("Unable to read config file");
+            println!("Unable to read config file at {:?}", &config_path);
             std::process::exit(1)
         });
 
@@ -90,8 +91,11 @@ fn main() {
         for c in slack {
             let sender = tui.sender();
             let conn_sender = conn_sender.clone();
-            thread::spawn(move || {
-                conn_sender.send(SlackConn::new(c.token, sender)).unwrap();
+            thread::spawn(move || match SlackConn::new(c.token, sender.clone()) {
+                Ok(connection) => conn_sender.send(connection).unwrap(),
+                Err(err) => sender
+                    .send(conn::Event::Error(format!("{:?}", err)))
+                    .unwrap(),
             });
         }
     }
@@ -102,8 +106,24 @@ fn main() {
         // This operation is blocking, but is the only I/O required to hook up to Discord, and we
         // only need to do this operation once per token, and we only permit one token so far so it
         // doesn't matter
-        let dis = discord::Discord::from_user_token(&discord_token).unwrap();
-        let (mut connection, info) = dis.connect().unwrap();
+
+        use backoff::{Error, ExponentialBackoff, Operation};
+        let mut op = || discord::Discord::from_user_token(&discord_token).map_err(Error::Transient);
+        let mut backoff = ExponentialBackoff::default();
+        let dis = op.retry(&mut backoff).unwrap_or_else(|e| {
+            println!("Unable to connect to Discord:\n{:#?}", e);
+            std::process::exit(1);
+        });
+
+        let (mut connection, info) = {
+            let mut op = || dis.connect().map_err(Error::Transient);
+            let mut backoff = ExponentialBackoff::default();
+            op.retry(&mut backoff).unwrap_or_else(|e| {
+                println!("Unable to connect to Discord:\n{:#?}", e);
+                std::process::exit(1);
+            })
+        };
+
         let dis = Arc::new(RwLock::new(dis));
 
         let (discord_sender, discord_reciever) = spmc::channel();
@@ -127,15 +147,12 @@ fn main() {
             let discord_reciever = discord_reciever.clone();
             let conn_sender = conn_sender.clone();
             thread::spawn(move || {
-                conn_sender
-                    .send(DiscordConn::new(
-                        dis,
-                        info,
-                        discord_reciever,
-                        &c.name,
-                        sender,
-                    ))
-                    .unwrap();
+                match DiscordConn::new(dis, info, discord_reciever, &c.name, sender.clone()) {
+                    Ok(connection) => conn_sender.send(connection).unwrap(),
+                    Err(err) => sender
+                        .send(conn::Event::Error(format!("{:?}", err)))
+                        .unwrap(),
+                }
             });
         }
     }
@@ -145,7 +162,7 @@ fn main() {
     drop(conn_sender);
 
     while let Ok(connection) = conn_recv.recv() {
-        tui.add_server(connection.unwrap());
+        tui.add_server(connection);
     }
 
     tui.run();
