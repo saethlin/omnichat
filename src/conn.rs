@@ -23,6 +23,7 @@ pub enum Event {
 pub enum ConnError {
     #[fail(display = "Slack response was damaged")] SlackError,
     #[fail(display = "Discord response was damaged")] DiscordError,
+    #[fail(display = "IRC response was damaged")] IrcError,
 }
 
 pub trait Conn: Send {

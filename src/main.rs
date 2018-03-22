@@ -1,6 +1,9 @@
+extern crate backoff;
 extern crate discord;
 #[macro_use]
 extern crate failure;
+extern crate futures;
+extern crate irc;
 #[macro_use]
 extern crate lazy_static;
 extern crate regex;
@@ -20,6 +23,7 @@ mod conn;
 mod slack_conn;
 mod bimap;
 mod discord_conn;
+mod irc_conn;
 
 #[derive(Debug, Deserialize, Clone)]
 struct SlackConfig {
@@ -31,11 +35,19 @@ struct DiscordConfig {
     name: String,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+struct IrcConfig {
+    name: String,
+    nick: String,
+    port: u16,
+}
+
 #[derive(Debug, Deserialize)]
 struct Config {
     discord_token: Option<String>,
     slack: Option<Vec<SlackConfig>>,
     discord: Option<Vec<DiscordConfig>>,
+    irc: Option<Vec<IrcConfig>>,
 }
 
 fn main() {
@@ -47,6 +59,7 @@ fn main() {
     use discord_conn::DiscordConn;
     use std::thread;
     use termion::raw::IntoRawMode;
+    use irc_conn::IrcConn;
 
     // Hack to make static linking openssl work
     if let Err(std::env::VarError::NotPresent) = std::env::var("SSL_CERT_DIR") {
@@ -69,7 +82,7 @@ fn main() {
         })
         .read_to_string(&mut contents)
         .unwrap_or_else(|_| {
-            println!("Unable to read config file");
+            println!("Unable to read config file at {:?}", &config_path);
             std::process::exit(1)
         });
 
@@ -85,13 +98,31 @@ fn main() {
 
     let (conn_sender, conn_recv) = std::sync::mpsc::channel();
 
+    if let Some(irc) = config.irc {
+        for i in irc {
+            let sender = tui.sender();
+            let conn_sender = conn_sender.clone();
+            thread::spawn(
+                move || match IrcConn::new(i.nick, i.name, i.port, sender.clone()) {
+                    Ok(connection) => conn_sender.send(connection).unwrap(),
+                    Err(err) => sender
+                        .send(conn::Event::Error(format!("{:?}", err)))
+                        .unwrap(),
+                },
+            );
+        }
+    }
+
     // Start all the slack connections first, because we can't do the Discord stuff fully async
     if let Some(slack) = config.slack {
         for c in slack {
             let sender = tui.sender();
             let conn_sender = conn_sender.clone();
-            thread::spawn(move || {
-                conn_sender.send(SlackConn::new(c.token, sender)).unwrap();
+            thread::spawn(move || match SlackConn::new(c.token, sender.clone()) {
+                Ok(connection) => conn_sender.send(connection).unwrap(),
+                Err(err) => sender
+                    .send(conn::Event::Error(format!("{:?}", err)))
+                    .unwrap(),
             });
         }
     }
@@ -102,8 +133,24 @@ fn main() {
         // This operation is blocking, but is the only I/O required to hook up to Discord, and we
         // only need to do this operation once per token, and we only permit one token so far so it
         // doesn't matter
-        let dis = discord::Discord::from_user_token(&discord_token).unwrap();
-        let (mut connection, info) = dis.connect().unwrap();
+
+        use backoff::{Error, ExponentialBackoff, Operation};
+        let mut op = || discord::Discord::from_user_token(&discord_token).map_err(Error::Transient);
+        let mut backoff = ExponentialBackoff::default();
+        let dis = op.retry(&mut backoff).unwrap_or_else(|e| {
+            println!("Unable to connect to Discord:\n{:#?}", e);
+            std::process::exit(1);
+        });
+
+        let (mut connection, info) = {
+            let mut op = || dis.connect().map_err(Error::Transient);
+            let mut backoff = ExponentialBackoff::default();
+            op.retry(&mut backoff).unwrap_or_else(|e| {
+                println!("Unable to connect to Discord:\n{:#?}", e);
+                std::process::exit(1);
+            })
+        };
+
         let dis = Arc::new(RwLock::new(dis));
 
         let (discord_sender, discord_reciever) = spmc::channel();
@@ -127,15 +174,12 @@ fn main() {
             let discord_reciever = discord_reciever.clone();
             let conn_sender = conn_sender.clone();
             thread::spawn(move || {
-                conn_sender
-                    .send(DiscordConn::new(
-                        dis,
-                        info,
-                        discord_reciever,
-                        &c.name,
-                        sender,
-                    ))
-                    .unwrap();
+                match DiscordConn::new(dis, info, discord_reciever, &c.name, sender.clone()) {
+                    Ok(connection) => conn_sender.send(connection).unwrap(),
+                    Err(err) => sender
+                        .send(conn::Event::Error(format!("{:?}", err)))
+                        .unwrap(),
+                }
             });
         }
     }
@@ -145,7 +189,7 @@ fn main() {
     drop(conn_sender);
 
     while let Ok(connection) = conn_recv.recv() {
-        tui.add_server(connection.unwrap());
+        tui.add_server(connection);
     }
 
     tui.run();

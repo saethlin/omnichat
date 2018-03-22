@@ -16,7 +16,7 @@ use std::iter::FromIterator;
 
 lazy_static! {
     static ref COLORS: Vec<AnsiValue> = {
-        let mut c = Vec::with_capacity(3*3*3);
+        let mut c = Vec::with_capacity(45);
         for r in 1..6 {
             for g in 1..6 {
                 for b in 1..6 {
@@ -335,39 +335,42 @@ impl TUI {
             }
         }
 
-        let message_area_height = self.message_area_height();
-        let out = ::std::io::stdout();
-        let mut lock = out.lock();
-        let server = &self.servers[self.current_server];
-        // Draw all the messages by looping over them in reverse
-        let mut row = message_area_height - 1;
-        'outer: for message in server.channels[server.current_channel]
-            .messages
-            .iter()
-            .rev()
+        // NLL HACK
         {
-            for (l, line) in message.contents.lines().rev().enumerate() {
-                let num_lines = message.contents.lines().count();
-                write!(lock, "{}", Goto(chan_width + 1, row));
-                row -= 1;
-                if l == num_lines - 1 {
-                    write!(
-                        lock,
-                        "{}{}{}: {}",
-                        Fg(COLORS[djb2(&message.sender) as usize % COLORS.len()]),
-                        message.sender,
-                        Fg(color::Reset),
-                        line
-                    );
-                } else {
-                    write!(lock, "{}", line);
-                }
-                if row == 1 {
-                    break 'outer;
+            let message_area_height = self.message_area_height();
+            let out = ::std::io::stdout();
+            let mut lock = out.lock();
+            let server = &self.servers[self.current_server];
+            // Draw all the messages by looping over them in reverse
+            let mut row = message_area_height - 1;
+            'outer: for message in server.channels[server.current_channel]
+                .messages
+                .iter()
+                .rev()
+            {
+                for (l, line) in message.contents.lines().rev().enumerate() {
+                    let num_lines = message.contents.lines().count();
+                    write!(lock, "{}", Goto(chan_width + 1, row));
+                    row -= 1;
+                    if l == num_lines - 1 {
+                        write!(
+                            lock,
+                            "{}{}{}: {}",
+                            Fg(COLORS[djb2(&message.sender) as usize % COLORS.len()]),
+                            message.sender,
+                            Fg(color::Reset),
+                            line
+                        );
+                    } else {
+                        write!(lock, "{}", line);
+                    }
+                    if row == 1 {
+                        break 'outer;
+                    }
                 }
             }
+            self.draw_message_area();
         }
-        self.draw_message_area();
     }
 
     #[allow(unused_must_use)]
