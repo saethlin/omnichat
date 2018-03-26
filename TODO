@@ -1,4 +1,3 @@
-Fix slack-rs-api by adding the new message types
 Discord: Outgoing user mentions
 
 Wrap or scroll server names

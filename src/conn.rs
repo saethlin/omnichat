@@ -7,7 +7,7 @@ pub struct Message {
     pub sender: String,
     pub contents: String,
     pub is_mention: bool,
-    //pub timestamp: f32,
+    //pub timestamp: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -23,7 +23,7 @@ pub enum Event {
 pub enum ConnError {
     #[fail(display = "Slack response was damaged")] SlackError,
     #[fail(display = "Discord response was damaged")] DiscordError,
-    #[fail(display = "IRC response was damaged")] IrcError,
+    //#[fail(display = "IRC response was damaged")] IrcError,
 }
 
 pub trait Conn: Send {

@@ -62,14 +62,19 @@ struct Server {
     connection: Box<Conn>,
     name: String,
     current_channel: usize,
-    has_unreads: bool,
     channel_scroll_offset: usize,
+}
+
+impl Server {
+    fn has_unreads(&self) -> bool {
+        self.channels.iter().any(|c| c.num_unreads > 0)
+    }
 }
 
 struct Channel {
     messages: Vec<ChanMessage>,
     name: String,
-    has_unreads: bool,
+    num_unreads: usize,
 }
 
 struct ChanMessage {
@@ -184,7 +189,7 @@ impl TUI {
         let server = &mut self.servers[self.current_server];
         for i in 0..server.channels.len() {
             let check_index = (server.current_channel + i) % server.channels.len();
-            if server.channels[check_index].has_unreads {
+            if server.channels[check_index].num_unreads > 0 {
                 server.current_channel = check_index;
                 break;
             }
@@ -196,7 +201,7 @@ impl TUI {
         for i in 0..server.channels.len() {
             let check_index =
                 (server.current_channel + server.channels.len() - i) % server.channels.len();
-            if server.channels[check_index].has_unreads {
+            if server.channels[check_index].num_unreads > 0 {
                 server.current_channel = check_index;
                 break;
             }
@@ -224,8 +229,9 @@ impl TUI {
         self.servers[0].channels[0]
             .messages
             .push(ChanMessage::new(String::from("Client"), message.to_owned()));
-        self.servers[0].has_unreads = true;
-        self.servers[0].channels[0].has_unreads = true;
+        if !((self.current_server == 0) & (self.servers[0].current_channel == 0)) {
+            self.servers[0].channels[0].num_unreads += 1;
+        }
     }
 
     pub fn add_server(&mut self, connection: Box<Conn>) {
@@ -238,13 +244,12 @@ impl TUI {
                 .map(|name| Channel {
                     messages: Vec::new(),
                     name: name.to_string(),
-                    has_unreads: false,
+                    num_unreads: 0,
                 })
                 .collect(),
             name: connection.name().to_string(),
             connection: connection,
             current_channel: 0,
-            has_unreads: false,
             channel_scroll_offset: 0,
         });
 
@@ -258,6 +263,12 @@ impl TUI {
     fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
 
+        let is_current_channel = {
+            let server = &self.servers[self.current_server];
+            (message.server == server.name)
+                && (message.channel == server.channels[server.current_channel].name)
+        };
+
         let server = self.servers
             .iter_mut()
             .find(|s| s.name == message.server)
@@ -268,17 +279,9 @@ impl TUI {
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
 
-        if set_unread {
-            /*
-            if !channel.has_unreads {
-                channel.messages.push(ChanMessage::new(
-                    "".to_string(),
-                    "UNREAD_MARKER".to_string(),
-                ));
-            }
-            */
-            channel.has_unreads = true;
-            server.has_unreads = true;
+        // Do not add an unread if we're currently on the message's channel
+        if set_unread && !is_current_channel {
+            channel.num_unreads += 1;
         }
 
         channel.messages.push(ChanMessage::new(
@@ -323,9 +326,6 @@ impl TUI {
             print!("{}|", Goto(chan_width, i));
         }
 
-        self.draw_server_names();
-        self.draw_channel_names();
-
         // Reformat all the messages, inside their own block because NLLs
         {
             let remaining_width = (width - chan_width) as usize;
@@ -343,11 +343,28 @@ impl TUI {
             let server = &self.servers[self.current_server];
             // Draw all the messages by looping over them in reverse
             let mut row = message_area_height - 1;
-            'outer: for message in server.channels[server.current_channel]
+            'outer: for (m, message) in server.channels[server.current_channel]
                 .messages
                 .iter()
                 .rev()
+                .enumerate()
             {
+                // Unread marker
+                let num_unreads = server.channels[server.current_channel].num_unreads;
+                if (num_unreads > 0) && (m == num_unreads) {
+                    write!(lock, "{}", Goto(chan_width + 1, row));
+                    write!(
+                        lock,
+                        "{}{}{}",
+                        Fg(color::Red),
+                        ::std::iter::repeat('-')
+                            .take((width - chan_width) as usize)
+                            .collect::<String>(),
+                        Fg(color::Reset)
+                    );
+                    row -= 1;
+                }
+
                 for (l, line) in message.contents.lines().rev().enumerate() {
                     let num_lines = message.contents.lines().count();
                     write!(lock, "{}", Goto(chan_width + 1, row));
@@ -369,8 +386,11 @@ impl TUI {
                     }
                 }
             }
-            self.draw_message_area();
         }
+
+        self.draw_server_names();
+        self.draw_channel_names();
+        self.draw_message_area();
     }
 
     #[allow(unused_must_use)]
@@ -417,8 +437,6 @@ impl TUI {
         }
         */
 
-        self.servers[self.current_server].has_unreads = false;
-
         // Draw all the server names across the top
         write!(lock, "{}", Goto(chan_width + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
@@ -430,7 +448,7 @@ impl TUI {
             let delim = if s == num_servers - 1 { "" } else { " • " };
             if s == self.current_server {
                 write!(lock, "{}{}{}", style::Bold, server.name, style::Reset,);
-            } else if server.has_unreads {
+            } else if server.has_unreads() {
                 write!(
                     lock,
                     "{}{}{}",
@@ -515,8 +533,8 @@ impl TUI {
                     style::Reset
                 );
                 // Remove unreads marker from current channel
-                channel.has_unreads = false;
-            } else if channel.has_unreads {
+                channel.num_unreads = 0;
+            } else if channel.num_unreads > 0 {
                 write!(
                     lock,
                     "{}{}{}{}",
@@ -656,18 +674,6 @@ impl TUI {
                         self.draw_message_area();
                     }
                 }
-                /*
-                Event::Mention(message) => {
-                    self.add_mention_message(message);
-                    if &server_name == "Client" && &channel_name == "Mentions" {
-                        self.draw();
-                    }
-                    if &server_name == "Client" {
-                        self.draw_channel_names();
-                        self.draw_message_area();
-                    }
-                }
-                */
                 Event::HistoryLoaded { server, channel } => {
                     if (server == server_name) && (channel == channel_name) {
                         self.draw();

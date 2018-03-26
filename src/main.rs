@@ -23,7 +23,7 @@ mod conn;
 mod slack_conn;
 mod bimap;
 mod discord_conn;
-mod irc_conn;
+//mod irc_conn;
 
 #[derive(Debug, Deserialize, Clone)]
 struct SlackConfig {
@@ -35,19 +35,21 @@ struct DiscordConfig {
     name: String,
 }
 
+/*
 #[derive(Debug, Deserialize, Clone)]
 struct IrcConfig {
     name: String,
     nick: String,
     port: u16,
 }
+*/
 
 #[derive(Debug, Deserialize)]
 struct Config {
     discord_token: Option<String>,
     slack: Option<Vec<SlackConfig>>,
     discord: Option<Vec<DiscordConfig>>,
-    irc: Option<Vec<IrcConfig>>,
+    //irc: Option<Vec<IrcConfig>>,
 }
 
 fn main() {
@@ -59,7 +61,7 @@ fn main() {
     use discord_conn::DiscordConn;
     use std::thread;
     use termion::raw::IntoRawMode;
-    use irc_conn::IrcConn;
+    //use irc_conn::IrcConn;
 
     // Hack to make static linking openssl work
     if let Err(std::env::VarError::NotPresent) = std::env::var("SSL_CERT_DIR") {
@@ -98,6 +100,7 @@ fn main() {
 
     let (conn_sender, conn_recv) = std::sync::mpsc::channel();
 
+    /*
     if let Some(irc) = config.irc {
         for i in irc {
             let sender = tui.sender();
@@ -112,6 +115,7 @@ fn main() {
             );
         }
     }
+    */
 
     // Start all the slack connections first, because we can't do the Discord stuff fully async
     if let Some(slack) = config.slack {
