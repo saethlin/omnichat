@@ -197,26 +197,37 @@ impl TUI {
     }
 
     fn next_channel_unread(&mut self) {
-        self.reset_current_unreads();
-        let server = &mut self.servers[self.current_server];
-        for i in 0..server.channels.len() {
-            let check_index = (server.current_channel + i) % server.channels.len();
-            if server.channels[check_index].num_unreads > 0 {
-                server.current_channel = check_index;
-                break;
+        //NLL HACK
+        let index = {
+            let server = &self.servers[self.current_server];
+            (0..server.channels.len())
+                .map(|i| (server.current_channel + i) % server.channels.len())
+                .find(|i| server.channels[*i].num_unreads > 0 && *i != server.current_channel)
+        };
+        match index {
+            None => {}
+            Some(index) => {
+                self.reset_current_unreads();
+                self.servers[self.current_server].current_channel = index;
             }
         }
     }
 
     fn previous_channel_unread(&mut self) {
-        self.reset_current_unreads();
-        let server = &mut self.servers[self.current_server];
-        for i in 0..server.channels.len() {
-            let check_index =
-                (server.current_channel + server.channels.len() - i) % server.channels.len();
-            if server.channels[check_index].num_unreads > 0 {
-                server.current_channel = check_index;
-                break;
+        //NLL HACK
+        let index = {
+            let server = &self.servers[self.current_server];
+            (0..server.channels.len())
+                .map(|i| {
+                    (server.current_channel + server.channels.len() - i) % server.channels.len()
+                })
+                .find(|i| server.channels[*i].num_unreads > 0 && *i != server.current_channel)
+        };
+        match index {
+            None => {}
+            Some(index) => {
+                self.reset_current_unreads();
+                self.servers[self.current_server].current_channel = index;
             }
         }
     }
@@ -535,7 +546,7 @@ impl TUI {
         let server = &mut self.servers[self.current_server];
         {
             let height = height as usize;
-            if server.current_channel+1 > height + server.channel_scroll_offset {
+            if server.current_channel + 1 > height + server.channel_scroll_offset {
                 server.channel_scroll_offset = server.current_channel - height + 1
             } else if server.current_channel < server.channel_scroll_offset {
                 server.channel_scroll_offset = server.current_channel;
