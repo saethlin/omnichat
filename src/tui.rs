@@ -345,11 +345,15 @@ impl TUI {
 
         // NLL HACK
         {
+            // Draw all the messages by looping over them in reverse
             let message_area_height = self.message_area_height();
             let out = ::std::io::stdout();
             let mut lock = out.lock();
             let server = &self.servers[self.current_server];
-            // Draw all the messages by looping over them in reverse
+
+            let num_unreads = server.channels[server.current_channel].num_unreads;
+            let mut draw_unread_marker = num_unreads > 0;
+
             let mut row = message_area_height - 1;
             'outer: for (m, message) in server.channels[server.current_channel]
                 .messages
@@ -358,8 +362,7 @@ impl TUI {
                 .enumerate()
             {
                 // Unread marker
-                let num_unreads = server.channels[server.current_channel].num_unreads;
-                if (num_unreads > 0) && (m == num_unreads) {
+                if (draw_unread_marker) && (m == num_unreads) {
                     write!(lock, "{}", Goto(chan_width + 1, row));
                     write!(
                         lock,
@@ -371,6 +374,10 @@ impl TUI {
                         Fg(color::Reset)
                     );
                     row -= 1;
+                    draw_unread_marker = false;
+                    if row == 1 {
+                        break 'outer;
+                    }
                 }
 
                 for (l, line) in message.contents.lines().rev().enumerate() {
@@ -393,6 +400,19 @@ impl TUI {
                         break 'outer;
                     }
                 }
+            }
+            // If we didn't draw the unread marker, put it at the top of the screen
+            if draw_unread_marker {
+                write!(lock, "{}", Goto(chan_width + 1, 2));
+                write!(
+                    lock,
+                    "{}{}{}",
+                    Fg(color::Red),
+                    ::std::iter::repeat('-')
+                        .take((width - chan_width) as usize)
+                        .collect::<String>(),
+                    Fg(color::Reset)
+                );
             }
         }
 
@@ -515,7 +535,7 @@ impl TUI {
         let server = &mut self.servers[self.current_server];
         {
             let height = height as usize;
-            if server.current_channel > height + server.channel_scroll_offset {
+            if server.current_channel+1 > height + server.channel_scroll_offset {
                 server.channel_scroll_offset = server.current_channel - height + 1
             } else if server.current_channel < server.channel_scroll_offset {
                 server.channel_scroll_offset = server.current_channel;
