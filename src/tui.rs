@@ -170,7 +170,13 @@ impl TUI {
         self.sender.clone()
     }
 
+    fn reset_current_unreads(&mut self) {
+        let server = &mut self.servers[self.current_server];
+        server.channels[server.current_channel].num_unreads = 0;
+    }
+
     fn next_server(&mut self) {
+        self.reset_current_unreads();
         self.current_server += 1;
         if self.current_server >= self.servers.len() {
             self.current_server = 0;
@@ -178,6 +184,7 @@ impl TUI {
     }
 
     fn previous_server(&mut self) {
+        self.reset_current_unreads();
         if self.current_server > 0 {
             self.current_server -= 1;
         } else {
@@ -186,6 +193,7 @@ impl TUI {
     }
 
     fn next_channel_unread(&mut self) {
+        self.reset_current_unreads();
         let server = &mut self.servers[self.current_server];
         for i in 0..server.channels.len() {
             let check_index = (server.current_channel + i) % server.channels.len();
@@ -197,6 +205,7 @@ impl TUI {
     }
 
     fn previous_channel_unread(&mut self) {
+        self.reset_current_unreads();
         let server = &mut self.servers[self.current_server];
         for i in 0..server.channels.len() {
             let check_index =
@@ -209,6 +218,7 @@ impl TUI {
     }
 
     fn next_channel(&mut self) {
+        self.reset_current_unreads();
         let server = &mut self.servers[self.current_server];
         server.current_channel += 1;
         if server.current_channel >= server.channels.len() {
@@ -217,6 +227,7 @@ impl TUI {
     }
 
     fn previous_channel(&mut self) {
+        self.reset_current_unreads();
         let server = &mut self.servers[self.current_server];
         if server.current_channel > 0 {
             server.current_channel -= 1;
@@ -263,12 +274,6 @@ impl TUI {
     fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
 
-        let is_current_channel = {
-            let server = &self.servers[self.current_server];
-            (message.server == server.name)
-                && (message.channel == server.channels[server.current_channel].name)
-        };
-
         let server = self.servers
             .iter_mut()
             .find(|s| s.name == message.server)
@@ -279,8 +284,7 @@ impl TUI {
             .find(|c| c.name == message.channel)
             .ok_or(UnknownChannel)?;
 
-        // Do not add an unread if we're currently on the message's channel
-        if set_unread && !is_current_channel {
+        if set_unread {
             channel.num_unreads += 1;
         }
 
@@ -532,8 +536,6 @@ impl TUI {
                     shortened_name,
                     style::Reset
                 );
-                // Remove unreads marker from current channel
-                channel.num_unreads = 0;
             } else if channel.num_unreads > 0 {
                 write!(
                     lock,
