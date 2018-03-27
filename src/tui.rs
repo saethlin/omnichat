@@ -113,6 +113,10 @@ impl ChanMessage {
             .break_words(true);
 
         for (l, line) in self.raw.lines().enumerate() {
+            // wrap_iter produces nothing on an empty line, so we have to supply the required newline
+            if line == "" {
+                self.contents.push('\n');
+            }
             if l == 0 {
                 for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
                 {
