@@ -263,6 +263,19 @@ impl SlackConn {
                                     .iter()
                                     .rev()
                                     .cloned()
+                                    .map(|m| {
+                                        match m {
+                                            Standard(mut msg) => {
+                                                msg.channel = Some(channel_id.clone());
+                                                Standard(msg)
+                                            },
+                                            BotMessage(mut msg) => {
+                                                msg.channel = Some(channel_id.clone());
+                                                BotMessage(msg)
+                                            }
+                                            _ => m,
+                                        }
+                                    })
                                     .filter_map(|m| handler.to_omni(m))
                                 {
                                     sender
@@ -290,7 +303,6 @@ impl SlackConn {
                             .unwrap()
                             .into_iter()
                             .rev()
-                            // TODO Need to hack in the channel somehow...
                             .map(|m| {
                                 match m {
                                     Standard(mut msg) => {
