@@ -988,7 +988,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "slack_api"
 version = "0.19.0"
-source = "git+https://github.com/saethlin/slack-rs-api?branch=bot_add_and_remove#afdd4e3da0d77c78223daaca18cb06016621699f"
+source = "git+https://github.com/saethlin/slack-rs-api?branch=bot_add_and_remove#e965fed72209a1326c91f180616cf70ffc71ca12"
 dependencies = [
  "reqwest 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.27 (registry+https://github.com/rust-lang/crates.io-index)",

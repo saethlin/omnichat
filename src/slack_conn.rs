@@ -26,44 +26,53 @@ struct Handler {
 }
 
 impl Handler {
-    pub fn to_omni(&self, message: slack_api::MessageStandard) -> Option<Message> {
-        use slack_api::MessageStandard;
-        if let MessageStandard {
-            user: Some(user),
-            text: Some(mut text),
-            channel: Some(channel),
-            ..
-        } = message
-        {
-            text = text.replace("&amp;", "&");
-            text = text.replace("&lt;", "<");
-            text = text.replace("&gt;", ">");
+    pub fn to_omni(&self, message: slack_api::Message) -> Option<Message> {
+        use slack_api::Message::*;
+        use slack_api::{MessageBotMessage, MessageStandard};
+        // TODO: Add more success cases to this
+        let (channel, user, mut text) = match message {
+            Standard(MessageStandard {
+                user: Some(user),
+                channel: Some(channel),
+                text: Some(text),
+                ..
+            }) => (channel, user, text),
+            BotMessage(MessageBotMessage {
+                username: Some(name),
+                channel: Some(channel),
+                text: Some(text),
+                ..
+            }) => (channel, name, text),
+            _ => return None,
+        };
 
-            text = MENTION_REGEX
-                .replace_all(&text, |caps: &::regex::Captures| {
-                    if let Some(name) = self.users.get_human(&caps[0][2..11]) {
-                        format!("@{}", name)
-                    } else {
-                        format!("@{}", &caps[0][2..11])
-                    }
-                })
-                .into_owned();
+        text = text.replace("&amp;", "&");
+        text = text.replace("&lt;", "<");
+        text = text.replace("&gt;", ">");
 
-            text = CHANNEL_REGEX.replace_all(&text, "#$n").into_owned();
+        text = MENTION_REGEX
+            .replace_all(&text, |caps: &::regex::Captures| {
+                if let Some(name) = self.users.get_human(&caps[0][2..11]) {
+                    format!("@{}", name)
+                } else {
+                    format!("@{}", &caps[0][2..11])
+                }
+            })
+            .into_owned();
 
-            if let Some(channel) = self.channels.get_human(&channel) {
-                return Some(Message {
-                    server: self.server_name.clone(),
-                    channel: channel.clone(),
-                    sender: self.users.get_human(&user).unwrap_or(&user).clone(),
-                    is_mention: text.contains(&self.my_name),
-                    contents: text,
-                });
-            } else {
-                return None;
-            }
+        text = CHANNEL_REGEX.replace_all(&text, "#$n").into_owned();
+
+        let user = user.to_string();
+        if let Some(channel) = self.channels.get_human(&channel) {
+            return Some(Message {
+                server: self.server_name.clone(),
+                channel: channel.clone(),
+                sender: self.users.get_human(&user).unwrap_or(&user).clone(),
+                is_mention: text.contains(&self.my_name),
+                contents: text,
+            });
         } else {
-            None
+            return None;
         }
     }
 
@@ -189,27 +198,36 @@ impl SlackConn {
 
         // Spin off a thread that will feed message events back to the TUI
         thread::spawn(move || {
-            use websocket::OwnedMessage::{Ping, Pong, Text};
-            use slack_api::Message::Standard;
+            use websocket::OwnedMessage::{Close, Ping, Pong, Text};
             loop {
-                let message = websocket.recv_message();
-                if let Ok(Text(message)) = message {
-                    // parse the message and add it to events
-                    if let Ok(Standard(slackmessage)) =
-                        serde_json::from_str::<slack_api::Message>(&message)
-                    {
-                        if let Some(mut omnimessage) = thread_handler.to_omni(slackmessage) {
-                            thread_sender
-                                .send(Event::Message(omnimessage))
-                                .expect("Sender died")
+                match websocket.recv_message() {
+                    Ok(Text(message)) => {
+                        // parse the message and add it to events
+                        match serde_json::from_str::<slack_api::Message>(&message) {
+                            // Deserialized into a message, try to convert into an omnimessage
+                            Ok(message) => {
+                                if let Some(omnimessage) = thread_handler.to_omni(message) {
+                                    thread_sender.send(Event::Message(omnimessage)).unwrap()
+                                }
+                            }
+
+                            Err(e) => thread_sender.send(Event::Error(format!("{}", e))).unwrap(),
                         }
                     }
-                } else if let Ok(Ping(data)) = message {
-                    websocket.send_message(&Pong(data)).unwrap_or_else(|_| {
+                    Ok(Ping(data)) => {
+                        websocket.send_message(&Pong(data)).unwrap_or_else(|_| {
+                            thread_sender
+                                .send(Event::Error("Failed to Pong".to_string()))
+                                .unwrap()
+                        });
+                    }
+                    Ok(Close(_)) => {
                         thread_sender
-                            .send(Event::Error("Failed to Pong".to_string()))
-                            .expect("Sender died")
-                    });
+                            .send(Event::Error("Websocket closed".to_owned()))
+                            .unwrap();
+                    }
+                    Err(e) => thread_sender.send(Event::Error(format!("{}", e))).unwrap(),
+                    _ => {}
                 }
             }
         });
@@ -228,7 +246,7 @@ impl SlackConn {
 
             thread::spawn(move || {
                 use slack_api::channels::{history, HistoryRequest};
-                use slack_api::Message::Standard;
+                use slack_api::Message::{BotMessage, Standard};
                 let mut req = HistoryRequest::default();
                 req.channel = &channel_id;
                 let response = history(&client, &token, &req);
@@ -239,15 +257,17 @@ impl SlackConn {
                         req.channel = &channel_id;
                         match slack_api::groups::history(&client, &token, &req) {
                             Ok(response) => {
-                                for message in response.messages.unwrap().iter().rev().cloned() {
-                                    if let Standard(mut slackmessage) = message {
-                                        slackmessage.channel = Some(channel_id.clone());
-                                        if let Some(omnimessage) = handler.to_omni(slackmessage) {
-                                            sender
-                                                .send(Event::HistoryMessage(omnimessage))
-                                                .expect("Sender died");
-                                        }
-                                    }
+                                for message in response
+                                    .messages
+                                    .unwrap()
+                                    .iter()
+                                    .rev()
+                                    .cloned()
+                                    .filter_map(|m| handler.to_omni(m))
+                                {
+                                    sender
+                                        .send(Event::HistoryMessage(message))
+                                        .expect("Sender died");
                                 }
                                 sender
                                     .send(Event::HistoryLoaded {
@@ -265,22 +285,37 @@ impl SlackConn {
                         sender.send(Event::Error(format!("{:?}", e))).unwrap();
                     }
                     Ok(response) => {
-                        for message in response.messages.unwrap().iter().rev().cloned() {
-                            if let Standard(mut slackmessage) = message {
-                                slackmessage.channel = Some(channel_id.clone());
-                                if let Some(omnimessage) = handler.to_omni(slackmessage) {
-                                    sender
-                                        .send(Event::HistoryMessage(omnimessage))
-                                        .expect("Sender died");
+                        for message in response
+                            .messages
+                            .unwrap()
+                            .into_iter()
+                            .rev()
+                            // TODO Need to hack in the channel somehow...
+                            .map(|m| {
+                                match m {
+                                    Standard(mut msg) => {
+                                        msg.channel = Some(channel_id.clone());
+                                        Standard(msg)
+                                    },
+                                    BotMessage(mut msg) => {
+                                        msg.channel = Some(channel_id.clone());
+                                        BotMessage(msg)
+                                    }
+                                    _ => m,
                                 }
-                            }
+                            })
+                            .filter_map(|m| handler.to_omni(m))
+                        {
+                            sender
+                                .send(Event::HistoryMessage(message))
+                                .unwrap();
                         }
                         sender
                             .send(Event::HistoryLoaded {
                                 server: server_name,
                                 channel: channel_name.clone(),
                             })
-                            .expect("Sender died");
+                            .unwrap();
                     }
                 }
             });
