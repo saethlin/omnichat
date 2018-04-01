@@ -41,8 +41,10 @@ fn djb2(input: &str) -> u64 {
 
 #[derive(Debug, Fail)]
 enum TuiError {
-    #[fail(display = "Got a message from an unknown channel")] UnknownChannel,
-    #[fail(display = "Got a message from an unknown server")] UnknownServer,
+    #[fail(display = "Got a message from an unknown channel")]
+    UnknownChannel,
+    #[fail(display = "Got a message from an unknown server")]
+    UnknownServer,
 }
 
 pub struct TUI {

@@ -61,6 +61,7 @@ fn main() {
     use discord_conn::DiscordConn;
     use std::thread;
     use termion::raw::IntoRawMode;
+    use conn::Event;
     //use irc_conn::IrcConn;
 
     // Hack to make static linking openssl work
@@ -109,7 +110,7 @@ fn main() {
                 move || match IrcConn::new(i.nick, i.name, i.port, sender.clone()) {
                     Ok(connection) => conn_sender.send(connection).unwrap(),
                     Err(err) => sender
-                        .send(conn::Event::Error(format!("{:?}", err)))
+                        .send(omnierror!(err))
                         .unwrap(),
                 },
             );
@@ -124,9 +125,7 @@ fn main() {
             let conn_sender = conn_sender.clone();
             thread::spawn(move || match SlackConn::new(c.token, sender.clone()) {
                 Ok(connection) => conn_sender.send(connection).unwrap(),
-                Err(err) => sender
-                    .send(conn::Event::Error(format!("{:?}", err)))
-                    .unwrap(),
+                Err(err) => sender.send(omnierror!(err)).unwrap(),
             });
         }
     }
@@ -165,9 +164,7 @@ fn main() {
             match connection.recv_event() {
                 Ok(ev) => discord_sender.send(ev).unwrap(),
                 Err(discord::Error::Closed(..)) => break,
-                Err(err) => error_channel
-                    .send(conn::Event::Error(format!("{:?}", err)))
-                    .unwrap(),
+                Err(err) => error_channel.send(omnierror!(err)).unwrap(),
             }
         });
 
@@ -180,9 +177,7 @@ fn main() {
             thread::spawn(move || {
                 match DiscordConn::new(dis, info, discord_reciever, &c.name, sender.clone()) {
                     Ok(connection) => conn_sender.send(connection).unwrap(),
-                    Err(err) => sender
-                        .send(conn::Event::Error(format!("{:?}", err)))
-                        .unwrap(),
+                    Err(err) => sender.send(omnierror!(err)).unwrap(),
                 }
             });
         }

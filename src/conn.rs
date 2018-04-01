@@ -1,3 +1,5 @@
+#![macro_use]
+
 use termion;
 
 #[derive(Debug, Clone)]
@@ -21,9 +23,17 @@ pub enum Event {
 
 #[derive(Debug, Fail)]
 pub enum ConnError {
-    #[fail(display = "Slack response was damaged")] SlackError,
-    #[fail(display = "Discord response was damaged")] DiscordError,
+    #[fail(display = "Slack response was damaged")]
+    SlackError,
+    #[fail(display = "Discord response was damaged")]
+    DiscordError,
     //#[fail(display = "IRC response was damaged")] IrcError,
+}
+
+macro_rules! omnierror {
+    ($e: expr) => {
+        Event::Error(format!("{:#?}\nfile {}, line {}", $e, file!(), line!()))
+    };
 }
 
 pub trait Conn: Send {

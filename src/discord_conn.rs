@@ -157,9 +157,7 @@ impl DiscordConn {
                     .unwrap()
                     .get_messages(id, discord::GetMessages::MostRecent, Some(100))
                     .unwrap_or_else(|e| {
-                        sender
-                            .send(Event::Error(format!("{}", e)))
-                            .expect("Sender died");
+                        sender.send(omnierror!(e)).expect("Sender died");
                         Vec::new()
                     });
 
@@ -213,11 +211,13 @@ impl DiscordConn {
                                 }))
                                 .expect("Sender died");
                         } else {
+                            // TODO: Messages from other servers end up here
+                            // And they really shouldn't even be sent to us in the first place
                             /*
                             sender
                                 .send(Event::Error(format!(
-                                    "Got a message from unknown discord channel: {:?}",
-                                    &message.channel_id
+                                    "Got a message from unknown discord channel: {:?}\n{}",
+                                    &message.channel_id, &message.content,
                                 )))
                                 .unwrap();
                             */
@@ -250,12 +250,7 @@ impl Conn for DiscordConn {
             "",
             false,
         ) {
-            self.sender
-                .send(Event::Error(format!(
-                    "Failed to send Discord message: {:?}",
-                    err
-                )))
-                .expect("Sender died");
+            self.sender.send(omnierror!(err)).expect("Sender died");
         }
     }
 

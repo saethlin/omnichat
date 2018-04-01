@@ -28,7 +28,7 @@ struct Handler {
 impl Handler {
     pub fn to_omni(&self, message: slack_api::Message) -> Option<Message> {
         use slack_api::Message::*;
-        use slack_api::{MessageBotMessage, MessageStandard};
+        use slack_api::{MessageBotMessage, MessageSlackbotResponse, MessageStandard};
         // TODO: Add more success cases to this
         let (channel, user, mut text) = match message {
             Standard(MessageStandard {
@@ -43,6 +43,12 @@ impl Handler {
                 text: Some(text),
                 ..
             }) => (channel, name, text),
+            SlackbotResponse(MessageSlackbotResponse {
+                user: Some(user),
+                channel: Some(channel),
+                text: Some(text),
+                ..
+            }) => (channel, user, text),
             _ => return None,
         };
 
@@ -211,7 +217,7 @@ impl SlackConn {
                                 }
                             }
 
-                            Err(e) => thread_sender.send(Event::Error(format!("{}", e))).unwrap(),
+                            Err(e) => thread_sender.send(omnierror!(e)).unwrap(),
                         }
                     }
                     Ok(Ping(data)) => {
@@ -226,7 +232,7 @@ impl SlackConn {
                             .send(Event::Error("Websocket closed".to_owned()))
                             .unwrap();
                     }
-                    Err(e) => thread_sender.send(Event::Error(format!("{}", e))).unwrap(),
+                    Err(e) => thread_sender.send(omnierror!(e)).unwrap(),
                     _ => {}
                 }
             }
@@ -246,7 +252,7 @@ impl SlackConn {
 
             thread::spawn(move || {
                 use slack_api::channels::{history, HistoryRequest};
-                use slack_api::Message::{BotMessage, Standard};
+                use slack_api::Message::{BotMessage, SlackbotResponse, Standard};
                 let mut req = HistoryRequest::default();
                 req.channel = &channel_id;
                 let response = history(&client, &token, &req);
@@ -263,18 +269,21 @@ impl SlackConn {
                                     .iter()
                                     .rev()
                                     .cloned()
-                                    .map(|m| {
-                                        match m {
-                                            Standard(mut msg) => {
-                                                msg.channel = Some(channel_id.clone());
-                                                Standard(msg)
-                                            },
-                                            BotMessage(mut msg) => {
-                                                msg.channel = Some(channel_id.clone());
-                                                BotMessage(msg)
-                                            }
-                                            _ => m,
+                                    .map(|m| match m {
+                                        Standard(mut msg) => {
+                                            msg.channel = Some(channel_id.clone());
+                                            Standard(msg)
                                         }
+                                        BotMessage(mut msg) => {
+                                            msg.channel = Some(channel_id.clone());
+                                            BotMessage(msg)
+                                        }
+                                        SlackbotResponse(mut msg) => {
+                                            msg.channel = Some(channel_id.clone());
+                                            SlackbotResponse(msg)
+                                        }
+
+                                        _ => m,
                                     })
                                     .filter_map(|m| handler.to_omni(m))
                                 {
@@ -290,12 +299,12 @@ impl SlackConn {
                                     .expect("Sender died");
                             }
                             Err(e) => {
-                                sender.send(Event::Error(format!("{:?}", e))).unwrap();
+                                sender.send(omnierror!(e)).unwrap();
                             }
                         }
                     }
                     Err(e) => {
-                        sender.send(Event::Error(format!("{:?}", e))).unwrap();
+                        sender.send(omnierror!(e)).unwrap();
                     }
                     Ok(response) => {
                         for message in response
@@ -303,24 +312,24 @@ impl SlackConn {
                             .unwrap()
                             .into_iter()
                             .rev()
-                            .map(|m| {
-                                match m {
-                                    Standard(mut msg) => {
-                                        msg.channel = Some(channel_id.clone());
-                                        Standard(msg)
-                                    },
-                                    BotMessage(mut msg) => {
-                                        msg.channel = Some(channel_id.clone());
-                                        BotMessage(msg)
-                                    }
-                                    _ => m,
+                            .map(|m| match m {
+                                Standard(mut msg) => {
+                                    msg.channel = Some(channel_id.clone());
+                                    Standard(msg)
                                 }
+                                BotMessage(mut msg) => {
+                                    msg.channel = Some(channel_id.clone());
+                                    BotMessage(msg)
+                                }
+                                SlackbotResponse(mut msg) => {
+                                    msg.channel = Some(channel_id.clone());
+                                    SlackbotResponse(msg)
+                                }
+                                _ => m,
                             })
                             .filter_map(|m| handler.to_omni(m))
                         {
-                            sender
-                                .send(Event::HistoryMessage(message))
-                                .unwrap();
+                            sender.send(Event::HistoryMessage(message)).unwrap();
                         }
                         sender
                             .send(Event::HistoryLoaded {
@@ -470,9 +479,7 @@ impl Conn for SlackConn {
         request.as_user = Some(true);
         if post_message(&self.client, &self.token, &request).is_err() {
             if let Err(e) = post_message(&self.client, &self.token, &request) {
-                self.sender
-                    .send(Event::Error(format!("{:?}", e)))
-                    .expect("Sender died");
+                self.sender.send(omnierror!(e)).expect("Sender died");
             }
         }
     }

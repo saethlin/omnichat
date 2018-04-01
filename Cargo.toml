@@ -20,4 +20,3 @@ irc = "0.13"
 futures = "0.1"
 slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="bot_add_and_remove"}
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
-
