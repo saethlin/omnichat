@@ -1,4 +1,4 @@
-use std::collections::hash_map::IntoIter;
+use std::collections::hash_map::{IntoIter, Iter};
 use std::collections::HashMap;
 use std::hash::Hash;
 
@@ -55,6 +55,10 @@ where
         Q: Hash + Eq,
     {
         self.left_to_right.get(left)
+    }
+
+    pub fn iter(&self) -> Iter<L, R> {
+        self.left_to_right.iter()
     }
 }
 

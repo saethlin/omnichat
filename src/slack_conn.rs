@@ -89,16 +89,19 @@ impl Handler {
         }
     }
 
-    pub fn to_slack(&self, text: String) -> String {
-        /*
-        for &(ref code, ref replacement) in &self.mention_patterns {
-            text = text.replace(replacement, code);
+    pub fn to_slack(&self, mut text: String) -> String {
+        for (id, name) in self.users.iter() {
+            let name_mention = format!("@{}", name);
+            let slack_mention = format!("<@{}>", id);
+            text = text.replace(&name_mention, &slack_mention);
         }
 
-        for &(ref code, ref replacement) in &self.channel_patterns {
-            text = text.replace(replacement, code);
+        for (id, name) in self.channels.iter() {
+            let name_mention = format!("#{}", name);
+            let slack_mention = format!("<#{}|{}>", id, name);
+            text = text.replace(&name_mention, &slack_mention);
         }
-        */
+
         text
     }
 }

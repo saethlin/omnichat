@@ -26,5 +26,4 @@ discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals
 
 [profile.release]
 panic = "abort"
-lto = true
 
