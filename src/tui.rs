@@ -1,14 +1,14 @@
-use termion;
+use conn::{Conn, Event, Message};
+use std::io::stdin;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use std::io::stdin;
-use conn::{Conn, Event, Message};
+use termion;
 
-use termion::input::TermRead;
-use termion::event::Event::*;
-use termion::event::Key::*;
 use termion::color::{AnsiValue, Fg};
 use termion::cursor::Goto;
+use termion::event::Event::*;
+use termion::event::Key::*;
+use termion::input::TermRead;
 use termion::{color, style};
 
 use std::io::Write;
@@ -30,6 +30,8 @@ lazy_static! {
     };
 }
 
+const CHAN_WIDTH: u16 = 20;
+
 fn djb2(input: &str) -> u64 {
     let mut hash: u64 = 5381;
 
@@ -47,6 +49,8 @@ enum TuiError {
     UnknownServer,
 }
 
+use std::cell::Cell;
+use std::collections::HashMap;
 pub struct TUI {
     servers: Vec<Server>,
     current_server: usize,
@@ -57,6 +61,7 @@ pub struct TUI {
     events: Receiver<Event>,
     sender: Sender<Event>,
     server_scroll_offset: usize,
+    orphaned_messages: HashMap<String, Cell<Vec<Message>>>,
 }
 
 struct Server {
@@ -119,6 +124,7 @@ impl ChanMessage {
             if line == "" {
                 self.contents.push('\n');
             }
+
             if l == 0 {
                 for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
                 {
@@ -166,6 +172,7 @@ impl TUI {
             events: reciever,
             sender: sender,
             server_scroll_offset: 0,
+            orphaned_messages: HashMap::new(),
         };
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender));
@@ -286,29 +293,55 @@ impl TUI {
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
             .unwrap_or(0) as u16 + 1;
+
+        let previous_server_name = self.servers[self.current_server].name.clone();
+        self.servers.sort_by_key(|s| s.name.clone());
+        self.current_server = self.servers
+            .iter()
+            .position(|s| s.name == previous_server_name)
+            .unwrap();
     }
 
     fn add_message(&mut self, message: &Message, set_unread: bool) -> Result<(), Error> {
         use tui::TuiError::*;
+        //NLL HACK
+        {
+            let server = self.servers
+                .iter_mut()
+                .find(|s| s.name == message.server)
+                .ok_or(UnknownServer)?;
+            let channel = server
+                .channels
+                .iter_mut()
+                .find(|c| c.name == message.channel)
+                .ok_or(UnknownChannel)?;
 
-        let server = self.servers
-            .iter_mut()
-            .find(|s| s.name == message.server)
-            .ok_or(UnknownServer)?;
-        let channel = server
-            .channels
-            .iter_mut()
-            .find(|c| c.name == message.channel)
-            .ok_or(UnknownChannel)?;
+            if set_unread {
+                channel.num_unreads += 1;
+            }
 
-        if set_unread {
-            channel.num_unreads += 1;
+            channel.messages.push(ChanMessage::new(
+                message.sender.clone(),
+                message.contents.clone(),
+            ));
         }
 
-        channel.messages.push(ChanMessage::new(
-            message.sender.clone(),
-            message.contents.clone(),
-        ));
+        if message.is_mention {
+            self.servers[0].channels[1].messages.push(ChanMessage::new(
+                message.sender.clone(),
+                message.contents.clone(),
+            ));
+            if set_unread {
+                self.servers[0].channels[1].num_unreads += 1;
+                if self.current_server != 0 {
+                    self.draw_server_names();
+                    self.draw_message_area();
+                } else {
+                    self.draw();
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -336,20 +369,18 @@ impl TUI {
 
     #[allow(unused_must_use)]
     fn draw(&mut self) {
-        let chan_width = self.longest_channel_name + 1;
-
         let (width, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
         print!("{}", termion::clear::All);
 
         for i in 1..height + 1 {
-            print!("{}|", Goto(chan_width, i));
+            print!("{}|", Goto(CHAN_WIDTH, i));
         }
 
+        let remaining_width = (width - CHAN_WIDTH) as usize;
         // Reformat all the messages, inside their own block because NLLs
         {
-            let remaining_width = (width - chan_width) as usize;
             let server = &mut self.servers[self.current_server];
             for message in server.channels[server.current_channel].messages.iter_mut() {
                 message.format(remaining_width);
@@ -376,13 +407,13 @@ impl TUI {
             {
                 // Unread marker
                 if (draw_unread_marker) && (m == num_unreads) {
-                    write!(lock, "{}", Goto(chan_width + 1, row));
+                    write!(lock, "{}", Goto(CHAN_WIDTH + 1, row));
                     write!(
                         lock,
                         "{}{}{}",
                         Fg(color::Red),
                         ::std::iter::repeat('-')
-                            .take((width - chan_width) as usize)
+                            .take((width - CHAN_WIDTH) as usize)
                             .collect::<String>(),
                         Fg(color::Reset)
                     );
@@ -393,9 +424,16 @@ impl TUI {
                     }
                 }
 
+                if message.contents.contains("⎞̖̎") {
+                    self.sender().send(Event::Error(format!(
+                        "{}",
+                        message.contents.lines().count()
+                    )));
+                }
+
                 for (l, line) in message.contents.lines().rev().enumerate() {
                     let num_lines = message.contents.lines().count();
-                    write!(lock, "{}", Goto(chan_width + 1, row));
+                    write!(lock, "{}", Goto(CHAN_WIDTH + 1, row));
                     row -= 1;
                     if l == num_lines - 1 {
                         write!(
@@ -416,13 +454,14 @@ impl TUI {
             }
             // If we didn't draw the unread marker, put it at the top of the screen
             if draw_unread_marker {
-                write!(lock, "{}", Goto(chan_width + 1, 2));
+                use std::cmp::max;
+                write!(lock, "{}", Goto(CHAN_WIDTH + 1, max(2, row)));
                 write!(
                     lock,
                     "{}{}{}",
                     Fg(color::Red),
                     ::std::iter::repeat('-')
-                        .take((width - chan_width) as usize)
+                        .take((width - CHAN_WIDTH) as usize)
                         .collect::<String>(),
                     Fg(color::Reset)
                 );
@@ -438,11 +477,10 @@ impl TUI {
     fn draw_server_names(&mut self) {
         let out = ::std::io::stdout();
         let mut lock = out.lock();
-        let chan_width = self.longest_channel_name + 1;
         let (width, _) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-        let width = width - chan_width;
+        let width = width - CHAN_WIDTH;
         // If the end of the current server name does not appear on the screen, increase until it
         // does
         loop {
@@ -479,7 +517,7 @@ impl TUI {
         */
 
         // Draw all the server names across the top
-        write!(lock, "{}", Goto(chan_width + 1, 1)); // Move to the top-right corner
+        write!(lock, "{}", Goto(CHAN_WIDTH + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
         for (s, server) in self.servers
             .iter()
@@ -515,7 +553,6 @@ impl TUI {
     fn draw_message_area(&self) {
         let out = ::std::io::stdout();
         let mut lock = out.lock();
-        let chan_width = self.longest_channel_name + 1;
 
         let message_area_height = self.message_area_height();
 
@@ -523,14 +560,14 @@ impl TUI {
             write!(
                 lock,
                 "{}{}",
-                Goto(chan_width + 1, message_area_height + l as u16),
+                Goto(CHAN_WIDTH + 1, message_area_height + l as u16),
                 line
             );
         }
         if self.message_buffer.is_empty() {
             let (_, height) =
                 termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-            write!(lock, "{}", Goto(chan_width + 1, height));
+            write!(lock, "{}", Goto(CHAN_WIDTH + 1, height));
         }
 
         lock.flush().unwrap();
@@ -542,7 +579,6 @@ impl TUI {
         let mut lock = out.lock();
         let (_, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-        let chan_width = self.longest_channel_name + 1;
 
         // Draw all the channels for the current server down the left side
         let server = &mut self.servers[self.current_server];
@@ -562,8 +598,11 @@ impl TUI {
             .skip(server.channel_scroll_offset)
             .take(height as usize)
         {
-            let shortened_name =
-                String::from_iter(channel.name.chars().take((chan_width - 1) as usize));
+            let shortened_name = if channel.name.chars().count() < CHAN_WIDTH as usize {
+                channel.name.clone()
+            } else {
+                String::from_iter(channel.name.chars().take(CHAN_WIDTH as usize -4).chain("...".chars()))
+            };
             if c == server.current_channel {
                 write!(
                     lock,
@@ -611,9 +650,8 @@ impl TUI {
                 self.message_buffer.pop();
                 let (width, _) =
                     termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-                let chan_width = self.longest_channel_name + 1;
                 self.message_area_formatted =
-                    ::textwrap::fill(&self.message_buffer, (width - chan_width) as usize);
+                    ::textwrap::fill(&self.message_buffer, (width - CHAN_WIDTH) as usize);
                 self.draw();
             }
             Key(Ctrl('c')) => self.shutdown = true,
@@ -625,12 +663,20 @@ impl TUI {
                 self.next_channel();
                 self.draw();
             }
-            Key(Right) => {
+            Key(Right) | Key(Ctrl('d')) => {
                 self.next_server();
                 self.draw();
             }
-            Key(Left) => {
+            Key(Left) | Key(Ctrl('a')) => {
                 self.previous_server();
+                self.draw();
+            }
+            Key(PageDown) | Key(Ctrl('s')) => {
+                self.next_channel_unread();
+                self.draw();
+            }
+            Key(PageUp) | Key(Ctrl('w')) => {
+                self.previous_channel_unread();
                 self.draw();
             }
             Key(Char(c)) => {
@@ -639,23 +685,15 @@ impl TUI {
                 self.message_buffer.push(c);
                 let (width, _) =
                     termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-                let chan_width = self.longest_channel_name;
+
                 self.message_area_formatted =
-                    ::textwrap::fill(&self.message_buffer, (width - chan_width - 1) as usize);
+                    ::textwrap::fill(&self.message_buffer, (width - CHAN_WIDTH - 1) as usize);
 
                 if previous_num_lines != self.message_area_formatted.lines().count() {
                     self.draw();
                 } else {
                     self.draw_message_area();
                 }
-            }
-            Key(PageDown) => {
-                self.next_channel_unread();
-                self.draw();
-            }
-            Key(PageUp) => {
-                self.previous_channel_unread();
-                self.draw();
             }
             _ => {}
         }
@@ -699,8 +737,10 @@ impl TUI {
                     }
                 }
                 Event::HistoryMessage(message) => {
-                    if let Err(e) = self.add_message(&message, false) {
-                        self.add_client_message(&e.to_string());
+                    // Attempt to add message, otherwise requeue it
+                    // TODO: This is a performance bug
+                    if self.add_message(&message, false).is_err() {
+                        self.orphaned_messages.entry(message.server.clone()).or_insert(Cell::new(Vec::with_capacity(1_000))).get_mut().push(message);
                     }
                 }
                 Event::Error(message) => {
@@ -717,6 +757,19 @@ impl TUI {
                     if (server == server_name) && (channel == channel_name) {
                         self.draw();
                     }
+                }
+                Event::Connected(conn) => {
+                    let new_server_name = conn.name().to_owned();
+                    self.add_server(conn);
+
+                    if self.orphaned_messages.get(&new_server_name).is_some() {
+                        let orphans = self.orphaned_messages.get(&new_server_name).unwrap().take();
+                        for msg in orphans {
+                            self.add_message(&msg, false).unwrap();
+                        }
+                    }
+
+                    self.draw();
                 }
             }
             if self.shutdown {

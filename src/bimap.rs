@@ -1,69 +1,72 @@
+use std::collections::hash_map::IntoIter;
 use std::collections::HashMap;
 use std::hash::Hash;
 
 #[derive(Clone)]
-pub struct BiMapBuilder<I, H> {
-    pub id: Vec<I>,
-    pub human: Vec<H>,
+pub struct BiMap<L, R> {
+    left_to_right: HashMap<L, R>,
+    right_to_left: HashMap<R, L>,
 }
 
-#[derive(Clone)]
-pub struct BiMap<I, H> {
-    id_to_human: HashMap<I, H>,
-    human_to_id: HashMap<H, I>,
-}
-
-impl<I, H> BiMap<I, H>
+impl<L, R> BiMap<L, R>
 where
-    I: Eq + Hash + Clone,
-    H: Eq + Hash + Clone,
+    L: Eq + Hash + Clone,
+    R: Eq + Hash + Clone,
 {
-    pub fn new(builder: BiMapBuilder<I, H>) -> Self {
-        let mut id_to_human = HashMap::new();
-        let mut human_to_id = HashMap::new();
-
-        for (id, human) in builder.id.into_iter().zip(builder.human.into_iter()) {
-            id_to_human.insert(id.clone(), human.clone());
-            human_to_id.insert(human, id);
+    pub fn new() -> Self {
+        Self {
+            left_to_right: HashMap::new(),
+            right_to_left: HashMap::new(),
         }
+    }
 
+    pub fn insert(&mut self, left: L, right: R) {
+        self.left_to_right.insert(left.clone(), right.clone());
+        self.right_to_left.insert(right.clone(), left.clone());
+    }
+
+    pub fn from(left: &[L], right: &[R]) -> Self {
+        let mut left_to_right = HashMap::new();
+        let mut right_to_left = HashMap::new();
+        left.iter()
+            .cloned()
+            .zip(right.iter().cloned())
+            .for_each(|(l, r)| {
+                left_to_right.insert(l.clone(), r.clone());
+                right_to_left.insert(r, l);
+            });
         BiMap {
-            id_to_human,
-            human_to_id,
+            left_to_right,
+            right_to_left,
         }
     }
 
-    pub fn get_human<Q: ?Sized>(&self, id: &Q) -> Option<&H>
+    pub fn get_left<Q: ?Sized>(&self, right: &Q) -> Option<&L>
     where
-        I: ::std::borrow::Borrow<Q>,
+        R: ::std::borrow::Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.id_to_human.get(id)
+        self.right_to_left.get(right)
     }
 
-    pub fn get_id<Q: ?Sized>(&self, human: &Q) -> Option<&I>
+    pub fn get_right<Q: ?Sized>(&self, left: &Q) -> Option<&R>
     where
-        H: ::std::borrow::Borrow<Q>,
+        L: ::std::borrow::Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.human_to_id.get(human)
-    }
-
-    pub fn contains_id(&self, val: &I) -> bool {
-        self.id_to_human.contains_key(val)
+        self.left_to_right.get(left)
     }
 }
 
-use std::collections::hash_map::IntoIter;
-impl<I, H> IntoIterator for BiMap<I, H>
+impl<L, R> IntoIterator for BiMap<L, R>
 where
-    I: Eq + Hash,
-    H: Eq + Hash,
+    L: Eq + Hash,
+    R: Eq + Hash,
 {
-    type Item = (I, H);
-    type IntoIter = IntoIter<I, H>;
+    type Item = (L, R);
+    type IntoIter = IntoIter<L, R>;
 
-    fn into_iter(self) -> IntoIter<I, H> {
-        self.id_to_human.into_iter()
+    fn into_iter(self) -> IntoIter<L, R> {
+        self.left_to_right.into_iter()
     }
 }

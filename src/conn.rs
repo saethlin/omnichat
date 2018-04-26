@@ -12,13 +12,13 @@ pub struct Message {
     //pub timestamp: f64,
 }
 
-#[derive(Debug, Clone)]
 pub enum Event {
     Message(Message),
     HistoryMessage(Message),
     HistoryLoaded { server: String, channel: String },
     Input(termion::event::Event),
     Error(String),
+    Connected(Box<Conn>),
 }
 
 #[derive(Debug, Fail)]
@@ -27,11 +27,10 @@ pub enum ConnError {
     SlackError,
     #[fail(display = "Discord response was damaged")]
     DiscordError,
-    //#[fail(display = "IRC response was damaged")] IrcError,
 }
 
 macro_rules! omnierror {
-    ($e: expr) => {
+    ($e:expr) => {
         Event::Error(format!("{:#?}\nfile {}, line {}", $e, file!(), line!()))
     };
 }
@@ -48,4 +47,6 @@ pub trait Conn: Send {
     fn autocomplete(&self, _word: &str) -> Option<&str> {
         None
     }
+
+    fn mark_read(&self, _channel: &str) {}
 }

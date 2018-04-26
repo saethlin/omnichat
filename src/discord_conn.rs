@@ -1,12 +1,12 @@
-use std::sync::mpsc::Sender;
-use std::thread;
-use std::sync::{Arc, RwLock};
-use bimap::{BiMap, BiMapBuilder};
-use conn::{Conn, Event, Message};
+use bimap::BiMap;
 use conn::ConnError::DiscordError;
-use failure::Error;
+use conn::{Conn, Event, Message};
 use discord;
 use discord::model::ChannelId;
+use failure::Error;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, RwLock};
+use std::thread;
 
 pub struct DiscordConn {
     discord: Arc<RwLock<discord::Discord>>,
@@ -97,8 +97,8 @@ impl DiscordConn {
             .unwrap();
         let my_roles = me_as_member.roles.clone();
 
-        use discord::model::ChannelType;
         use discord::model::permissions::Permissions;
+        use discord::model::ChannelType;
         let mut channel_names = Vec::new();
         let mut channel_ids = Vec::new();
         let mut channel_patterns = Vec::new();
@@ -134,10 +134,7 @@ impl DiscordConn {
             }
         }
 
-        let channels = BiMap::new(BiMapBuilder {
-            human: channel_names.clone(),
-            id: channel_ids,
-        });
+        let channels = BiMap::from(&channel_ids, &channel_names);
 
         let handler = Arc::new(Handler {
             server_name: server_name.to_owned(),
@@ -152,6 +149,8 @@ impl DiscordConn {
             let sender = sender.clone();
             let handler = Arc::clone(&handler);
             thread::spawn(move || {
+                let current_user = handle.read().unwrap().get_current_user().unwrap();
+                let my_mention = format!("{}", current_user.id.mention());
                 let mut messages = handle
                     .read()
                     .unwrap()
@@ -171,7 +170,11 @@ impl DiscordConn {
                             channel: name.clone(),
                             sender: m.author.name.clone(),
                             contents: handler.to_omni(&m),
-                            is_mention: false,
+                            is_mention: m.mentions
+                                .iter()
+                                .map(|u| format!("{}", u.id.mention()))
+                                .find(|m| m == &my_mention)
+                                .is_some(),
                         }))
                         .expect("Sender died");
                 }
@@ -198,14 +201,19 @@ impl DiscordConn {
                     if let discord::model::Event::MessageCreate(message) = ev {
                         if let Some(channel_name) = handler
                             .channels
-                            .get_human(&message.channel_id)
+                            .get_right(&message.channel_id)
                             .map(|c| c.clone())
                         {
                             sender
                                 .send(Event::Message(Message {
                                     server: handler.server_name.clone(),
                                     channel: channel_name,
-                                    is_mention: message.content.contains(&my_mention),
+                                    is_mention: message
+                                        .mentions
+                                        .iter()
+                                        .map(|u| format!("{}", u.id.mention()))
+                                        .find(|m| m == &my_mention)
+                                        .is_some(),
                                     contents: handler.to_omni(&message),
                                     sender: message.author.name,
                                 }))
@@ -243,7 +251,7 @@ impl Conn for DiscordConn {
         let dis = self.discord.write().unwrap();
         if let Err(err) = dis.send_message(
             self.channels
-                .get_id(&String::from(channel))
+                .get_left(&String::from(channel))
                 .unwrap()
                 .clone(),
             &self.handler.to_discord(contents.to_string()),
