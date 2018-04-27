@@ -292,101 +292,65 @@ impl SlackConn {
 
             let channel_id = format!("{}", channel_id);
             thread::spawn(move || {
-                use slack_api::channels::{history, HistoryRequest};
-                use slack_api::Message::{BotMessage, SlackbotResponse, Standard, FileShare};
-                let mut req = HistoryRequest::default();
-                req.channel = &channel_id;
-                let response = history(&client, &token, &req);
-                match response {
-                    // This is a disgusting hack to handle how slack treats private channels as groups
-                    Err(slack_api::channels::HistoryError::ChannelNotFound) => {
-                        let mut req = slack_api::groups::HistoryRequest::default();
-                        req.channel = &channel_id;
-                        match slack_api::groups::history(&client, &token, &req) {
-                            Ok(response) => {
-                                for message in response
-                                    .messages
-                                    .unwrap()
-                                    .iter()
-                                    .rev()
-                                    .cloned()
-                                    .map(|m| match m {
-                                        Standard(mut msg) => {
-                                            msg.channel = Some(channel_id.clone());
-                                            Standard(msg)
-                                        }
-                                        BotMessage(mut msg) => {
-                                            msg.channel = Some(channel_id.clone());
-                                            BotMessage(msg)
-                                        }
-                                        SlackbotResponse(mut msg) => {
-                                            msg.channel = Some(channel_id.clone());
-                                            SlackbotResponse(msg)
-                                        }
-                                        FileShare(mut msg) => {
-                                            msg.channel = Some(channel_id.clone());
-                                            FileShare(msg)
-                                        }
-                                        _ => m,
-                                    })
-                                    .filter_map(|m| handler.to_omni(m))
-                                {
-                                    sender
-                                        .send(Event::HistoryMessage(message))
-                                        .expect("Sender died");
-                                }
-                                sender
-                                    .send(Event::HistoryLoaded {
-                                        server: server_name,
-                                        channel: format!("{}", channel_name),
-                                    })
-                                    .expect("Sender died");
-                            }
-                            Err(e) => {
-                                sender.send(omnierror!(e)).unwrap();
-                            }
+                use slack_api::Message::{BotMessage, FileShare, SlackbotResponse, Standard};
+                use slack_api::{channels, groups};
+
+                let messages = if channel_id.starts_with('C') {
+                    let mut req = channels::HistoryRequest::default();
+                    req.channel = &channel_id;
+                    match channels::history(&client, &token, &req) {
+                        Ok(response) => response.messages.unwrap(),
+                        Err(e) => {
+                            sender.send(omnierror!(e)).unwrap();
+                            Vec::new()
                         }
                     }
-                    Err(e) => {
-                        sender.send(omnierror!(e)).unwrap();
-                    }
-                    Ok(response) => {
-                        for message in response
-                            .messages
-                            .unwrap()
-                            .into_iter()
-                            .rev()
-                            .map(|m| match m {
-                                Standard(mut msg) => {
-                                    msg.channel = Some(channel_id.clone());
-                                    Standard(msg)
-                                }
-                                BotMessage(mut msg) => {
-                                    msg.channel = Some(channel_id.clone());
-                                    BotMessage(msg)
-                                }
-                                SlackbotResponse(mut msg) => {
-                                    msg.channel = Some(channel_id.clone());
-                                    SlackbotResponse(msg)
-                                }
-                                FileShare(mut msg) => {
-                                    msg.channel = Some(channel_id.clone());
-                                    FileShare(msg)
-                                }
-                                _ => m,
-                            })
-                            .filter_map(|m| handler.to_omni(m))
-                        {
-                            sender.send(Event::HistoryMessage(message)).unwrap();
+                } else if channel_id.starts_with('G') {
+                    let mut req = groups::HistoryRequest::default();
+                    req.channel = &channel_id;
+                    match groups::history(&client, &token, &req) {
+                        Ok(response) => response.messages.unwrap(),
+                        Err(e) => {
+                            sender.send(omnierror!(e)).unwrap();
+                            Vec::new()
                         }
-                        sender
-                            .send(Event::HistoryLoaded {
-                                server: server_name,
-                                channel: format!("{}", channel_name),
-                            })
-                            .unwrap();
+                    }
+                } else {
+                    sender
+                        .send(Event::Error(format!(
+                            "Don't understand this channel ID {}",
+                            channel_id
+                        )))
+                        .unwrap();
+                    Vec::new()
+                };
+
+                for mut message in messages.into_iter().rev() {
+                    match message {
+                        Standard(ref mut msg) => {
+                            msg.channel = Some(channel_id.clone());
+                        }
+                        BotMessage(ref mut msg) => {
+                            msg.channel = Some(channel_id.clone());
+                        }
+                        SlackbotResponse(ref mut msg) => {
+                            msg.channel = Some(channel_id.clone());
+                        }
+                        FileShare(ref mut msg) => {
+                            msg.channel = Some(channel_id.clone());
+                        }
+                        _ => {}
+                    }
+                    if let Some(message) = handler.to_omni(message) {
+                        sender.send(Event::HistoryMessage(message)).unwrap();
                     }
                 }
+                sender
+                    .send(Event::HistoryLoaded {
+                        server: server_name,
+                        channel: channel_name,
+                    })
+                    .unwrap();
             });
         }
 
@@ -427,7 +391,7 @@ impl Conn for SlackConn {
     }
 
     fn mark_read(&self, channel: &str, _timestamp: Option<&str>) {
-        use slack_api::channels::{mark, MarkRequest};
+        use slack_api::{channels, groups};
 
         let channel_id = self.channels.get_left(channel).expect("channel not found");
         let channel_id_str = format!("{}", channel_id);
@@ -438,13 +402,30 @@ impl Conn for SlackConn {
         thread::spawn(move || {
             let unix_ts = ::chrono::offset::Local::now().timestamp() + 1;
             let ts = unix_ts.to_string();
-            let request = MarkRequest {
-                channel: &channel_id_str,
-                ts: &ts,
-            };
 
-            if let Err(e) = mark(&client, &token, &request) {
-                sender.send(omnierror!(e)).unwrap();
+            if channel_id_str.starts_with('C') {
+                let request = channels::MarkRequest {
+                    channel: &channel_id_str,
+                    ts: &ts,
+                };
+                if let Err(e) = channels::mark(&client, &token, &request) {
+                    sender.send(omnierror!(e)).unwrap();
+                }
+            } else if channel_id_str.starts_with('G') {
+                let request = groups::MarkRequest {
+                    channel: &channel_id_str,
+                    ts: &ts,
+                };
+                if let Err(e) = groups::mark(&client, &token, &request) {
+                    sender.send(omnierror!(e)).unwrap();
+                }
+            } else {
+                sender
+                    .send(Event::Error(format!(
+                        "Don't understand this channel ID {}",
+                        channel_id_str
+                    )))
+                    .unwrap();
             }
         });
     }
