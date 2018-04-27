@@ -188,6 +188,14 @@ impl TUI {
     fn reset_current_unreads(&mut self) {
         let server = &mut self.servers[self.current_server];
         server.channels[server.current_channel].num_unreads = 0;
+        let current_channel = &server.channels[server.current_channel];
+        server.connection.mark_read(
+            &current_channel.name,
+            current_channel
+                .messages
+                .last()
+                .map(|m| m.timestamp.as_str()),
+        );
     }
 
     fn next_server(&mut self) {
@@ -250,9 +258,6 @@ impl TUI {
         if server.current_channel >= server.channels.len() {
             server.current_channel = 0;
         }
-
-        let current_channel = &server.channels[server.current_channel];
-        server.connection.mark_read(&current_channel.name, current_channel.messages.last().map(|m| m.timestamp.as_str()));
     }
 
     fn previous_channel(&mut self) {
@@ -266,9 +271,11 @@ impl TUI {
     }
 
     fn add_client_message(&mut self, message: &str) {
-        self.servers[0].channels[0]
-            .messages
-            .push(ChanMessage::new(String::from("Client"), message.to_owned(), 0.0.to_string()));
+        self.servers[0].channels[0].messages.push(ChanMessage::new(
+            String::from("Client"),
+            message.to_owned(),
+            0.0.to_string(),
+        ));
         if !((self.current_server == 0) & (self.servers[0].current_channel == 0)) {
             self.servers[0].channels[0].num_unreads += 1;
         }

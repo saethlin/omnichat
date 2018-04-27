@@ -32,7 +32,8 @@ struct Handler {
 impl Handler {
     pub fn to_omni(&self, message: slack_api::Message) -> Option<Message> {
         use slack_api::Message::*;
-        use slack_api::{MessageBotMessage, MessageSlackbotResponse, MessageStandard};
+        use slack_api::{MessageBotMessage, MessageFileShare, MessageSlackbotResponse,
+                        MessageStandard};
         // TODO: Add more success cases to this
         let (channel, user, mut text, ts) = match message {
             Standard(MessageStandard {
@@ -50,6 +51,13 @@ impl Handler {
                 ..
             }) => (channel, name, text, ts),
             SlackbotResponse(MessageSlackbotResponse {
+                user: Some(user),
+                channel: Some(channel),
+                text: Some(text),
+                ts: Some(ts),
+                ..
+            }) => (channel, user, text, ts),
+            FileShare(MessageFileShare {
                 user: Some(user),
                 channel: Some(channel),
                 text: Some(text),
@@ -285,7 +293,7 @@ impl SlackConn {
             let channel_id = format!("{}", channel_id);
             thread::spawn(move || {
                 use slack_api::channels::{history, HistoryRequest};
-                use slack_api::Message::{BotMessage, SlackbotResponse, Standard};
+                use slack_api::Message::{BotMessage, SlackbotResponse, Standard, FileShare};
                 let mut req = HistoryRequest::default();
                 req.channel = &channel_id;
                 let response = history(&client, &token, &req);
@@ -315,7 +323,10 @@ impl SlackConn {
                                             msg.channel = Some(channel_id.clone());
                                             SlackbotResponse(msg)
                                         }
-
+                                        FileShare(mut msg) => {
+                                            msg.channel = Some(channel_id.clone());
+                                            FileShare(msg)
+                                        }
                                         _ => m,
                                     })
                                     .filter_map(|m| handler.to_omni(m))
@@ -358,6 +369,10 @@ impl SlackConn {
                                     msg.channel = Some(channel_id.clone());
                                     SlackbotResponse(msg)
                                 }
+                                FileShare(mut msg) => {
+                                    msg.channel = Some(channel_id.clone());
+                                    FileShare(msg)
+                                }
                                 _ => m,
                             })
                             .filter_map(|m| handler.to_omni(m))
@@ -378,13 +393,12 @@ impl SlackConn {
         Ok(Box::new(SlackConn {
             token: token.to_string(),
             client: slack_api::requests::Client::new()?,
-            users: users,
-            channels: channels,
-            channel_names: channel_names,
-            team_name: team_name,
-            //last_message_timestamp: "".to_owned(),
-            sender: sender,
-            handler: handler,
+            users,
+            channels,
+            channel_names,
+            team_name,
+            sender,
+            handler,
         }))
     }
 }
@@ -412,19 +426,20 @@ impl Conn for SlackConn {
         &self.team_name
     }
 
-    fn mark_read(&self, channel: &str, timestamp: Option<&str>) {
+    fn mark_read(&self, channel: &str, _timestamp: Option<&str>) {
         use slack_api::channels::{mark, MarkRequest};
 
         let channel_id = self.channels.get_left(channel).expect("channel not found");
         let channel_id_str = format!("{}", channel_id);
 
-        let ts = timestamp.unwrap().to_string();
         let client = slack_api::requests::Client::new().unwrap();
         let token = self.token.clone();
         let sender = self.sender.clone();
         thread::spawn(move || {
+            let unix_ts = ::chrono::offset::Local::now().timestamp() + 1;
+            let ts = unix_ts.to_string();
             let request = MarkRequest {
-                channel:&channel_id_str,
+                channel: &channel_id_str,
                 ts: &ts,
             };
 
