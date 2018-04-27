@@ -9,7 +9,7 @@ pub struct Message {
     pub sender: String,
     pub contents: String,
     pub is_mention: bool,
-    //pub timestamp: f64,
+    pub timestamp: String,
 }
 
 pub enum Event {
@@ -48,5 +48,5 @@ pub trait Conn: Send {
         None
     }
 
-    fn mark_read(&self, _channel: &str) {}
+    fn mark_read(&self, _channel: &str, _timestamp: Option<&str>) {}
 }

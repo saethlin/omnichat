@@ -175,6 +175,7 @@ impl DiscordConn {
                                 .map(|u| format!("{}", u.id.mention()))
                                 .find(|m| m == &my_mention)
                                 .is_some(),
+                            timestamp: m.timestamp.timestamp().to_string(), // TODO: jam more precision in here?
                         }))
                         .expect("Sender died");
                 }
@@ -216,6 +217,7 @@ impl DiscordConn {
                                         .is_some(),
                                     contents: handler.to_omni(&message),
                                     sender: message.author.name,
+                                    timestamp: message.timestamp.timestamp().to_string(),
                                 }))
                                 .expect("Sender died");
                         } else {

@@ -34,25 +34,28 @@ impl Handler {
         use slack_api::Message::*;
         use slack_api::{MessageBotMessage, MessageSlackbotResponse, MessageStandard};
         // TODO: Add more success cases to this
-        let (channel, user, mut text) = match message {
+        let (channel, user, mut text, ts) = match message {
             Standard(MessageStandard {
                 user: Some(user),
                 channel: Some(channel),
                 text: Some(text),
+                ts: Some(ts),
                 ..
-            }) => (channel, user, text),
+            }) => (channel, user, text, ts),
             BotMessage(MessageBotMessage {
                 username: Some(name),
                 channel: Some(channel),
                 text: Some(text),
+                ts: Some(ts),
                 ..
-            }) => (channel, name, text),
+            }) => (channel, name, text, ts),
             SlackbotResponse(MessageSlackbotResponse {
                 user: Some(user),
                 channel: Some(channel),
                 text: Some(text),
+                ts: Some(ts),
                 ..
-            }) => (channel, user, text),
+            }) => (channel, user, text, ts),
             _ => return None,
         };
 
@@ -83,6 +86,7 @@ impl Handler {
                     .clone(),
                 is_mention: text.contains(&self.my_name),
                 contents: text,
+                timestamp: ts,
             });
         } else {
             return None;
@@ -107,6 +111,7 @@ impl Handler {
 }
 
 use std::sync::Arc;
+
 pub struct SlackConn {
     token: String,
     team_name: String,
@@ -120,7 +125,6 @@ pub struct SlackConn {
 
 impl SlackConn {
     pub fn new(token: String, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
-
         let connect_handle = {
             let token = token.clone();
             thread::spawn(move || -> Result<slack_api::rtm::ConnectResponse, Error> {
@@ -198,7 +202,9 @@ impl SlackConn {
 
         // Slack private channels are actually groups
         let (mut channel_names, mut channels) = channels_handle.join().unwrap()?;
-        for group in groups_handle.join().unwrap()?
+        for group in groups_handle
+            .join()
+            .unwrap()?
             .groups
             .ok_or(SlackError)?
             .iter()
@@ -404,5 +410,27 @@ impl Conn for SlackConn {
 
     fn name(&self) -> &str {
         &self.team_name
+    }
+
+    fn mark_read(&self, channel: &str, timestamp: Option<&str>) {
+        use slack_api::channels::{mark, MarkRequest};
+
+        let channel_id = self.channels.get_left(channel).expect("channel not found");
+        let channel_id_str = format!("{}", channel_id);
+
+        let ts = timestamp.unwrap().to_string();
+        let client = slack_api::requests::Client::new().unwrap();
+        let token = self.token.clone();
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let request = MarkRequest {
+                channel:&channel_id_str,
+                ts: &ts,
+            };
+
+            if let Err(e) = mark(&client, &token, &request) {
+                sender.send(omnierror!(e)).unwrap();
+            }
+        });
     }
 }

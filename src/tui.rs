@@ -89,15 +89,17 @@ struct ChanMessage {
     raw: String,
     pub contents: String,
     pub sender: String,
+    timestamp: String,
 }
 
 impl ChanMessage {
-    fn new(sender: String, contents: String) -> Self {
+    fn new(sender: String, contents: String, timestamp: String) -> Self {
         ChanMessage {
             formatted_width: None,
             raw: contents,
             contents: String::new(),
-            sender: sender,
+            sender,
+            timestamp,
         }
     }
 
@@ -248,6 +250,9 @@ impl TUI {
         if server.current_channel >= server.channels.len() {
             server.current_channel = 0;
         }
+
+        let current_channel = &server.channels[server.current_channel];
+        server.connection.mark_read(&current_channel.name, current_channel.messages.last().map(|m| m.timestamp.as_str()));
     }
 
     fn previous_channel(&mut self) {
@@ -263,7 +268,7 @@ impl TUI {
     fn add_client_message(&mut self, message: &str) {
         self.servers[0].channels[0]
             .messages
-            .push(ChanMessage::new(String::from("Client"), message.to_owned()));
+            .push(ChanMessage::new(String::from("Client"), message.to_owned(), 0.0.to_string()));
         if !((self.current_server == 0) & (self.servers[0].current_channel == 0)) {
             self.servers[0].channels[0].num_unreads += 1;
         }
@@ -323,6 +328,7 @@ impl TUI {
             channel.messages.push(ChanMessage::new(
                 message.sender.clone(),
                 message.contents.clone(),
+                message.timestamp.clone(),
             ));
         }
 
@@ -330,6 +336,7 @@ impl TUI {
             self.servers[0].channels[1].messages.push(ChanMessage::new(
                 message.sender.clone(),
                 message.contents.clone(),
+                message.timestamp.clone(),
             ));
             if set_unread {
                 self.servers[0].channels[1].num_unreads += 1;
@@ -601,7 +608,13 @@ impl TUI {
             let shortened_name = if channel.name.chars().count() < CHAN_WIDTH as usize {
                 channel.name.clone()
             } else {
-                String::from_iter(channel.name.chars().take(CHAN_WIDTH as usize -4).chain("...".chars()))
+                String::from_iter(
+                    channel
+                        .name
+                        .chars()
+                        .take(CHAN_WIDTH as usize - 4)
+                        .chain("...".chars()),
+                )
             };
             if c == server.current_channel {
                 write!(
@@ -740,7 +753,11 @@ impl TUI {
                     // Attempt to add message, otherwise requeue it
                     // TODO: This is a performance bug
                     if self.add_message(&message, false).is_err() {
-                        self.orphaned_messages.entry(message.server.clone()).or_insert(Cell::new(Vec::with_capacity(1_000))).get_mut().push(message);
+                        self.orphaned_messages
+                            .entry(message.server.clone())
+                            .or_insert(Cell::new(Vec::with_capacity(1_000)))
+                            .get_mut()
+                            .push(message);
                     }
                 }
                 Event::Error(message) => {
@@ -809,6 +826,7 @@ impl Conn for ClientConn {
                 contents: contents.to_string(),
                 sender: String::new(),
                 is_mention: false,
+                timestamp: 0.0.to_string(),
             }))
             .expect("Sender died");
     }
