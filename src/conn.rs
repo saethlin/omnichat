@@ -31,22 +31,22 @@ pub enum ConnError {
 
 macro_rules! omnierror {
     ($e:expr) => {
-        Event::Error(format!("{:#?}\nfile {}, line {}", $e, file!(), line!()))
+        Event::Error(format!("{}\nfile {}, line {}", $e, file!(), line!()))
     };
 }
 
 pub trait Conn: Send {
     fn name(&self) -> &str;
 
-    fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
+    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a>;
 
     fn send_channel_message(&mut self, _channel: &str, _contents: &str) {}
 
-    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a>;
+    fn mark_read(&self, _channel: &str, _timestamp: Option<&str>) {}
+
+    fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
 
     fn autocomplete(&self, _word: &str) -> Option<&str> {
         None
     }
-
-    fn mark_read(&self, _channel: &str, _timestamp: Option<&str>) {}
 }

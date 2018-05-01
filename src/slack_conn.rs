@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use bimap::BiMap;
 use conn::ConnError::SlackError;
 use conn::{Conn, Event, Message};
@@ -118,8 +119,6 @@ impl Handler {
     }
 }
 
-use std::sync::Arc;
-
 pub struct SlackConn {
     token: String,
     team_name: String,
@@ -136,15 +135,15 @@ impl SlackConn {
         let connect_handle = {
             let token = token.clone();
             thread::spawn(move || -> Result<slack_api::rtm::ConnectResponse, Error> {
-                let client = slack_api::requests::Client::new()?;
-                Ok(slack_api::rtm::connect(&client, &token)?)
+                let client = slack_api::requests::default_client()?;
+                Ok(slack_api::rtm::connect(&client, &token, &slack_api::rtm::ConnectRequest::default())?)
             })
         };
 
         let users_handle = {
             let token = token.clone();
             thread::spawn(move || -> Result<_, Error> {
-                let client = slack_api::requests::Client::new()?;
+                let client = slack_api::requests::default_client()?;
                 let users_response = slack_api::users::list(
                     &client,
                     &token,
@@ -152,7 +151,7 @@ impl SlackConn {
                 )?;
 
                 let mut users = BiMap::new();
-                for user in users_response.members.ok_or(SlackError)? {
+                for user in users_response.members {
                     if let slack_api::User {
                         id: Some(id),
                         name: Some(name),
@@ -173,7 +172,7 @@ impl SlackConn {
             {
                 let token = token.clone();
                 thread::spawn(move || -> Result<_, Error> {
-                    let client = slack_api::requests::Client::new()?;
+                    let client = slack_api::requests::default_client()?;
                     let channels = slack_api::channels::list(
                         &client,
                         &token,
@@ -199,7 +198,7 @@ impl SlackConn {
         let groups_handle = {
             let token = token.clone();
             thread::spawn(move || -> Result<_, Error> {
-                let client = slack_api::requests::Client::new()?;
+                let client = slack_api::requests::default_client()?;
                 Ok(slack_api::groups::list(
                     &client,
                     &token,
@@ -286,7 +285,7 @@ impl SlackConn {
         for (channel_id, channel_name) in channels.clone().into_iter() {
             let sender = sender.clone();
             let handler = handler.clone();
-            let client = slack_api::requests::Client::new().unwrap();
+            let client = slack_api::requests::default_client().unwrap();
             let token = token.clone();
             let server_name = team_name.clone();
 
@@ -356,7 +355,7 @@ impl SlackConn {
 
         Ok(Box::new(SlackConn {
             token: token.to_string(),
-            client: slack_api::requests::Client::new()?,
+            client: slack_api::requests::default_client()?,
             users,
             channels,
             channel_names,
@@ -368,6 +367,14 @@ impl SlackConn {
 }
 
 impl Conn for SlackConn {
+    fn name(&self) -> &str {
+        &self.team_name
+    }
+
+    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
+        Box::new(self.channel_names.iter().map(|s| s.as_str()))
+    }
+
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let contents = self.handler.to_slack(contents.to_string());
         use slack_api::chat::post_message;
@@ -382,21 +389,13 @@ impl Conn for SlackConn {
         }
     }
 
-    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        Box::new(self.channel_names.iter().map(|s| s.as_str()))
-    }
-
-    fn name(&self) -> &str {
-        &self.team_name
-    }
-
     fn mark_read(&self, channel: &str, _timestamp: Option<&str>) {
         use slack_api::{channels, groups};
 
         let channel_id = self.channels.get_left(channel).expect("channel not found");
         let channel_id_str = format!("{}", channel_id);
 
-        let client = slack_api::requests::Client::new().unwrap();
+        let client = slack_api::requests::default_client().unwrap();
         let token = self.token.clone();
         let sender = self.sender.clone();
         thread::spawn(move || {

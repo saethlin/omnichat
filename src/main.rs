@@ -83,7 +83,7 @@ fn main() {
         std::process::exit(1)
     });
 
-    let _screenguard = termion::screen::AlternateScreen::from(std::io::stdout());
+    //let _screenguard = termion::screen::AlternateScreen::from(std::io::stdout());
     let _rawguard = std::io::stdout().into_raw_mode().unwrap();
 
     let tui = TUI::new();

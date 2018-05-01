@@ -43,10 +43,10 @@ fn djb2(input: &str) -> u64 {
 
 #[derive(Debug, Fail)]
 enum TuiError {
-    #[fail(display = "Got a message from an unknown channel")]
-    UnknownChannel,
-    #[fail(display = "Got a message from an unknown server")]
-    UnknownServer,
+    #[fail(display = "Got a message from an unknown channel: {}", channel)]
+    UnknownChannel {channel: String},
+    #[fail(display = "Got a message from an unknown server: {}", server)]
+    UnknownServer {server: String},
 }
 
 use std::cell::Cell;
@@ -321,12 +321,12 @@ impl TUI {
             let server = self.servers
                 .iter_mut()
                 .find(|s| s.name == message.server)
-                .ok_or(UnknownServer)?;
+                .ok_or(UnknownServer{server: message.server.clone()})?;
             let channel = server
                 .channels
                 .iter_mut()
                 .find(|c| c.name == message.channel)
-                .ok_or(UnknownChannel)?;
+                .ok_or(UnknownChannel{channel: message.channel.clone()})?;
 
             if set_unread {
                 channel.num_unreads += 1;
