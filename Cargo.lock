@@ -1080,7 +1080,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "slack_api"
 version = "0.19.0"
-source = "git+https://github.com/saethlin/slack-rs-api?branch=types#b84a28dc303c39a6bb7460f748ec4ce7fc5d3ee3"
+source = "git+https://github.com/saethlin/slack-rs-api?branch=types#b4a40add376cf5f608f00b52ef100ed3b1d102be"
 dependencies = [
  "derive-error 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "reqwest 0.8.5 (registry+https://github.com/rust-lang/crates.io-index)",
