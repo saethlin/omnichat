@@ -182,7 +182,7 @@ impl SlackConn {
                     let mut channels_map = BiMap::new();
                     let mut channel_names = Vec::new();
                     for channel in
-                        channels.channels.ok_or(SlackError)?.iter().filter(|c| {
+                        channels.channels.iter().filter(|c| {
                             c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true)
                         }) {
                         let name = channel.name.clone().ok_or(SlackError)?;
@@ -298,7 +298,7 @@ impl SlackConn {
                     let mut req = channels::HistoryRequest::default();
                     req.channel = &channel_id;
                     match channels::history(&client, &token, &req) {
-                        Ok(response) => response.messages.unwrap(),
+                        Ok(response) => response.messages,
                         Err(e) => {
                             sender.send(omnierror!(e)).unwrap();
                             Vec::new()

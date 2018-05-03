@@ -129,6 +129,21 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "channels"
+version = "0.19.0"
+source = "git+https://github.com/saethlin/slack-rs-api?branch=types#73d562ae0fb888eb64849542b2d12330e7578ac1"
+dependencies = [
+ "derive-error 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "requests 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)",
+ "reqwest 0.8.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.43 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_derive 1.0.43 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_json 1.0.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_qs 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "types 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -911,6 +926,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "requests"
+version = "0.19.0"
+source = "git+https://github.com/saethlin/slack-rs-api?branch=types#73d562ae0fb888eb64849542b2d12330e7578ac1"
+dependencies = [
+ "reqwest 0.8.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.43 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_qs 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "reqwest"
 version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1080,14 +1105,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "slack_api"
 version = "0.19.0"
-source = "git+https://github.com/saethlin/slack-rs-api?branch=types#b4a40add376cf5f608f00b52ef100ed3b1d102be"
+source = "git+https://github.com/saethlin/slack-rs-api?branch=types#73d562ae0fb888eb64849542b2d12330e7578ac1"
 dependencies = [
+ "channels 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)",
  "derive-error 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "requests 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)",
  "reqwest 0.8.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.43 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.16 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_qs 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "types 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)",
 ]
 
 [[package]]
@@ -1384,6 +1412,16 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "types"
+version = "0.19.0"
+source = "git+https://github.com/saethlin/slack-rs-api?branch=types#73d562ae0fb888eb64849542b2d12330e7578ac1"
+dependencies = [
+ "serde 1.0.43 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_derive 1.0.43 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_json 1.0.16 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "ucd-util"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1557,6 +1595,7 @@ dependencies = [
 "checksum case 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e88b166b48e29667f5443df64df3c61dc07dc2b1a0b0d231800e07f09a33ecc1"
 "checksum cc 1.0.12 (registry+https://github.com/rust-lang/crates.io-index)" = "a9b90658a0d04c19acb58f07c9076948d3a716db1039674430c94e4aec88de20"
 "checksum cfg-if 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "d4c819a1287eb618df47cc647173c5c4c66ba19d888a6e50d605672aed3140de"
+"checksum channels 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)" = "<none>"
 "checksum chrono 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1cce36c92cb605414e9b824f866f5babe0a0368e39ea07393b9b63cf3844c0e6"
 "checksum core-foundation 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "25bfd746d203017f7d5cbd31ee5d8e17f94b6521c7af77ece6c9e4b2d4b16c67"
 "checksum core-foundation-sys 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "065a5d7ffdcbc8fa145d6f0746f3555025b9097a9e9cda59f7467abae670c78d"
@@ -1644,6 +1683,7 @@ dependencies = [
 "checksum regex-syntax 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)" = "bd90079345f4a4c3409214734ae220fd773c6f2e8a543d07370c6c1c369cfbfb"
 "checksum relay 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "1576e382688d7e9deecea24417e350d3062d97e32e45d70b1cde65994ff1489a"
 "checksum remove_dir_all 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "3488ba1b9a2084d38645c4c08276a1752dcbf2c7130d74f1569681ad5d2799c5"
+"checksum requests 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)" = "<none>"
 "checksum reqwest 0.8.5 (registry+https://github.com/rust-lang/crates.io-index)" = "241faa9a8ca28a03cbbb9815a5d085f271d4c0168a19181f106aa93240c22ddb"
 "checksum rustc-demangle 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)" = "11fb43a206a04116ffd7cfcf9bcb941f8eb6cc7ff667272246b0a1c74259a3cb"
 "checksum rustc_version 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)" = "c5f5376ea5e30ce23c03eb77cbe4962b988deead10910c372b226388b594c084"
@@ -1695,6 +1735,7 @@ dependencies = [
 "checksum toml 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "a0263c6c02c4db6c8f7681f9fd35e90de799ebd4cfdeab77a38f4ff6b3d8c0d9"
 "checksum traitobject 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "efd1f82c56340fdf16f2a953d7bda4f8fdffba13d93b00844c25572110b26079"
 "checksum typeable 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "1410f6f91f21d1612654e7cc69193b0334f909dcf2c790c4826254fbb86f8887"
+"checksum types 0.19.0 (git+https://github.com/saethlin/slack-rs-api?branch=types)" = "<none>"
 "checksum ucd-util 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "fd2be2d6639d0f8fe6cdda291ad456e23629558d466e2789d2c3e9892bda285d"
 "checksum unicase 1.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7f4765f83163b74f957c797ad9253caf97f103fb064d3999aea9568d09fc8a33"
 "checksum unicase 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "284b6d3db520d67fbe88fd778c21510d1b0ba4a551e5d0fbb023d33405f6de8a"
