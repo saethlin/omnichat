@@ -167,7 +167,7 @@ impl SlackConn {
                 Ok(users)
             })
         };
-
+        
         let channels_handle =
             {
                 let token = token.clone();
@@ -213,7 +213,6 @@ impl SlackConn {
             .join()
             .unwrap()?
             .groups
-            .ok_or(SlackError)?
             .iter()
             .filter(|g| !g.is_archived.unwrap())
             .filter(|g| !g.is_mpim.unwrap())
@@ -308,7 +307,7 @@ impl SlackConn {
                     let mut req = groups::HistoryRequest::default();
                     req.channel = &channel_id;
                     match groups::history(&client, &token, &req) {
-                        Ok(response) => response.messages.unwrap(),
+                        Ok(response) => response.messages,
                         Err(e) => {
                             sender.send(omnierror!(e)).unwrap();
                             Vec::new()
@@ -356,7 +355,7 @@ impl SlackConn {
         Ok(Box::new(SlackConn {
             token: token.to_string(),
             client: slack_api::requests::default_client()?,
-            users,
+            users: users,
             channels,
             channel_names,
             team_name,
