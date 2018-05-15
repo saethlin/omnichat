@@ -180,11 +180,7 @@ impl SlackConn {
                     .into_iter()
                     .filter(|c| c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true))
                 {
-                    let slack_api::Channel {
-                        id,
-                        name,
-                        ..
-                    } = channel;
+                    let slack_api::Channel { id, name, .. } = channel;
                     let id = ChannelId(id);
                     channel_names.push(name.clone());
                     channels_map.insert(id, name);
@@ -216,11 +212,7 @@ impl SlackConn {
             .filter(|g| !g.is_archived.unwrap())
             .filter(|g| !g.is_mpim.unwrap())
         {
-            let slack_api::Group {
-                id,
-                name,
-                ..
-            } = group;
+            let slack_api::Group { id, name, .. } = group;
             let id = ChannelId(id);
             channel_names.push(name.clone());
             channels.insert(id, name);
@@ -296,26 +288,38 @@ impl SlackConn {
                 use slack_api::Message::{BotMessage, FileShare, SlackbotResponse, Standard};
                 use slack_api::{channels, groups};
 
-                let messages = if channel_id.starts_with('C') {
+                let (messages, unread_count) = if channel_id.starts_with('C') {
+                    let mut req = slack_api::channels::InfoRequest::default();
+                    req.channel = &channel_id;
+                    let info = slack_api::channels::info(&client, &token, &req);
+                    let unread_count = info.unwrap().channel.unread_count.unwrap();
+
                     let mut req = channels::HistoryRequest::default();
                     req.channel = &channel_id;
-                    match channels::history(&client, &token, &req) {
+                    let messages = match channels::history(&client, &token, &req) {
                         Ok(response) => response.messages,
                         Err(e) => {
                             sender.send(omnierror!(e)).unwrap();
                             Vec::new()
                         }
-                    }
+                    };
+                    (messages, unread_count)
                 } else if channel_id.starts_with('G') {
+                    let mut req = slack_api::groups::InfoRequest::default();
+                    req.channel = &channel_id;
+                    let info = slack_api::groups::info(&client, &token, &req);
+                    let unread_count = info.unwrap().group.unread_count.unwrap();
+
                     let mut req = groups::HistoryRequest::default();
                     req.channel = &channel_id;
-                    match groups::history(&client, &token, &req) {
+                    let messages = match groups::history(&client, &token, &req) {
                         Ok(response) => response.messages,
                         Err(e) => {
                             sender.send(omnierror!(e)).unwrap();
                             Vec::new()
                         }
-                    }
+                    };
+                    (messages, unread_count)
                 } else {
                     sender
                         .send(Event::Error(format!(
@@ -323,7 +327,7 @@ impl SlackConn {
                             channel_id
                         )))
                         .unwrap();
-                    Vec::new()
+                    (Vec::new(), 0)
                 };
 
                 for mut message in messages.into_iter().rev() {
@@ -350,6 +354,7 @@ impl SlackConn {
                     .send(Event::HistoryLoaded {
                         server: server_name,
                         channel: channel_name,
+                        unread_count: unread_count as usize,
                     })
                     .unwrap();
             });

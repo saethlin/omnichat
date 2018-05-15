@@ -1,5 +1,5 @@
 use bimap::BiMap;
-use conn::ConnError::DiscordError;
+use conn::ConnError::ConnectError;
 use conn::{Conn, Event, Message};
 use discord;
 use discord::model::ChannelId;
@@ -76,7 +76,7 @@ impl DiscordConn {
                 }
             })
             .find(|s| s.name == server_name)
-            .ok_or(DiscordError)?
+            .ok_or(ConnectError)?
             .clone();
 
         let mut mention_patterns = Vec::new();
@@ -89,7 +89,7 @@ impl DiscordConn {
             }
         }
 
-        let my_id = discord::State::new(info).user().id;
+        let my_id = discord::State::new(info.clone()).user().id;
         let me_as_member = discord
             .read()
             .unwrap()
@@ -148,6 +148,15 @@ impl DiscordConn {
             let handle = discord.clone();
             let sender = sender.clone();
             let handler = Arc::clone(&handler);
+            let last_read_timestamp = if let Some(ref unread_info) = info.read_state {
+                unread_info
+                    .iter()
+                    .find(|i| i.id == id)
+                    .and_then(|i| i.last_message_id)
+                    .map(|i| i.creation_date())
+            } else {
+                None
+            };
             thread::spawn(move || {
                 let current_user = handle.read().unwrap().get_current_user().unwrap();
                 let my_mention = format!("{}", current_user.id.mention());
@@ -162,7 +171,15 @@ impl DiscordConn {
 
                 // TODO: handle ordering of messages in the frontend
                 messages.sort_by_key(|m| m.timestamp.timestamp());
-
+                let unread_count = if let Some(ts) = last_read_timestamp {
+                    // TODO: This is totally wrong
+                    messages
+                        .iter()
+                        .filter(|m| m.timestamp.timestamp() > ts.timestamp())
+                        .count()
+                } else {
+                    0
+                };
                 for m in messages.into_iter() {
                     sender
                         .send(Event::HistoryMessage(Message {
@@ -183,6 +200,7 @@ impl DiscordConn {
                     .send(Event::HistoryLoaded {
                         server: handler.server_name.clone(),
                         channel: name.clone(),
+                        unread_count,
                     })
                     .expect("sender died");
             });

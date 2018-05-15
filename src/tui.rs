@@ -784,9 +784,28 @@ impl TUI {
                         self.draw_message_area();
                     }
                 }
-                Event::HistoryLoaded { server, channel } => {
+                Event::HistoryLoaded {
+                    server,
+                    channel,
+                    unread_count,
+                } => {
                     if (server == server_name) && (channel == channel_name) {
                         self.draw();
+                    }
+
+                    match self.servers
+                        .iter_mut()
+                        .find(|s| s.name == server)
+                        .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+                    {
+                        Some(c) => c.num_unreads = unread_count,
+                        None => self.sender
+                            .send(Event::HistoryLoaded {
+                                server,
+                                channel,
+                                unread_count,
+                            })
+                            .unwrap(),
                     }
                 }
                 Event::Connected(conn) => {

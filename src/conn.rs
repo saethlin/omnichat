@@ -13,7 +13,11 @@ pub struct Message {
 pub enum Event {
     Message(Message),
     HistoryMessage(Message),
-    HistoryLoaded { server: String, channel: String },
+    HistoryLoaded {
+        server: String,
+        channel: String,
+        unread_count: usize,
+    },
     Input(termion::event::Event),
     Error(String),
     Connected(Box<Conn>),
@@ -21,10 +25,8 @@ pub enum Event {
 
 #[derive(Debug, Fail)]
 pub enum ConnError {
-    #[fail(display = "Slack response was damaged")]
-    SlackError,
-    #[fail(display = "Discord response was damaged")]
-    DiscordError,
+    #[fail(display = "Could not connect to the server")]
+    ConnectError,
 }
 
 macro_rules! omnierror {
