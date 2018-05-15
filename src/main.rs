@@ -21,10 +21,11 @@ extern crate websocket;
 extern crate derive_more;
 extern crate chrono;
 
+#[macro_use]
+mod conn;
 mod tui;
 use tui::TUI;
 mod bimap;
-mod conn;
 mod discord_conn;
 mod slack_conn;
 

@@ -1,5 +1,3 @@
-#![macro_use]
-
 use termion;
 
 #[derive(Debug, Clone)]

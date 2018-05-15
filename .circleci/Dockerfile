@@ -1,6 +1,6 @@
-FROM frolvlad/alpine-rust:latest
+FROM rust:latest
 
-RUN apk update
-RUN apk add --no-cache git make
-RUN apk add --no-cache libressl-dev
+RUN apt update
+RUN apt install git make
+RUN apt install libssl-dev
 

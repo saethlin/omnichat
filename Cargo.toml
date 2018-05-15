@@ -24,6 +24,3 @@ chrono = "0.4"
 #slack_api = {path = "/home/ben/slack-rs-api"}
 slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types"}
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
-
-[profile.release]
-debug = true

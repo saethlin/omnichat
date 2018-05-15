@@ -1,12 +1,11 @@
-use std::sync::Arc;
 use bimap::BiMap;
-use conn::ConnError::SlackError;
 use conn::{Conn, Event, Message};
 use failure::Error;
 use regex::Regex;
 use serde_json;
 use slack_api;
 use std::sync::mpsc::Sender;
+use std::sync::Arc;
 use std::thread;
 use websocket;
 
@@ -33,8 +32,9 @@ struct Handler {
 impl Handler {
     pub fn to_omni(&self, message: slack_api::Message) -> Option<Message> {
         use slack_api::Message::*;
-        use slack_api::{MessageBotMessage, MessageFileShare, MessageSlackbotResponse,
-                        MessageStandard};
+        use slack_api::{
+            MessageBotMessage, MessageFileShare, MessageSlackbotResponse, MessageStandard,
+        };
         // TODO: Add more success cases to this
         let (channel, user, mut text, ts) = match message {
             Standard(MessageStandard {
@@ -136,7 +136,11 @@ impl SlackConn {
             let token = token.clone();
             thread::spawn(move || -> Result<slack_api::rtm::ConnectResponse, Error> {
                 let client = slack_api::requests::default_client()?;
-                Ok(slack_api::rtm::connect(&client, &token, &slack_api::rtm::ConnectRequest::default())?)
+                Ok(slack_api::rtm::connect(
+                    &client,
+                    &token,
+                    &slack_api::rtm::ConnectRequest::default(),
+                )?)
             })
         };
 
@@ -152,48 +156,43 @@ impl SlackConn {
 
                 let mut users = BiMap::new();
                 for user in users_response.members {
-                    if let slack_api::User {
-                        id: Some(id),
-                        name: Some(name),
-                        ..
-                    } = user
-                    {
-                        users.insert(UserId(id), name);
-                    } else {
-                        return Err(SlackError.into());
-                    }
+                    users.insert(UserId(user.id), user.name);
                 }
 
                 Ok(users)
             })
         };
-        
-        let channels_handle =
-            {
-                let token = token.clone();
-                thread::spawn(move || -> Result<_, Error> {
-                    let client = slack_api::requests::default_client()?;
-                    let channels = slack_api::channels::list(
-                        &client,
-                        &token,
-                        &slack_api::channels::ListRequest::default(),
-                    )?;
 
-                    let mut channels_map = BiMap::new();
-                    let mut channel_names = Vec::new();
-                    for channel in
-                        channels.channels.iter().filter(|c| {
-                            c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true)
-                        }) {
-                        let name = channel.name.clone().ok_or(SlackError)?;
-                        let id = ChannelId(channel.id.clone().ok_or(SlackError)?);
-                        channel_names.push(name.clone());
-                        channels_map.insert(id, name);
-                    }
+        let channels_handle = {
+            let token = token.clone();
+            thread::spawn(move || -> Result<_, Error> {
+                let client = slack_api::requests::default_client()?;
+                let channels = slack_api::channels::list(
+                    &client,
+                    &token,
+                    &slack_api::channels::ListRequest::default(),
+                )?;
 
-                    Ok((channel_names, channels_map))
-                })
-            };
+                let mut channels_map = BiMap::new();
+                let mut channel_names = Vec::new();
+                for channel in channels
+                    .channels
+                    .into_iter()
+                    .filter(|c| c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true))
+                {
+                    let slack_api::Channel {
+                        id,
+                        name,
+                        ..
+                    } = channel;
+                    let id = ChannelId(id);
+                    channel_names.push(name.clone());
+                    channels_map.insert(id, name);
+                }
+
+                Ok((channel_names, channels_map))
+            })
+        };
 
         let groups_handle = {
             let token = token.clone();
@@ -213,12 +212,16 @@ impl SlackConn {
             .join()
             .unwrap()?
             .groups
-            .iter()
+            .into_iter()
             .filter(|g| !g.is_archived.unwrap())
             .filter(|g| !g.is_mpim.unwrap())
         {
-            let name = group.name.clone().ok_or(SlackError)?;
-            let id = ChannelId(group.id.clone().ok_or(SlackError)?);
+            let slack_api::Group {
+                id,
+                name,
+                ..
+            } = group;
+            let id = ChannelId(id);
             channel_names.push(name.clone());
             channels.insert(id, name);
         }

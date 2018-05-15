@@ -44,9 +44,9 @@ fn djb2(input: &str) -> u64 {
 #[derive(Debug, Fail)]
 enum TuiError {
     #[fail(display = "Got a message from an unknown channel: {}", channel)]
-    UnknownChannel {channel: String},
+    UnknownChannel { channel: String },
     #[fail(display = "Got a message from an unknown server: {}", server)]
-    UnknownServer {server: String},
+    UnknownServer { server: String },
 }
 
 use std::cell::Cell;
@@ -187,15 +187,18 @@ impl TUI {
 
     fn reset_current_unreads(&mut self) {
         let server = &mut self.servers[self.current_server];
-        server.channels[server.current_channel].num_unreads = 0;
-        let current_channel = &server.channels[server.current_channel];
-        server.connection.mark_read(
-            &current_channel.name,
-            current_channel
-                .messages
-                .last()
-                .map(|m| m.timestamp.as_str()),
-        );
+        if server.channels[server.current_channel].num_unreads > 0 {
+            server.channels[server.current_channel].num_unreads = 0;
+            let current_channel = &server.channels[server.current_channel];
+
+            server.connection.mark_read(
+                &current_channel.name,
+                current_channel
+                    .messages
+                    .last()
+                    .map(|m| m.timestamp.as_str()),
+            );
+        }
     }
 
     fn next_server(&mut self) {
@@ -321,12 +324,16 @@ impl TUI {
             let server = self.servers
                 .iter_mut()
                 .find(|s| s.name == message.server)
-                .ok_or(UnknownServer{server: message.server.clone()})?;
+                .ok_or(UnknownServer {
+                    server: message.server.clone(),
+                })?;
             let channel = server
                 .channels
                 .iter_mut()
                 .find(|c| c.name == message.channel)
-                .ok_or(UnknownChannel{channel: message.channel.clone()})?;
+                .ok_or(UnknownChannel {
+                    channel: message.channel.clone(),
+                })?;
 
             if set_unread {
                 channel.num_unreads += 1;
