@@ -50,8 +50,6 @@ enum TuiError {
 pub struct TUI {
     servers: Vec<Server>,
     current_server: usize,
-    message_buffer: String,
-    message_area_formatted: String,
     longest_channel_name: u16,
     shutdown: bool,
     events: Receiver<Event>,
@@ -84,6 +82,8 @@ struct Channel {
     name: String,
     num_unreads: usize,
     message_scroll_offset: usize,
+    message_buffer: String,
+    message_buffer_formatted: String,
 }
 
 struct ChanMessage {
@@ -176,8 +176,6 @@ impl TUI {
         let mut tui = Self {
             servers: Vec::new(),
             current_server: 0,
-            message_buffer: String::new(),
-            message_area_formatted: String::new(),
             longest_channel_name: 0,
             shutdown: false,
             events: reciever,
@@ -194,6 +192,16 @@ impl TUI {
 
     pub fn sender(&self) -> Sender<Event> {
         self.sender.clone()
+    }
+
+    fn current_channel(&self) -> &Channel {
+        let server = &self.servers[self.current_server];
+        &server.channels[server.current_channel]
+    }
+
+    fn current_channel_mut(&mut self) -> &mut Channel {
+        let server = &mut self.servers[self.current_server];
+        &mut server.channels[server.current_channel]
     }
 
     fn reset_current_unreads(&mut self) {
@@ -307,6 +315,8 @@ impl TUI {
                     name: name.to_string(),
                     num_unreads: 0,
                     message_scroll_offset: 0,
+                    message_buffer: String::new(),
+                    message_buffer_formatted: String::new(),
                 })
                 .collect(),
             name: connection.name().to_string(),
@@ -382,20 +392,23 @@ impl TUI {
     }
 
     fn send_message(&mut self) {
-        let server = &mut self.servers[self.current_server];
-        let current_channel_name = &server.channels[server.current_channel].name;
-        server
-            .connection
-            .send_channel_message(current_channel_name, &self.message_buffer);
-        self.message_buffer.clear();
-        self.message_area_formatted.clear();
+        {
+            let contents = self.current_channel().message_buffer.clone();
+            let server = &mut self.servers[self.current_server];
+            let current_channel_name = &server.channels[server.current_channel].name;
+            server
+                .connection
+                .send_channel_message(current_channel_name, &contents);
+        }
+        self.current_channel_mut().message_buffer.clear();
+        self.current_channel_mut().message_buffer_formatted.clear();
     }
 
     fn message_area_height(&self) -> u16 {
         let (_, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-        let message_area_lines = self.message_area_formatted.lines().count() as u16;
+        let message_area_lines = self.current_channel().message_buffer_formatted.lines().count() as u16;
         if message_area_lines > 1 {
             height - message_area_lines + 1
         } else {
@@ -434,8 +447,7 @@ impl TUI {
             let num_unreads = server.channels[server.current_channel].num_unreads;
             let mut draw_unread_marker = num_unreads > 0;
 
-            let server = &self.servers[self.current_server];
-            let offset = server.channels[server.current_channel].message_scroll_offset;
+            let offset = self.current_channel().message_scroll_offset;
 
             let mut row = message_area_height - 1;
             let mut skipped = 0;
@@ -596,12 +608,12 @@ impl TUI {
         let (width, _) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-        self.message_area_formatted =
-            ::textwrap::fill(&self.message_buffer, (width - CHAN_WIDTH - 1) as usize);
+        self.current_channel_mut().message_buffer_formatted =
+            ::textwrap::fill(&self.current_channel().message_buffer, (width - CHAN_WIDTH - 1) as usize);
 
         let message_area_height = self.message_area_height();
 
-        for (l, line) in self.message_area_formatted.lines().enumerate() {
+        for (l, line) in self.current_channel().message_buffer_formatted.lines().enumerate() {
             write!(
                 lock,
                 "{}{}",
@@ -609,7 +621,7 @@ impl TUI {
                 line
             );
         }
-        if self.message_buffer.is_empty() {
+        if self.current_channel().message_buffer.is_empty() {
             let (_, height) =
                 termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
             write!(lock, "{}", Goto(CHAN_WIDTH + 1, height));
@@ -690,7 +702,7 @@ impl TUI {
     fn handle_input(&mut self, event: &termion::event::Event) {
         match *event {
             Key(Char('\n')) => {
-                if !self.message_buffer.is_empty() {
+                if !self.current_channel().message_buffer.is_empty() {
                     self.send_message();
                     self.draw();
                 }
@@ -698,11 +710,11 @@ impl TUI {
             Key(Backspace) => {
                 //TODO: It would be great to apply the same anti-flicker optimization,
                 //but properly clearing the message area is tricky
-                self.message_buffer.pop();
+                self.current_channel_mut().message_buffer.pop();
                 let (width, _) =
                     termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-                self.message_area_formatted =
-                    ::textwrap::fill(&self.message_buffer, (width - CHAN_WIDTH) as usize);
+                self.current_channel_mut().message_buffer_formatted =
+                    ::textwrap::fill(&self.current_channel().message_buffer, (width - CHAN_WIDTH) as usize);
                 self.draw();
             }
             Key(Ctrl('c')) => self.shutdown = true,
@@ -749,7 +761,7 @@ impl TUI {
             Key(Char('\t')) => {
                 if self.autocompletions.is_empty() {
                     self.autocompletions =
-                        if let Some(last_word) = self.message_buffer.split_whitespace().last() {
+                        if let Some(last_word) = self.current_channel().message_buffer.split_whitespace().last() {
                             self.servers[self.current_server]
                                 .connection
                                 .autocomplete(last_word)
@@ -758,16 +770,17 @@ impl TUI {
                         }
                 }
                 if !self.autocompletions.is_empty() {
-                    while let Some(c) = self.message_buffer.chars().last() {
+                    while let Some(c) = self.current_channel().message_buffer.chars().last() {
                         if c.is_whitespace() {
                             break;
                         } else {
-                            self.message_buffer.pop();
+                            self.current_channel_mut().message_buffer.pop();
                         }
                     }
                     self.autocomplete_index %= self.autocompletions.len();
-                    self.message_buffer
-                        .extend(self.autocompletions[self.autocomplete_index].chars());
+                    let chosen_completion = self.autocompletions[self.autocomplete_index].clone();
+                    self.current_channel_mut().message_buffer
+                        .extend(chosen_completion.chars());
                     self.autocomplete_index += 1;
                     self.draw();
                 }
@@ -776,16 +789,16 @@ impl TUI {
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
 
-                let previous_num_lines = self.message_area_formatted.lines().count();
+                let previous_num_lines = self.current_channel().message_buffer_formatted.lines().count();
 
-                self.message_buffer.push(c);
+                self.current_channel_mut().message_buffer.push(c);
                 let (width, _) =
                     termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-                self.message_area_formatted =
-                    ::textwrap::fill(&self.message_buffer, (width - CHAN_WIDTH - 1) as usize);
+                self.current_channel_mut().message_buffer_formatted =
+                    ::textwrap::fill(&self.current_channel().message_buffer, (width - CHAN_WIDTH - 1) as usize);
 
-                if previous_num_lines != self.message_area_formatted.lines().count() {
+                if previous_num_lines != self.current_channel().message_buffer_formatted.lines().count() {
                     self.draw();
                 } else {
                     self.draw_message_area();
