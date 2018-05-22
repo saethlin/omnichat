@@ -55,7 +55,6 @@ fn main() {
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};
     use std::thread;
-    use termion::raw::IntoRawMode;
 
     openssl_probe::init_ssl_cert_env_vars();
 
@@ -83,9 +82,6 @@ fn main() {
         println!("{:?} is not a valid omnichat config file", &config_path);
         std::process::exit(1)
     });
-
-    //let _screenguard = termion::screen::AlternateScreen::from(std::io::stdout());
-    let _rawguard = std::io::stdout().into_raw_mode().unwrap();
 
     let tui = TUI::new();
 

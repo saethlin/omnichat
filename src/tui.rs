@@ -1,7 +1,5 @@
 use conn::{Conn, Event, Message};
-use std::io::stdin;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
 use termion;
 
 use termion::color::{AnsiValue, Fg};
@@ -62,6 +60,10 @@ pub struct TUI {
     sender: Sender<Event>,
     server_scroll_offset: usize,
     orphaned_messages: HashMap<String, Cell<Vec<Message>>>,
+    _guards: (
+        termion::screen::AlternateScreen<::std::io::Stdout>,
+        termion::raw::RawTerminal<::std::io::Stdout>,
+    ),
 }
 
 struct Server {
@@ -154,6 +156,13 @@ impl ChanMessage {
 
 impl TUI {
     pub fn new() -> Self {
+        use std::io::stdin;
+        use std::thread;
+        use termion::raw::IntoRawMode;
+
+        let screenguard = termion::screen::AlternateScreen::from(::std::io::stdout());
+        let rawguard = ::std::io::stdout().into_raw_mode().unwrap();
+
         let (sender, reciever) = channel();
         let send = sender.clone();
         thread::spawn(move || {
@@ -175,6 +184,7 @@ impl TUI {
             sender: sender,
             server_scroll_offset: 0,
             orphaned_messages: HashMap::new(),
+            _guards: (screenguard, rawguard),
         };
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender));
@@ -746,7 +756,7 @@ impl TUI {
                     self.handle_input(&event);
                 }
                 // These optimizations could be substantially improved
-                // Technically we only need to redraw the one server recieving the event
+                // Technically we only need to redraw the one server receiving the event
                 // I'm a bit uncomfortable doing that though because it spreads out the logic
                 // a lot and may make refactoring/recoloring this too difficult
                 Event::Message(message) => {
