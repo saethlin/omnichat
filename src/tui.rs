@@ -83,6 +83,7 @@ struct Channel {
     messages: Vec<ChanMessage>,
     name: String,
     num_unreads: usize,
+    message_scroll_offset: usize,
 }
 
 struct ChanMessage {
@@ -305,6 +306,7 @@ impl TUI {
                     messages: Vec::new(),
                     name: name.to_string(),
                     num_unreads: 0,
+                    message_scroll_offset: 0,
                 })
                 .collect(),
             name: connection.name().to_string(),
@@ -432,7 +434,11 @@ impl TUI {
             let num_unreads = server.channels[server.current_channel].num_unreads;
             let mut draw_unread_marker = num_unreads > 0;
 
+            let server = &self.servers[self.current_server];
+            let offset = server.channels[server.current_channel].message_scroll_offset;
+
             let mut row = message_area_height - 1;
+            let mut skipped = 0;
             'outer: for (m, message) in server.channels[server.current_channel]
                 .messages
                 .iter()
@@ -458,14 +464,11 @@ impl TUI {
                     }
                 }
 
-                if message.contents.contains("⎞̖̎") {
-                    self.sender().send(Event::Error(format!(
-                        "{}",
-                        message.contents.lines().count()
-                    )));
-                }
-
                 for (l, line) in message.contents.lines().rev().enumerate() {
+                    if skipped < offset {
+                        skipped += 1;
+                        continue;
+                    }
                     let num_lines = message.contents.lines().count();
                     write!(lock, "{}", Goto(CHAN_WIDTH + 1, row));
                     row -= 1;
@@ -592,7 +595,7 @@ impl TUI {
 
         let (width, _) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-        let width = width - CHAN_WIDTH;
+
         self.message_area_formatted =
             ::textwrap::fill(&self.message_buffer, (width - CHAN_WIDTH - 1) as usize);
 
@@ -727,6 +730,22 @@ impl TUI {
                 self.previous_channel_unread();
                 self.draw();
             }
+            Key(Ctrl('q')) => {
+                {
+                    let server = &mut self.servers[self.current_server];
+                    server.channels[server.current_channel].message_scroll_offset += 1;
+                }
+                self.draw();
+            }
+            Key(Ctrl('e')) => {
+                {
+                    let server = &mut self.servers[self.current_server];
+                    let chan = &mut server.channels[server.current_channel];
+                    let previous_offset = chan.message_scroll_offset;
+                    chan.message_scroll_offset = previous_offset.saturating_sub(1);
+                }
+                self.draw();
+            }
             Key(Char('\t')) => {
                 if self.autocompletions.is_empty() {
                     self.autocompletions =
@@ -859,6 +878,7 @@ impl TUI {
                 Event::Connected(conn) => {
                     self.add_server(conn);
                     self.draw_server_names();
+                    self.draw_message_area();
                 }
             }
             if self.shutdown {
