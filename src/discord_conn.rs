@@ -46,7 +46,8 @@ impl Handler {
     // TODO: This is incomplete, as I don't have a full listing of users
     // It's also laughably slow for a big server like progdisc
     pub fn to_discord(&self, mut text: String) -> String {
-        for &(ref id, ref human) in self.mention_patterns
+        for &(ref id, ref human) in self
+            .mention_patterns
             .iter()
             .chain(self.channel_patterns.iter())
         {
@@ -66,7 +67,8 @@ impl DiscordConn {
     ) -> Result<Box<Conn>, Error> {
         use discord::model::PossibleServer::Online;
 
-        let server = info.servers
+        let server = info
+            .servers
             .iter()
             .filter_map(|s| {
                 if let &Online(ref server) = s {
@@ -126,7 +128,8 @@ impl DiscordConn {
             }
 
             // Also filter for channels that are not voice or category markers
-            if can_see && channel.kind != ChannelType::Category
+            if can_see
+                && channel.kind != ChannelType::Category
                 && channel.kind != ChannelType::Voice
             {
                 channel_names.push(channel.name.clone());
@@ -187,7 +190,8 @@ impl DiscordConn {
                             channel: name.clone(),
                             sender: m.author.name.clone(),
                             contents: handler.to_omni(&m),
-                            is_mention: m.mentions
+                            is_mention: m
+                                .mentions
                                 .iter()
                                 .map(|u| format!("{}", u.id.mention()))
                                 .find(|m| m == &my_mention)

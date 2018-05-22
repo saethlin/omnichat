@@ -89,7 +89,8 @@ impl Handler {
             return Some(Message {
                 server: self.server_name.clone(),
                 channel: channel.clone(),
-                sender: self.users
+                sender: self
+                    .users
                     .get_right(&UserId(user.clone()))
                     .unwrap_or(&user)
                     .clone(),
@@ -434,5 +435,25 @@ impl Conn for SlackConn {
                     .unwrap();
             }
         });
+    }
+
+    fn autocomplete(&self, word: &str) -> Vec<String> {
+        match word.chars().next() {
+            Some('@') => self
+                .users
+                .iter()
+                .map(|(_id, name)| name)
+                .filter(|name| name.starts_with(&word[1..]))
+                .map(|s| String::from("@") + s)
+                .collect(),
+            Some('#') => self
+                .channels
+                .iter()
+                .map(|(_id, name)| name)
+                .filter(|name| name.starts_with(&word[1..]))
+                .map(|s| String::from("#") + s)
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 }

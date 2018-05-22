@@ -127,7 +127,7 @@ fn main() {
 
             let dis = Arc::new(RwLock::new(dis));
 
-            let (discord_sender, discord_reciever) = spmc::channel();
+            let (discord_sender, discord_receiver) = spmc::channel();
 
             // Spawn a thread that copies the incoming Discord events out to every omnichat server
             let error_sender = sender.clone();
@@ -143,9 +143,9 @@ fn main() {
                 let sender = sender.clone();
                 let info = info.clone();
                 let dis = dis.clone();
-                let discord_reciever = discord_reciever.clone();
+                let discord_receiver = discord_receiver.clone();
                 thread::spawn(move || {
-                    match DiscordConn::new(dis, info, discord_reciever, &c.name, sender.clone()) {
+                    match DiscordConn::new(dis, info, discord_receiver, &c.name, sender.clone()) {
                         Ok(connection) => sender.send(Event::Connected(connection)).unwrap(),
                         Err(err) => sender.send(omnierror!(err)).unwrap(),
                     }

@@ -47,8 +47,6 @@ enum TuiError {
     UnknownServer { server: String },
 }
 
-use std::cell::Cell;
-use std::collections::HashMap;
 pub struct TUI {
     servers: Vec<Server>,
     current_server: usize,
@@ -59,7 +57,8 @@ pub struct TUI {
     events: Receiver<Event>,
     sender: Sender<Event>,
     server_scroll_offset: usize,
-    orphaned_messages: HashMap<String, Cell<Vec<Message>>>,
+    autocompletions: Vec<String>,
+    autocomplete_index: usize,
     _guards: (
         termion::screen::AlternateScreen<::std::io::Stdout>,
         termion::raw::RawTerminal<::std::io::Stdout>,
@@ -183,7 +182,8 @@ impl TUI {
             events: reciever,
             sender: sender,
             server_scroll_offset: 0,
-            orphaned_messages: HashMap::new(),
+            autocompletions: Vec::new(),
+            autocomplete_index: 0,
             _guards: (screenguard, rawguard),
         };
         let sender = tui.sender();
@@ -313,7 +313,8 @@ impl TUI {
             channel_scroll_offset: 0,
         });
 
-        self.longest_channel_name = self.servers
+        self.longest_channel_name = self
+            .servers
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
@@ -321,7 +322,8 @@ impl TUI {
 
         let previous_server_name = self.servers[self.current_server].name.clone();
         self.servers.sort_by_key(|s| s.name.clone());
-        self.current_server = self.servers
+        self.current_server = self
+            .servers
             .iter()
             .position(|s| s.name == previous_server_name)
             .unwrap();
@@ -331,7 +333,8 @@ impl TUI {
         use tui::TuiError::*;
         //NLL HACK
         {
-            let server = self.servers
+            let server = self
+                .servers
                 .iter_mut()
                 .find(|s| s.name == message.server)
                 .ok_or(UnknownServer {
@@ -515,7 +518,8 @@ impl TUI {
         // If the end of the current server name does not appear on the screen, increase until it
         // does
         loop {
-            let chars_to_name_end = self.servers
+            let chars_to_name_end = self
+                .servers
                 .iter()
                 .skip(self.server_scroll_offset)
                 .map(|s| s.name.chars().count())
@@ -550,7 +554,8 @@ impl TUI {
         // Draw all the server names across the top
         write!(lock, "{}", Goto(CHAN_WIDTH + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
-        for (s, server) in self.servers
+        for (s, server) in self
+            .servers
             .iter()
             .enumerate()
             .skip(self.server_scroll_offset)
@@ -581,9 +586,15 @@ impl TUI {
     }
 
     #[allow(unused_must_use)]
-    fn draw_message_area(&self) {
+    fn draw_message_area(&mut self) {
         let out = ::std::io::stdout();
         let mut lock = out.lock();
+
+        let (width, _) =
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+        let width = width - CHAN_WIDTH;
+        self.message_area_formatted =
+            ::textwrap::fill(&self.message_buffer, (width - CHAN_WIDTH - 1) as usize);
 
         let message_area_height = self.message_area_height();
 
@@ -716,7 +727,36 @@ impl TUI {
                 self.previous_channel_unread();
                 self.draw();
             }
+            Key(Char('\t')) => {
+                if self.autocompletions.is_empty() {
+                    self.autocompletions =
+                        if let Some(last_word) = self.message_buffer.split_whitespace().last() {
+                            self.servers[self.current_server]
+                                .connection
+                                .autocomplete(last_word)
+                        } else {
+                            Vec::new()
+                        }
+                }
+                if !self.autocompletions.is_empty() {
+                    while let Some(c) = self.message_buffer.chars().last() {
+                        if c.is_whitespace() {
+                            break;
+                        } else {
+                            self.message_buffer.pop();
+                        }
+                    }
+                    self.autocomplete_index %= self.autocompletions.len();
+                    self.message_buffer
+                        .extend(self.autocompletions[self.autocomplete_index].chars());
+                    self.autocomplete_index += 1;
+                    self.draw();
+                }
+            }
             Key(Char(c)) => {
+                self.autocompletions.clear();
+                self.autocomplete_index = 0;
+
                 let previous_num_lines = self.message_area_formatted.lines().count();
 
                 self.message_buffer.push(c);
@@ -777,11 +817,7 @@ impl TUI {
                     // Attempt to add message, otherwise requeue it
                     // TODO: This is a performance bug
                     if self.add_message(&message, false).is_err() {
-                        self.orphaned_messages
-                            .entry(message.server.clone())
-                            .or_insert(Cell::new(Vec::with_capacity(1_000)))
-                            .get_mut()
-                            .push(message);
+                        self.sender.send(Event::HistoryMessage(message)).unwrap();
                     }
                 }
                 Event::Error(message) => {
@@ -803,13 +839,15 @@ impl TUI {
                         self.draw();
                     }
 
-                    match self.servers
+                    match self
+                        .servers
                         .iter_mut()
                         .find(|s| s.name == server)
                         .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
                     {
                         Some(c) => c.num_unreads = unread_count,
-                        None => self.sender
+                        None => self
+                            .sender
                             .send(Event::HistoryLoaded {
                                 server,
                                 channel,
@@ -819,17 +857,8 @@ impl TUI {
                     }
                 }
                 Event::Connected(conn) => {
-                    let new_server_name = conn.name().to_owned();
                     self.add_server(conn);
-
-                    if self.orphaned_messages.get(&new_server_name).is_some() {
-                        let orphans = self.orphaned_messages.get(&new_server_name).unwrap().take();
-                        for msg in orphans {
-                            self.add_message(&msg, false).unwrap();
-                        }
-                    }
-
-                    self.draw();
+                    self.draw_server_names();
                 }
             }
             if self.shutdown {

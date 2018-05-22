@@ -46,7 +46,7 @@ pub trait Conn: Send {
 
     fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
 
-    fn autocomplete(&self, _word: &str) -> Option<&str> {
-        None
+    fn autocomplete(&self, _word: &str) -> Vec<String> {
+        Vec::new()
     }
 }
