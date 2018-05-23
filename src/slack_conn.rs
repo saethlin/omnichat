@@ -255,7 +255,12 @@ impl SlackConn {
                                 }
                             }
 
-                            Err(e) => thread_sender.send(omnierror!(e)).unwrap(),
+                            Err(e) => {
+                                thread_sender.send(omnierror!(e)).unwrap();
+                                thread_sender
+                                    .send(Event::Error(message.to_string()))
+                                    .unwrap();
+                            }
                         }
                     }
                     Ok(Ping(data)) => {
@@ -270,7 +275,6 @@ impl SlackConn {
                             .send(Event::Error("Websocket closed".to_owned()))
                             .unwrap();
                     }
-                    Err(e) => thread_sender.send(omnierror!(e)).unwrap(),
                     _ => {}
                 }
             }
