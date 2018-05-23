@@ -3,7 +3,6 @@ Discord+Slack+TUI: Support for muted channels
 Discord+Slack: Make sure all users are loaded
 Discord: Handle attachment-only messages
 
-Better keybindings that enable left/right arrows to work as desired in the message entry area
 Wrap or scroll server names
 Send "user is typing" messages
 

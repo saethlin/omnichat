@@ -57,6 +57,7 @@ pub struct TUI {
     server_scroll_offset: usize,
     autocompletions: Vec<String>,
     autocomplete_index: usize,
+    cursor_pos: usize,
     _guards: (
         termion::screen::AlternateScreen<::std::io::Stdout>,
         termion::raw::RawTerminal<::std::io::Stdout>,
@@ -183,6 +184,7 @@ impl TUI {
             server_scroll_offset: 0,
             autocompletions: Vec::new(),
             autocomplete_index: 0,
+            cursor_pos: 0,
             _guards: (screenguard, rawguard),
         };
         let sender = tui.sender();
@@ -395,8 +397,6 @@ impl TUI {
                 .connection
                 .send_channel_message(current_channel_name, &contents);
         }
-        self.current_channel_mut().message_buffer.clear();
-        self.current_channel_mut().message_buffer_formatted.clear();
     }
 
     fn message_area_height(&self) -> u16 {
@@ -629,11 +629,12 @@ impl TUI {
                 line
             ).unwrap();
         }
-        if self.current_channel().message_buffer.is_empty() {
-            let (_, height) =
-                termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-            write!(lock, "{}", Goto(CHAN_WIDTH + 1, height)).unwrap();
-        }
+
+        write!(
+            lock,
+            "{}",
+            Goto(CHAN_WIDTH + 1 + self.cursor_pos as u16, height)
+        ).unwrap();
 
         let out = ::std::io::stdout();
         let mut l = out.lock();
@@ -646,17 +647,17 @@ impl TUI {
             Key(Char('\n')) => {
                 if !self.current_channel().message_buffer.is_empty() {
                     self.send_message();
+                    self.current_channel_mut().message_buffer.clear();
+                    self.cursor_pos = 0;
                     self.draw();
                 }
             }
             Key(Backspace) => {
-                self.current_channel_mut().message_buffer.pop();
-                let (width, _) =
-                    termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-                self.current_channel_mut().message_buffer_formatted = ::textwrap::fill(
-                    &self.current_channel().message_buffer,
-                    (width - CHAN_WIDTH) as usize,
-                );
+                if self.cursor_pos > 0 {
+                    let remove_pos = self.cursor_pos - 1;
+                    self.current_channel_mut().message_buffer.remove(remove_pos);
+                    self.cursor_pos -= 1;
+                }
                 self.draw();
             }
             Key(Ctrl('c')) => self.shutdown = true,
@@ -668,11 +669,11 @@ impl TUI {
                 self.next_channel();
                 self.draw();
             }
-            Key(Right) | Key(Ctrl('d')) => {
+            Key(Ctrl('d')) => {
                 self.next_server();
                 self.draw();
             }
-            Key(Left) | Key(Ctrl('a')) => {
+            Key(Ctrl('a')) => {
                 self.previous_server();
                 self.draw();
             }
@@ -697,6 +698,18 @@ impl TUI {
                     let chan = &mut server.channels[server.current_channel];
                     let previous_offset = chan.message_scroll_offset;
                     chan.message_scroll_offset = previous_offset.saturating_sub(1);
+                }
+                self.draw();
+            }
+            Key(Left) => {
+                if self.cursor_pos > 0 {
+                    self.cursor_pos -= 1;
+                }
+                self.draw();
+            }
+            Key(Right) => {
+                if self.cursor_pos < self.current_channel().message_buffer.len() {
+                    self.cursor_pos += 1;
                 }
                 self.draw();
             }
@@ -736,14 +749,11 @@ impl TUI {
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
 
-                self.current_channel_mut().message_buffer.push(c);
-                let (width, _) =
-                    termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
-
-                self.current_channel_mut().message_buffer_formatted = ::textwrap::fill(
-                    &self.current_channel().message_buffer,
-                    (width - CHAN_WIDTH - 1) as usize,
-                );
+                let current_pos = self.cursor_pos;
+                self.current_channel_mut()
+                    .message_buffer
+                    .insert(current_pos, c);
+                self.cursor_pos += 1;
 
                 self.draw();
             }

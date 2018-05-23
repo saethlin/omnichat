@@ -23,5 +23,5 @@ jobs:
           key: project-cache-{{ checksum "Cargo.lock" }}
           paths:
             - "target"
-            - "$HOME/.cargo"
+            - "~/.cargo"
 
