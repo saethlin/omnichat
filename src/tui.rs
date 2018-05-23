@@ -9,7 +9,6 @@ use termion::event::Key::*;
 use termion::input::TermRead;
 use termion::{color, style};
 
-use std::io::Write;
 use std::iter::FromIterator;
 
 lazy_static! {
@@ -381,7 +380,6 @@ impl TUI {
             ));
             if set_unread {
                 self.servers[0].channels[1].num_unreads += 1;
-                self.draw();
             }
         }
 
@@ -636,10 +634,13 @@ impl TUI {
             Goto(CHAN_WIDTH + 1 + self.cursor_pos as u16, height)
         ).unwrap();
 
-        let out = ::std::io::stdout();
-        let mut l = out.lock();
-        l.write_all(lock.as_bytes()).unwrap();
-        l.flush().unwrap();
+        {
+            use std::io::Write;
+            let out = ::std::io::stdout();
+            let mut l = out.lock();
+            l.write_all(lock.as_bytes()).unwrap();
+            l.flush().unwrap();
+        }
     }
 
     fn handle_input(&mut self, event: &termion::event::Event) {
@@ -649,7 +650,6 @@ impl TUI {
                     self.send_message();
                     self.current_channel_mut().message_buffer.clear();
                     self.cursor_pos = 0;
-                    self.draw();
                 }
             }
             Key(Backspace) => {
@@ -658,60 +658,45 @@ impl TUI {
                     self.current_channel_mut().message_buffer.remove(remove_pos);
                     self.cursor_pos -= 1;
                 }
-                self.draw();
             }
             Key(Ctrl('c')) => self.shutdown = true,
             Key(Up) => {
                 self.previous_channel();
-                self.draw();
             }
             Key(Down) => {
                 self.next_channel();
-                self.draw();
             }
             Key(Ctrl('d')) => {
                 self.next_server();
-                self.draw();
             }
             Key(Ctrl('a')) => {
                 self.previous_server();
-                self.draw();
             }
             Key(PageDown) | Key(Ctrl('s')) => {
                 self.next_channel_unread();
-                self.draw();
             }
             Key(PageUp) | Key(Ctrl('w')) => {
                 self.previous_channel_unread();
-                self.draw();
             }
             Key(Ctrl('q')) => {
-                {
-                    let server = &mut self.servers[self.current_server];
-                    server.channels[server.current_channel].message_scroll_offset += 1;
-                }
-                self.draw();
+                let server = &mut self.servers[self.current_server];
+                server.channels[server.current_channel].message_scroll_offset += 1;
             }
             Key(Ctrl('e')) => {
-                {
-                    let server = &mut self.servers[self.current_server];
-                    let chan = &mut server.channels[server.current_channel];
-                    let previous_offset = chan.message_scroll_offset;
-                    chan.message_scroll_offset = previous_offset.saturating_sub(1);
-                }
-                self.draw();
+                let server = &mut self.servers[self.current_server];
+                let chan = &mut server.channels[server.current_channel];
+                let previous_offset = chan.message_scroll_offset;
+                chan.message_scroll_offset = previous_offset.saturating_sub(1);
             }
             Key(Left) => {
                 if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                 }
-                self.draw();
             }
             Key(Right) => {
                 if self.cursor_pos < self.current_channel().message_buffer.len() {
                     self.cursor_pos += 1;
                 }
-                self.draw();
             }
             Key(Char('\t')) => {
                 if self.autocompletions.is_empty() {
@@ -742,7 +727,6 @@ impl TUI {
                         .message_buffer
                         .extend(chosen_completion.chars());
                     self.autocomplete_index += 1;
-                    self.draw();
                 }
             }
             Key(Char(c)) => {
@@ -754,79 +738,86 @@ impl TUI {
                     .message_buffer
                     .insert(current_pos, c);
                 self.cursor_pos += 1;
-
-                self.draw();
             }
             _ => {}
         }
     }
 
+    fn handle_event(&mut self, event: Event) {
+        match event {
+            Event::Input(event) => {
+                self.handle_input(&event);
+            }
+            Event::Message(message) => {
+                if let Err(e) = self.add_message(&message, true) {
+                    self.add_client_message(&e.to_string());
+                }
+            }
+            Event::HistoryMessage(message) => {
+                // Attempt to add message, otherwise requeue it
+                if self.add_message(&message, false).is_err() {
+                    self.sender.send(Event::HistoryMessage(message)).unwrap();
+                }
+            }
+            Event::Error(message) => {
+                self.add_client_message(&message);
+            }
+            Event::HistoryLoaded {
+                server,
+                channel,
+                unread_count,
+            } => match self
+                .servers
+                .iter_mut()
+                .find(|s| s.name == server)
+                .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+            {
+                Some(c) => c.num_unreads = unread_count,
+                None => self
+                    .sender
+                    .send(Event::HistoryLoaded {
+                        server,
+                        channel,
+                        unread_count,
+                    })
+                    .unwrap(),
+            },
+            Event::Connected(conn) => {
+                self.add_server(conn);
+            }
+        }
+    }
+
     pub fn run(mut self) {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
         self.draw();
         loop {
             let event = match self.events.recv() {
                 Ok(ev) => ev,
                 Err(_) => break,
             };
+            self.handle_event(event);
 
-            let (server_name, channel_name) = {
-                let server = &self.servers[self.current_server];
-                let server_name = server.name.clone();
-                let channel_name = server.channels[server.current_channel].name.clone();
-                (server_name, channel_name)
-            };
+            // Now we have another 16 miliseconds to handle other events before anyone notices
+            let start_instant = Instant::now();
+            while let Some(remaining_time) =
+                Duration::from_millis(16).checked_sub(start_instant.elapsed())
+            {
+                let event = match self.events.recv_timeout(remaining_time) {
+                    Ok(ev) => ev,
+                    Err(mpsc::RecvTimeoutError::Timeout) => break,
+                    Err(_) => {
+                        self.shutdown = true;
+                        break;
+                    }
+                };
 
-            match event {
-                Event::Input(event) => {
-                    self.handle_input(&event);
-                }
-                Event::Message(message) => {
-                    if let Err(e) = self.add_message(&message, true) {
-                        self.add_client_message(&e.to_string());
-                    }
-                    self.draw();
-                }
-                Event::HistoryMessage(message) => {
-                    // Attempt to add message, otherwise requeue it
-                    if self.add_message(&message, false).is_err() {
-                        self.sender.send(Event::HistoryMessage(message)).unwrap();
-                    }
-                }
-                Event::Error(message) => {
-                    self.add_client_message(&message);
-                    self.draw();
-                }
-                Event::HistoryLoaded {
-                    server,
-                    channel,
-                    unread_count,
-                } => {
-                    if (server == server_name) && (channel == channel_name) {
-                        self.draw();
-                    }
-
-                    match self
-                        .servers
-                        .iter_mut()
-                        .find(|s| s.name == server)
-                        .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
-                    {
-                        Some(c) => c.num_unreads = unread_count,
-                        None => self
-                            .sender
-                            .send(Event::HistoryLoaded {
-                                server,
-                                channel,
-                                unread_count,
-                            })
-                            .unwrap(),
-                    }
-                }
-                Event::Connected(conn) => {
-                    self.add_server(conn);
-                    self.draw();
-                }
+                self.handle_event(event);
             }
+
+            self.draw();
+
             if self.shutdown {
                 break;
             }

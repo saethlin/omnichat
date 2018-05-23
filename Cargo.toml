@@ -26,5 +26,4 @@ slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types"}
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
 
 [profile.release]
-lto = true
 panic = "abort"
