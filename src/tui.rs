@@ -1,23 +1,15 @@
 use conn::{Conn, Event, Message};
-use std::sync::mpsc::{channel, Receiver, Sender};
-use termion;
-
-use termion::color::{AnsiValue, Fg};
-use termion::cursor::Goto;
-use termion::event::Event::*;
-use termion::event::Key::*;
-use termion::event::{MouseButton, MouseEvent};
-use termion::input::TermRead;
-use termion::{color, style};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::thread;
 
 lazy_static! {
-    static ref COLORS: Vec<AnsiValue> = {
+    static ref COLORS: Vec<::termion::color::AnsiValue> = {
         let mut c = Vec::with_capacity(45);
         for r in 1..6 {
             for g in 1..6 {
                 for b in 1..6 {
                     if r < 2 || g < 2 || g < 2 {
-                        c.push(AnsiValue::rgb(r, g, b));
+                        c.push(::termion::color::AnsiValue::rgb(r, g, b));
                     }
                 }
             }
@@ -49,10 +41,10 @@ pub struct TUI {
     autocomplete_index: usize,
     cursor_pos: usize,
     _guards: (
-        termion::screen::AlternateScreen<::std::io::Stdout>,
-        termion::raw::RawTerminal<::std::io::Stdout>,
+        ::termion::screen::AlternateScreen<::std::io::Stdout>,
+        ::termion::raw::RawTerminal<::std::io::Stdout>,
     ),
-    previous_height: u16,
+    previous_terminal_height: u16,
     truncate_buffer_to: usize,
 }
 
@@ -98,7 +90,10 @@ impl ChanMessage {
     }
 
     fn format(&mut self, width: usize) {
+        use std::fmt::Write;
+        use termion::color::{Fg, Reset};
         use textwrap::{NoHyphenation, Wrapper};
+
         if Some(width) == self.formatted_width {
             return;
         }
@@ -126,13 +121,12 @@ impl ChanMessage {
                 for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
                 {
                     if l == 0 {
-                        use std::fmt::Write;
                         write!(
                             self.formatted,
                             "{}{}{}: ",
                             Fg(COLORS[djb2(&self.sender) as usize % COLORS.len()]),
                             self.sender,
-                            Fg(color::Reset),
+                            Fg(Reset),
                         ).unwrap();
 
                         self.formatted
@@ -158,11 +152,10 @@ impl ChanMessage {
 
 impl TUI {
     pub fn new() -> Self {
-        use std::io::stdin;
-        use std::thread;
+        use termion::input::TermRead;
         use termion::raw::IntoRawMode;
 
-        let screenguard = termion::screen::AlternateScreen::from(::std::io::stdout());
+        let screenguard = ::termion::screen::AlternateScreen::from(::std::io::stdout());
         let rawguard = ::std::io::stdout().into_raw_mode().unwrap();
 
         let (sender, reciever) = channel();
@@ -178,7 +171,7 @@ impl TUI {
 
         let send = sender.clone();
         thread::spawn(move || {
-            for event in stdin().events() {
+            for event in ::std::io::stdin().events() {
                 if let Ok(ev) = event {
                     send.send(Event::Input(ev)).unwrap();
                 }
@@ -198,7 +191,7 @@ impl TUI {
             cursor_pos: 0,
             _guards: (screenguard, rawguard),
             truncate_buffer_to: 0,
-            previous_height: 0,
+            previous_terminal_height: 0,
         };
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender));
@@ -408,24 +401,27 @@ impl TUI {
 
     fn draw(&mut self, render_buffer: &mut String) {
         use std::fmt::Write;
+        use termion::color::Fg;
+        use termion::cursor::Goto;
+        use termion::{color, style};
 
-        let (width, height) =
-            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+        let (terminal_width, terminal_height) =
+            ::termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-        if height != self.previous_height {
+        if terminal_height != self.previous_terminal_height {
             render_buffer.clear();
-            write!(render_buffer, "{}", termion::clear::All).unwrap();
+            write!(render_buffer, "{}", ::termion::clear::All).unwrap();
 
-            for i in 1..height + 1 {
+            for i in 1..terminal_height + 1 {
                 write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i)).unwrap();
             }
             self.truncate_buffer_to = render_buffer.len();
-            self.previous_height = height;
+            self.previous_terminal_height = terminal_height;
         } else {
             render_buffer.truncate(self.truncate_buffer_to);
         }
 
-        let remaining_width = (width - CHAN_WIDTH) as usize;
+        let remaining_width = (terminal_width - CHAN_WIDTH) as usize;
         for message in self.current_channel_mut().messages.iter_mut() {
             message.format(remaining_width);
         }
@@ -433,29 +429,23 @@ impl TUI {
         // Draw the message input area
         // We need this message area height to render the channel messages
         // More NLL hacking
-        let message_area_height = {
-            let wrapped_lines = ::textwrap::Wrapper::with_splitter(
-                (width - CHAN_WIDTH - 1) as usize,
-                ::textwrap::NoHyphenation,
-            ).wrap(&self.current_channel().message_buffer);
-
-            let message_area_height = if wrapped_lines.len() > 1 {
-                height - wrapped_lines.len() as u16 + 1
-            } else {
-                height
-            };
-
-            for (l, line) in wrapped_lines.iter().enumerate() {
-                write!(
-                    render_buffer,
-                    "{}{}",
-                    Goto(CHAN_WIDTH + 1, message_area_height + l as u16),
-                    line
-                ).unwrap();
-            }
-
-            message_area_height
-        };
+        let total_chars = self.current_channel().message_buffer.chars().count();
+        let rows = (total_chars / remaining_width) + 1;
+        for row in (0..rows).rev() {
+            write!(
+                render_buffer,
+                "{}",
+                Goto(CHAN_WIDTH + 1, terminal_height - (rows - row - 1) as u16)
+            ).unwrap();
+            render_buffer.extend(
+                self.current_channel()
+                    .message_buffer
+                    .chars()
+                    .skip(remaining_width * row)
+                    .take(remaining_width),
+            );
+        }
+        let message_area_height = terminal_height - rows as u16 + 1;
 
         // Draw all the messages by looping over them in reverse
         let num_unreads = self.current_channel().num_unreads;
@@ -551,7 +541,7 @@ impl TUI {
             // Draw all the channels for the current server down the left side
             let server = &mut self.servers[self.current_server];
             {
-                let height = height as usize;
+                let height = terminal_height as usize;
                 if server.current_channel + 1 > height + server.channel_scroll_offset {
                     server.channel_scroll_offset = server.current_channel - height + 1
                 } else if server.current_channel < server.channel_scroll_offset {
@@ -572,7 +562,7 @@ impl TUI {
                 .iter_mut()
                 .enumerate()
                 .skip(server.channel_scroll_offset)
-                .take(height as usize)
+                .take(terminal_height as usize)
             {
                 if c == server.current_channel {
                     write!(
@@ -606,8 +596,15 @@ impl TUI {
             }
         }
 
-        //self.add_client_message(&format!("{:?}", cursor_position));
-        write!(render_buffer, "{}", Goto(self.cursor_pos as u16, height)).unwrap();
+        write!(
+            render_buffer,
+            "{}",
+            Goto(
+                CHAN_WIDTH + 1 + (self.cursor_pos % remaining_width) as u16,
+                terminal_height - (total_chars / remaining_width) as u16
+                    + (self.cursor_pos / remaining_width) as u16
+            )
+        ).unwrap();
         {
             use std::io::Write;
             let out = ::std::io::stdout();
@@ -617,7 +614,11 @@ impl TUI {
         }
     }
 
-    fn handle_input(&mut self, event: &termion::event::Event) {
+    fn handle_input(&mut self, event: &::termion::event::Event) {
+        use termion::event::Event::*;
+        use termion::event::Key::*;
+        use termion::event::{MouseButton, MouseEvent};
+
         match *event {
             Key(Char('\n')) => {
                 if !self.current_channel().message_buffer.is_empty() {
@@ -628,9 +629,16 @@ impl TUI {
             }
             Key(Backspace) => {
                 if self.cursor_pos > 0 {
-                    let remove_pos = self.cursor_pos - 1;
+                    let remove_pos = self.cursor_pos as usize - 1;
                     self.current_channel_mut().message_buffer.remove(remove_pos);
                     self.cursor_pos -= 1;
+                }
+            }
+            Key(Delete) => {
+                let buffer_chars = self.current_channel().message_buffer.chars().count();
+                if buffer_chars > 0 && self.cursor_pos < buffer_chars {
+                    let remove_pos = self.cursor_pos;
+                    self.current_channel_mut().message_buffer.remove(remove_pos);
                 }
             }
             Key(Ctrl('c')) => self.shutdown = true,
@@ -668,7 +676,7 @@ impl TUI {
                 }
             }
             Key(Right) => {
-                if self.cursor_pos < self.current_channel().message_buffer.len() {
+                if usize::from(self.cursor_pos) < self.current_channel().message_buffer.len() {
                     self.cursor_pos += 1;
                 }
             }
@@ -707,7 +715,7 @@ impl TUI {
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
 
-                let current_pos = self.cursor_pos;
+                let current_pos = self.cursor_pos as usize;
                 self.current_channel_mut()
                     .message_buffer
                     .insert(current_pos, c);
@@ -791,7 +799,6 @@ impl TUI {
     // This is basically a game loop, we could use a temporary storage allocator
     // If that were possible
     pub fn run(mut self) {
-        use std::sync::mpsc;
         use std::time::{Duration, Instant};
         let mut render_buffer = String::new();
         self.draw(&mut render_buffer);
@@ -809,7 +816,7 @@ impl TUI {
             {
                 let event = match self.events.recv_timeout(remaining_time) {
                     Ok(ev) => ev,
-                    Err(mpsc::RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Timeout) => break,
                     Err(_) => {
                         self.shutdown = true;
                         break;
