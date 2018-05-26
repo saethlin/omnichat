@@ -98,6 +98,7 @@ impl ChanMessage {
     }
 
     fn format(&mut self, width: usize) {
+        use textwrap::{NoHyphenation, Wrapper};
         if Some(width) == self.formatted_width {
             return;
         }
@@ -106,11 +107,11 @@ impl ChanMessage {
         self.formatted.clear();
         let indent_str = "    ";
         let sender_spacer = " ".repeat(self.sender.chars().count() + 2);
-        let wrapper = ::textwrap::Wrapper::new(width)
+        let wrapper = Wrapper::with_splitter(width, NoHyphenation)
             .subsequent_indent(indent_str)
             .initial_indent(indent_str)
             .break_words(true);
-        let first_line_wrapper = ::textwrap::Wrapper::new(width)
+        let first_line_wrapper = Wrapper::with_splitter(width, NoHyphenation)
             .subsequent_indent(indent_str)
             .initial_indent(&sender_spacer)
             .break_words(true);
@@ -433,8 +434,10 @@ impl TUI {
         // We need this message area height to render the channel messages
         // More NLL hacking
         let message_area_height = {
-            let wrapped_lines = ::textwrap::Wrapper::new((width - CHAN_WIDTH - 1) as usize)
-                .wrap(&self.current_channel().message_buffer);
+            let wrapped_lines = ::textwrap::Wrapper::with_splitter(
+                (width - CHAN_WIDTH - 1) as usize,
+                ::textwrap::NoHyphenation,
+            ).wrap(&self.current_channel().message_buffer);
 
             let message_area_height = if wrapped_lines.len() > 1 {
                 height - wrapped_lines.len() as u16 + 1
