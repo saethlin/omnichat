@@ -22,6 +22,7 @@ struct Handler {
     channels: BiMap<ChannelId, String>,
     mention_patterns: Vec<(String, String)>,
     channel_patterns: Vec<(String, String)>,
+    discord: Arc<RwLock<discord::Discord>>,
 }
 
 impl Handler {
@@ -144,6 +145,7 @@ impl DiscordConn {
             channels: channels,
             mention_patterns: mention_patterns,
             channel_patterns: channel_patterns,
+            discord: Arc::clone(&discord),
         });
 
         // Load message history
@@ -242,6 +244,8 @@ impl DiscordConn {
                                     timestamp: message.timestamp.timestamp().to_string(),
                                 }))
                                 .expect("Sender died");
+                            // Ack the message
+                            handler.discord.read().unwrap().ack_message(message.channel_id, message.id).unwrap();
                         } else {
                             // TODO: Messages from other servers end up here
                             // And they really shouldn't even be sent to us in the first place

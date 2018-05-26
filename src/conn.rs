@@ -21,6 +21,7 @@ pub enum Event {
     Input(termion::event::Event),
     Error(String),
     Connected(Box<Conn>),
+    Resize,
 }
 
 #[derive(Debug, Fail)]

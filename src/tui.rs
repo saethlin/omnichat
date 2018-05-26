@@ -6,6 +6,7 @@ use termion::color::{AnsiValue, Fg};
 use termion::cursor::Goto;
 use termion::event::Event::*;
 use termion::event::Key::*;
+use termion::event::{MouseButton, MouseEvent};
 use termion::input::TermRead;
 use termion::{color, style};
 
@@ -51,6 +52,8 @@ pub struct TUI {
         termion::screen::AlternateScreen<::std::io::Stdout>,
         termion::raw::RawTerminal<::std::io::Stdout>,
     ),
+    previous_height: u16,
+    truncate_buffer_to: usize,
 }
 
 struct Server {
@@ -122,6 +125,15 @@ impl ChanMessage {
                 for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
                 {
                     if l == 0 {
+                        use std::fmt::Write;
+                        write!(
+                            self.formatted,
+                            "{}{}{}: ",
+                            Fg(COLORS[djb2(&self.sender) as usize % COLORS.len()]),
+                            self.sender,
+                            Fg(color::Reset),
+                        ).unwrap();
+
                         self.formatted
                             .extend(wrapped_line.chars().skip_while(|c| c.is_whitespace()));
                     } else {
@@ -153,11 +165,21 @@ impl TUI {
         let rawguard = ::std::io::stdout().into_raw_mode().unwrap();
 
         let (sender, reciever) = channel();
+
+        // Must be called before any threads are launched
+        let signal = ::chan_signal::notify(&[::chan_signal::Signal::WINCH]);
+        let winch_send = sender.clone();
+        thread::spawn(move || {
+            for _ in signal {
+                winch_send.send(Event::Resize).unwrap();
+            }
+        });
+
         let send = sender.clone();
         thread::spawn(move || {
             for event in stdin().events() {
                 if let Ok(ev) = event {
-                    send.send(Event::Input(ev)).expect("IO event sender died");
+                    send.send(Event::Input(ev)).unwrap();
                 }
             }
         });
@@ -174,6 +196,8 @@ impl TUI {
             autocomplete_index: 0,
             cursor_pos: 0,
             _guards: (screenguard, rawguard),
+            truncate_buffer_to: 0,
+            previous_height: 0,
         };
         let sender = tui.sender();
         tui.add_server(ClientConn::new(sender));
@@ -314,7 +338,8 @@ impl TUI {
             channel_scroll_offset: 0,
         });
 
-        self.longest_channel_name = self.servers
+        self.longest_channel_name = self
+            .servers
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
@@ -322,7 +347,8 @@ impl TUI {
 
         let previous_server_name = self.servers[self.current_server].name.clone();
         self.servers.sort_by_key(|s| s.name.clone());
-        self.current_server = self.servers
+        self.current_server = self
+            .servers
             .iter()
             .position(|s| s.name == previous_server_name)
             .unwrap();
@@ -363,6 +389,10 @@ impl TUI {
             message.timestamp,
         ));
 
+        if set_unread {
+            channel.messages.sort_by_key(|m| m.timestamp.clone());
+        }
+
         Ok(())
     }
 
@@ -378,23 +408,25 @@ impl TUI {
     fn draw(&mut self, render_buffer: &mut String) {
         use std::fmt::Write;
 
-        let draw_start = ::std::time::Instant::now();
         let (width, height) =
             termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
-        write!(render_buffer, "{}", termion::clear::All).unwrap();
+        if height != self.previous_height {
+            render_buffer.clear();
+            write!(render_buffer, "{}", termion::clear::All).unwrap();
 
-        for i in 1..height + 1 {
-            write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i)).unwrap();
+            for i in 1..height + 1 {
+                write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i)).unwrap();
+            }
+            self.truncate_buffer_to = render_buffer.len();
+            self.previous_height = height;
+        } else {
+            render_buffer.truncate(self.truncate_buffer_to);
         }
 
         let remaining_width = (width - CHAN_WIDTH) as usize;
-        // Reformat all the messages, inside their own block because NLLs
-        {
-            let server = &mut self.servers[self.current_server];
-            for message in server.channels[server.current_channel].messages.iter_mut() {
-                message.format(remaining_width);
-            }
+        for message in self.current_channel_mut().messages.iter_mut() {
+            message.format(remaining_width);
         }
 
         // Draw the message input area
@@ -422,76 +454,60 @@ impl TUI {
             message_area_height
         };
 
-        // NLL HACK
-        {
-            // Draw all the messages by looping over them in reverse
-            let server = &self.servers[self.current_server];
+        // Draw all the messages by looping over them in reverse
+        let num_unreads = self.current_channel().num_unreads;
+        let mut draw_unread_marker = num_unreads > 0;
 
-            let num_unreads = server.channels[server.current_channel].num_unreads;
-            let mut draw_unread_marker = num_unreads > 0;
+        let offset = self.current_channel().message_scroll_offset;
 
-            let offset = self.current_channel().message_scroll_offset;
-
-            let mut row = message_area_height - 1;
-            let mut skipped = 0;
-            'outer: for (m, message) in server.channels[server.current_channel]
-                .messages
-                .iter()
-                .rev()
-                .enumerate()
-            {
-                // Unread marker
-                if (draw_unread_marker) && (m == num_unreads) {
-                    write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, row)).unwrap();
-                    write!(render_buffer, "{}", Fg(color::Red)).unwrap();
-                    render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
-                    write!(render_buffer, "{}", Fg(color::Reset)).unwrap();
-                    row -= 1;
-                    draw_unread_marker = false;
-                    if row == 1 {
-                        break 'outer;
-                    }
-                }
-
-                for (l, line) in message.formatted.lines().rev().enumerate() {
-                    if skipped < offset {
-                        skipped += 1;
-                        continue;
-                    }
-                    let num_lines = message.formatted.lines().count();
-                    write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, row)).unwrap();
-                    row -= 1;
-                    if l == num_lines - 1 {
-                        write!(
-                            render_buffer,
-                            "{}{}{}: {}",
-                            Fg(COLORS[djb2(&message.sender) as usize % COLORS.len()]),
-                            message.sender,
-                            Fg(color::Reset),
-                            line
-                        ).unwrap();
-                    } else {
-                        write!(render_buffer, "{}", line).unwrap();
-                    }
-                    if row == 1 {
-                        break 'outer;
-                    }
-                }
-            }
-            // If we didn't draw the unread marker, put it at the top of the screen
-            if draw_unread_marker {
-                use std::cmp::max;
-                write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, max(2, row))).unwrap();
-                write!(render_buffer, "{}", Fg(color::Red)).unwrap();
+        let mut row = message_area_height - 1;
+        let mut skipped = 0;
+        'outer: for (m, message) in self.current_channel().messages.iter().rev().enumerate() {
+            // Unread marker
+            if (draw_unread_marker) && (m == num_unreads) {
+                write!(
+                    render_buffer,
+                    "{}{}",
+                    Goto(CHAN_WIDTH + 1, row),
+                    Fg(color::Red)
+                ).unwrap();
                 render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
                 write!(render_buffer, "{}", Fg(color::Reset)).unwrap();
+                row -= 1;
+                draw_unread_marker = false;
+                if row == 1 {
+                    break 'outer;
+                }
             }
+
+            for line in message.formatted.lines().rev() {
+                if skipped < offset {
+                    skipped += 1;
+                    continue;
+                }
+                write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, row)).unwrap();
+                render_buffer.push_str(line);
+                row -= 1;
+                if row == 1 {
+                    break 'outer;
+                }
+            }
+        }
+
+        // If we didn't draw the unread marker, put it at the top of the screen
+        if draw_unread_marker {
+            use std::cmp::max;
+            write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, max(2, row))).unwrap();
+            write!(render_buffer, "{}", Fg(color::Red)).unwrap();
+            render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
+            write!(render_buffer, "{}", Fg(color::Reset)).unwrap();
         }
 
         // Draw all the server names across the top
         write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, 1)).unwrap(); // Move to the top-right corner
         let num_servers = self.servers.len();
-        for (s, server) in self.servers
+        for (s, server) in self
+            .servers
             .iter()
             .enumerate()
             .skip(self.server_scroll_offset)
@@ -589,16 +605,13 @@ impl TUI {
 
         //self.add_client_message(&format!("{:?}", cursor_position));
         write!(render_buffer, "{}", Goto(self.cursor_pos as u16, height)).unwrap();
-
         {
             use std::io::Write;
             let out = ::std::io::stdout();
             let mut lock = out.lock();
             lock.write_all(render_buffer.as_bytes()).unwrap();
             lock.flush().unwrap();
-            render_buffer.clear();
         }
-        self.add_client_message(&format!("{:?}", draw_start.elapsed()));
     }
 
     fn handle_input(&mut self, event: &termion::event::Event) {
@@ -636,11 +649,11 @@ impl TUI {
             Key(PageUp) | Key(Ctrl('w')) => {
                 self.previous_channel_unread();
             }
-            Key(Ctrl('q')) => {
+            Key(Ctrl('q')) | Mouse(MouseEvent::Press(MouseButton::WheelUp, ..)) => {
                 let server = &mut self.servers[self.current_server];
                 server.channels[server.current_channel].message_scroll_offset += 1;
             }
-            Key(Ctrl('e')) => {
+            Key(Ctrl('e')) | Mouse(MouseEvent::Press(MouseButton::WheelDown, ..)) => {
                 let server = &mut self.servers[self.current_server];
                 let chan = &mut server.channels[server.current_channel];
                 let previous_offset = chan.message_scroll_offset;
@@ -658,7 +671,8 @@ impl TUI {
             }
             Key(Char('\t')) => {
                 if self.autocompletions.is_empty() {
-                    self.autocompletions = if let Some(last_word) = self.current_channel()
+                    self.autocompletions = if let Some(last_word) = self
+                        .current_channel()
                         .message_buffer
                         .split_whitespace()
                         .last()
@@ -696,12 +710,35 @@ impl TUI {
                     .insert(current_pos, c);
                 self.cursor_pos += 1;
             }
+            Unsupported(ref bytes) => match bytes.as_slice() {
+                [27, 79, 65] => self
+                    .sender
+                    .send(Event::Input(Mouse(MouseEvent::Press(
+                        MouseButton::WheelUp,
+                        1,
+                        1,
+                    ))))
+                    .unwrap(),
+                [27, 79, 66] => self
+                    .sender
+                    .send(Event::Input(Mouse(MouseEvent::Press(
+                        MouseButton::WheelDown,
+                        1,
+                        1,
+                    ))))
+                    .unwrap(),
+
+                _ => {
+                    self.add_client_message(&format!("{:?}", bytes));
+                }
+            },
             _ => {}
         }
     }
 
     fn handle_event(&mut self, event: Event) {
         match event {
+            Event::Resize => {} // Will be redrawn because we got an event
             Event::Input(event) => {
                 self.handle_input(&event);
             }
@@ -726,13 +763,15 @@ impl TUI {
                 server,
                 channel,
                 unread_count,
-            } => match self.servers
+            } => match self
+                .servers
                 .iter_mut()
                 .find(|s| s.name == server)
                 .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
             {
                 Some(c) => c.num_unreads = unread_count,
-                None => self.sender
+                None => self
+                    .sender
                     .send(Event::HistoryLoaded {
                         server,
                         channel,

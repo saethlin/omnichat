@@ -19,6 +19,7 @@ extern crate toml;
 extern crate websocket;
 #[macro_use]
 extern crate derive_more;
+extern crate chan_signal;
 extern crate chrono;
 
 #[macro_use]
