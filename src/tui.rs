@@ -1,6 +1,5 @@
 use conn::{Conn, Event, Message};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
-use std::thread;
 
 lazy_static! {
     static ref COLORS: Vec<::termion::color::AnsiValue> = {
@@ -152,6 +151,7 @@ impl ChanMessage {
 
 impl TUI {
     pub fn new() -> Self {
+        use std::thread;
         use termion::input::TermRead;
         use termion::raw::IntoRawMode;
 

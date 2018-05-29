@@ -12,3 +12,18 @@ user: User
 cache_ts: Timestamp
 event_ts: Timestamp
 
+New slack type:
+type: team_join
+user: User
+cache_ts: Timestamp
+event_ts: Timestamp
+
+New slack type add:
+????????
+
+New slack type:
+type: im_created
+user: UserId
+channel: Channel
+event_ts: Timestamp
+

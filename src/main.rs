@@ -24,8 +24,10 @@ extern crate chrono;
 
 #[macro_use]
 mod conn;
+
 mod tui;
-use tui::TUI;
+use tui::TUI as UI;
+
 mod bimap;
 mod discord_conn;
 mod slack_conn;
@@ -84,7 +86,7 @@ fn main() {
         std::process::exit(1)
     });
 
-    let tui = TUI::new();
+    let tui = UI::new();
 
     // Start all the slack connections first, because we can't do the Discord stuff fully async
     if let Some(slack) = config.slack {
