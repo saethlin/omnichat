@@ -714,7 +714,6 @@ impl TUI {
             Key(Char(c)) => {
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
-
                 let current_pos = self.cursor_pos as usize;
                 self.current_channel_mut()
                     .message_buffer
@@ -764,6 +763,10 @@ impl TUI {
             Event::HistoryMessage(message) => {
                 // Attempt to add message, otherwise requeue it
                 if let Err(message) = self.add_message(message, false) {
+                    self.add_client_message(&format!(
+                        "Failed to add message from {}, {}",
+                        message.channel, message.server
+                    ));
                     self.sender.send(Event::HistoryMessage(message)).unwrap();
                 }
             }

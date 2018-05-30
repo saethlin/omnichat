@@ -45,7 +45,7 @@ pub trait Conn: Send {
 
     fn mark_read(&self, _channel: &str, _timestamp: Option<&str>) {}
 
-    fn handle_cmd(&mut self, _cmd: String, _args: Vec<String>) {}
+    fn handle_cmd(&mut self, _cmd: &str) {}
 
     fn autocomplete(&self, _word: &str) -> Vec<String> {
         Vec::new()

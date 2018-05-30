@@ -4,7 +4,7 @@ version = "0.0.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
 
 [dependencies]
-derive_more = "0.10"
+derive_more = "0.11"
 failure = "0.1"
 websocket = "0.20"
 serde = "1.0"
@@ -19,6 +19,7 @@ irc = "0.13"
 futures = "0.1"
 openssl-probe = "0.1"
 chrono = "0.4"
+reqwest = "0.8"
 termion = "1.5"
 chan-signal = "0.3"
 textwrap = "0.9"

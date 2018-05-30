@@ -245,7 +245,12 @@ impl DiscordConn {
                                 }))
                                 .expect("Sender died");
                             // Ack the message
-                            handler.discord.read().unwrap().ack_message(message.channel_id, message.id).unwrap();
+                            handler
+                                .discord
+                                .read()
+                                .unwrap()
+                                .ack_message(message.channel_id, message.id)
+                                .unwrap();
                         } else {
                             // TODO: Messages from other servers end up here
                             // And they really shouldn't even be sent to us in the first place

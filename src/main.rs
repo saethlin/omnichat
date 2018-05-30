@@ -10,6 +10,9 @@ extern crate openssl_probe;
 extern crate regex;
 #[macro_use]
 extern crate serde_derive;
+extern crate chan_signal;
+extern crate chrono;
+extern crate reqwest;
 extern crate serde_json;
 extern crate slack_api;
 extern crate spmc;
@@ -19,8 +22,6 @@ extern crate toml;
 extern crate websocket;
 #[macro_use]
 extern crate derive_more;
-extern crate chan_signal;
-extern crate chrono;
 
 #[macro_use]
 mod conn;
@@ -30,6 +31,7 @@ use tui::TUI as UI;
 
 mod bimap;
 mod discord_conn;
+mod pushbullet_conn;
 mod slack_conn;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -42,16 +44,23 @@ struct DiscordConfig {
     name: String,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+struct PushbulletConfig {
+    token: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct Config {
     discord_token: Option<String>,
     slack: Option<Vec<SlackConfig>>,
     discord: Option<Vec<DiscordConfig>>,
+    pushbullet: Option<PushbulletConfig>,
 }
 
 fn main() {
     use conn::Event;
     use discord_conn::DiscordConn;
+    use pushbullet_conn::PushbulletConn;
     use slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -128,6 +137,9 @@ fn main() {
                 })
             };
 
+            //let state = discord::State::new(info);
+            //connection.download_all_members(&mut state);
+
             let dis = Arc::new(RwLock::new(dis));
 
             let (discord_sender, discord_receiver) = spmc::channel();
@@ -157,5 +169,12 @@ fn main() {
         });
     }
 
+    // Pushbullet initialization
+    if let Some(pushbullet_config) = config.pushbullet {
+        let pb_sender = tui.sender();
+        thread::spawn(move || {
+            PushbulletConn::new(pushbullet_config.token, pb_sender);
+        });
+    }
     tui.run();
 }
