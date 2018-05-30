@@ -20,9 +20,12 @@ where
         }
     }
 
-    pub fn insert(&mut self, left: L, right: R) {
-        self.left_to_right.insert(left.clone(), right.clone());
-        self.right_to_left.insert(right.clone(), left.clone());
+    pub fn insert<IL: Into<L>, IR: Into<R>>(&mut self, left: IL, right: IR) {
+        let the_left = left.into();
+        let the_right = right.into();
+        self.left_to_right
+            .insert(the_left.clone(), the_right.clone());
+        self.right_to_left.insert(the_right, the_left);
     }
 
     pub fn from(left: &[L], right: &[R]) -> Self {
