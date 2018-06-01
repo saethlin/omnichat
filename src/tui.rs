@@ -383,9 +383,7 @@ impl TUI {
             message.timestamp,
         ));
 
-        if set_unread {
-            channel.messages.sort_by_key(|m| m.timestamp.clone());
-        }
+        channel.messages.sort_by_key(|m| m.timestamp.clone());
 
         Ok(())
     }
@@ -708,6 +706,7 @@ impl TUI {
                     self.current_channel_mut()
                         .message_buffer
                         .extend(chosen_completion.chars());
+                    self.cursor_pos += chosen_completion.chars().count();
                     self.autocomplete_index += 1;
                 }
             }
@@ -753,11 +752,12 @@ impl TUI {
                 self.handle_input(&event);
             }
             Event::Message(message) => {
-                if let Err(msg) = self.add_message(message, true) {
+                if let Err(message) = self.add_message(message, true) {
                     self.add_client_message(&format!(
                         "Failed to add message from {}, {}",
-                        msg.channel, msg.server
+                        message.channel, message.server
                     ));
+                    self.sender.send(Event::Message(message)).unwrap();
                 }
             }
             Event::HistoryMessage(message) => {
