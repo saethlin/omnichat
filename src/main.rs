@@ -171,8 +171,13 @@ fn main() {
     // Pushbullet initialization
     if let Some(pushbullet_config) = config.pushbullet {
         let pb_sender = tui.sender();
+        let sender = tui.sender();
         thread::spawn(move || {
-            PushbulletConn::new(pushbullet_config.token, pb_sender);
+            sender
+                .send(Event::Connected(
+                    PushbulletConn::new(pushbullet_config.token, pb_sender).unwrap(),
+                ))
+                .unwrap();
         });
     }
     tui.run();
