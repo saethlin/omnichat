@@ -5,11 +5,10 @@ pub struct CursorVec<T> {
 
 impl<T> CursorVec<T> {
     // The whole point of this structure is to always be able to get from it
-    pub fn new(base: Vec<T>) -> Self<T> {
-        assert!(base.len() > 0);
+    pub fn new(first: T) -> CursorVec<T> {
         Self {
             index: 0,
-            vec: base,
+            vec: vec![first],
         }
     }
     pub fn get(&self) -> &T {
@@ -23,6 +22,10 @@ impl<T> CursorVec<T> {
     pub fn prev(&mut self) {
         self.index -= 1;
         self.index %= self.vec.len();
+    }
+    pub fn first(&self) -> &T {
+        debug_assert!(!self.vec.is_empty());
+        unsafe {self.vec.get_unchecked(0)}
     }
     pub fn wrapping_seek(&mut self, index: usize) {
         self.index = index;

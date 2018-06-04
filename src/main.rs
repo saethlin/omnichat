@@ -29,7 +29,7 @@ mod conn;
 mod logger;
 mod tui;
 use tui::TUI as UI;
-
+mod cursor_vec;
 mod bimap;
 mod discord_conn;
 mod pushbullet_conn;

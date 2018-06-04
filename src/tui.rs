@@ -212,8 +212,10 @@ impl TUI {
     }
 
     fn current_channel_mut(&mut self) -> &mut Channel {
-        let server = &mut self.servers[self.current_server];
-        &mut server.channels[server.current_channel]
+        self.servers
+            .get_mut(self.current_server)
+            .and_then(|s| s.channels.get_mut(s.current_channel))
+            .unwrap()
     }
 
     fn reset_current_unreads(&mut self) {

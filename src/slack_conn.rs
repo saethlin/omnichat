@@ -428,39 +428,40 @@ impl Conn for SlackConn {
         }
     }
 
-    fn mark_read(&self, channel: &str, _timestamp: Option<&str>) {
+    fn mark_read(&self, channel: &str, timestamp: Option<&str>) {
         use slack_api::{channels, groups};
 
-        let channel_or_group_id = self
-            .channels
-            .get_left(channel)
-            .expect("channel not found")
-            .clone();
+        let channel_or_group_id = match self.channels.get_left(channel) {
+            Some(s) => s.clone(),
+            None => {
+                error!("Tried to mark unread for channel {} in server {} but channel does not exist", channel, self.name());
+                return;
+            }
+        };
 
         let client = self.client.clone();
         let token = self.token.clone();
-        thread::spawn(move || {
-            let unix_ts = ::chrono::offset::Local::now().timestamp() + 1;
-            let ts = unix_ts.to_string();
+        let ts = timestamp
+            .map(|t| t.to_owned())
+            .unwrap_or_else(|| (::chrono::offset::Local::now().timestamp() + 1).to_string());
 
-            match channel_or_group_id {
-                ChannelOrGroupId::Channel(channel_id) => {
-                    let request = channels::MarkRequest {
-                        channel: channel_id,
-                        ts: &ts,
-                    };
-                    if let Err(e) = channels::mark(&client, &token, &request) {
-                        error!("{}", e);
-                    }
+        thread::spawn(move || match channel_or_group_id {
+            ChannelOrGroupId::Channel(channel_id) => {
+                let request = channels::MarkRequest {
+                    channel: channel_id,
+                    ts: &ts,
+                };
+                if let Err(e) = channels::mark(&client, &token, &request) {
+                    error!("{}", e);
                 }
-                ChannelOrGroupId::Group(group_id) => {
-                    let request = groups::MarkRequest {
-                        channel: group_id,
-                        ts: &ts,
-                    };
-                    if let Err(e) = groups::mark(&client, &token, &request) {
-                        error!("{}", e);
-                    }
+            }
+            ChannelOrGroupId::Group(group_id) => {
+                let request = groups::MarkRequest {
+                    channel: group_id,
+                    ts: &ts,
+                };
+                if let Err(e) = groups::mark(&client, &token, &request) {
+                    error!("{}", e);
                 }
             }
         });
