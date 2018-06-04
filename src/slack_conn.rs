@@ -434,7 +434,11 @@ impl Conn for SlackConn {
         let channel_or_group_id = match self.channels.get_left(channel) {
             Some(s) => s.clone(),
             None => {
-                error!("Tried to mark unread for channel {} in server {} but channel does not exist", channel, self.name());
+                error!(
+                    "Tried to mark unread for channel {} in server {} but channel does not exist",
+                    channel,
+                    self.name()
+                );
                 return;
             }
         };

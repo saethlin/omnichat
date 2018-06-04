@@ -1,4 +1,5 @@
 use conn::{Conn, Event, Message};
+use cursor_vec::CursorVec;
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
 lazy_static! {
@@ -31,8 +32,7 @@ fn djb2(input: &str) -> u64 {
 pub struct TUI {
     // Create a special server and channels, which will enable
     // all the get-methods to be nofail since we can fall back to them
-    servers: Vec<Server>,
-    current_server: usize,
+    servers: CursorVec<Server>,
     longest_channel_name: u16,
     shutdown: bool,
     events: Receiver<Event>,
@@ -180,9 +180,23 @@ impl TUI {
             }
         });
 
-        let mut tui = Self {
-            servers: Vec::new(),
-            current_server: 0,
+        Self {
+            servers: CursorVec::new(Server {
+                channels: vec!["Errors", "Mentions"]
+                    .iter()
+                    .map(|name| Channel {
+                        messages: Vec::new(),
+                        name: name.to_string(),
+                        num_unreads: 0,
+                        message_scroll_offset: 0,
+                        message_buffer: String::new(),
+                    })
+                    .collect(),
+                connection: ClientConn::new(sender.clone()),
+                channel_scroll_offset: 0,
+                current_channel: 0,
+                name: String::from("Client"),
+            }),
             longest_channel_name: 0,
             shutdown: false,
             events: reciever,
@@ -194,10 +208,7 @@ impl TUI {
             _guards: (screenguard, rawguard),
             truncate_buffer_to: 0,
             previous_terminal_height: 0,
-        };
-        let sender = tui.sender();
-        tui.add_server(ClientConn::new(sender));
-        tui
+        }
     }
 
     pub fn sender(&self) -> SyncSender<Event> {
@@ -205,21 +216,17 @@ impl TUI {
     }
 
     fn current_channel(&self) -> &Channel {
-        self.servers
-            .get(self.current_server)
-            .and_then(|s| s.channels.get(s.current_channel))
-            .unwrap()
+        let server = self.servers.get();
+        server.channels.get(server.current_channel).unwrap()
     }
 
     fn current_channel_mut(&mut self) -> &mut Channel {
-        self.servers
-            .get_mut(self.current_server)
-            .and_then(|s| s.channels.get_mut(s.current_channel))
-            .unwrap()
+        let server = self.servers.get_mut();
+        server.channels.get_mut(server.current_channel).unwrap()
     }
 
     fn reset_current_unreads(&mut self) {
-        let server = &mut self.servers[self.current_server];
+        let server = self.servers.get_mut();
         if server.channels[server.current_channel].num_unreads > 0 {
             server.channels[server.current_channel].num_unreads = 0;
             let current_channel = &server.channels[server.current_channel];
@@ -236,25 +243,18 @@ impl TUI {
 
     fn next_server(&mut self) {
         self.reset_current_unreads();
-        self.current_server += 1;
-        if self.current_server >= self.servers.len() {
-            self.current_server = 0;
-        }
+        self.servers.next();
     }
 
     fn previous_server(&mut self) {
         self.reset_current_unreads();
-        if self.current_server > 0 {
-            self.current_server -= 1;
-        } else {
-            self.current_server = self.servers.len() - 1;
-        }
+        self.servers.prev();
     }
 
     fn next_channel_unread(&mut self) {
         //NLL HACK
         let index = {
-            let server = &self.servers[self.current_server];
+            let server = self.servers.get_mut();
             (0..server.channels.len())
                 .map(|i| (server.current_channel + i) % server.channels.len())
                 .find(|i| server.channels[*i].num_unreads > 0 && *i != server.current_channel)
@@ -263,7 +263,7 @@ impl TUI {
             None => {}
             Some(index) => {
                 self.reset_current_unreads();
-                self.servers[self.current_server].current_channel = index;
+                self.servers.get_mut().current_channel = index;
             }
         }
     }
@@ -271,7 +271,7 @@ impl TUI {
     fn previous_channel_unread(&mut self) {
         //NLL HACK
         let index = {
-            let server = &self.servers[self.current_server];
+            let server = self.servers.get_mut();
             (0..server.channels.len())
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
@@ -282,14 +282,14 @@ impl TUI {
             None => {}
             Some(index) => {
                 self.reset_current_unreads();
-                self.servers[self.current_server].current_channel = index;
+                self.servers.get_mut().current_channel = index;
             }
         }
     }
 
     fn next_channel(&mut self) {
         self.reset_current_unreads();
-        let server = &mut self.servers[self.current_server];
+        let server = self.servers.get_mut();
         server.current_channel += 1;
         if server.current_channel >= server.channels.len() {
             server.current_channel = 0;
@@ -298,7 +298,7 @@ impl TUI {
 
     fn previous_channel(&mut self) {
         self.reset_current_unreads();
-        let server = &mut self.servers[self.current_server];
+        let server = &mut self.servers.get_mut();
         if server.current_channel > 0 {
             server.current_channel -= 1;
         } else {
@@ -307,14 +307,14 @@ impl TUI {
     }
 
     fn add_client_message(&mut self, message: &str) {
-        self.servers[0].channels[0].messages.push(ChanMessage::new(
-            String::from("Client"),
-            message.to_owned(),
-            0.0.to_string(),
-        ));
-        if !((self.current_server == 0) & (self.servers[0].current_channel == 0)) {
-            self.servers[0].channels[0].num_unreads += 1;
-        }
+        self.servers.get_first_mut().channels[0]
+            .messages
+            .push(ChanMessage::new(
+                String::from("Client"),
+                message.to_owned(),
+                0.0.to_string(),
+            ));
+        self.servers.get_first_mut().channels[0].num_unreads += 1;
     }
 
     pub fn add_server(&mut self, connection: Box<Conn>) {
@@ -345,24 +345,24 @@ impl TUI {
             .max()
             .unwrap_or(0) as u16 + 1;
 
-        let previous_server_name = self.servers[self.current_server].name.clone();
+        let previous_server_name = self.servers.get().name.clone();
         self.servers.sort_by_key(|s| s.name.clone());
-        self.current_server = self
-            .servers
-            .iter()
-            .position(|s| s.name == previous_server_name)
-            .unwrap();
+        while self.servers.get().name != previous_server_name {
+            self.servers.next();
+        }
     }
 
     fn add_message(&mut self, message: Message, set_unread: bool) -> Result<(), Message> {
         if message.is_mention {
-            self.servers[0].channels[1].messages.push(ChanMessage::new(
-                message.sender.clone(),
-                message.contents.clone(),
-                message.timestamp.clone(),
-            ));
+            self.servers.get_first_mut().channels[1]
+                .messages
+                .push(ChanMessage::new(
+                    message.sender.clone(),
+                    message.contents.clone(),
+                    message.timestamp.clone(),
+                ));
             if set_unread {
-                self.servers[0].channels[1].num_unreads += 1;
+                self.servers.get_first_mut().channels[1].num_unreads += 1;
             }
         }
 
@@ -396,11 +396,11 @@ impl TUI {
 
     fn send_message(&mut self) {
         let contents = self.current_channel().message_buffer.clone();
-        let server = &mut self.servers[self.current_server];
-        let current_channel_name = &server.channels[server.current_channel].name;
-        server
+        let current_channel_name = self.current_channel().name.clone();
+        self.servers
+            .get_mut()
             .connection
-            .send_channel_message(current_channel_name, &contents);
+            .send_channel_message(&current_channel_name, &contents);
     }
 
     fn draw(&mut self, render_buffer: &mut String) {
@@ -509,7 +509,7 @@ impl TUI {
             .enumerate()
             .skip(self.server_scroll_offset)
         {
-            if s == self.current_server {
+            if s == self.servers.tell() {
                 write!(
                     render_buffer,
                     "{}{}{}",
@@ -543,7 +543,7 @@ impl TUI {
 
         {
             // Draw all the channels for the current server down the left side
-            let server = &mut self.servers[self.current_server];
+            let server = self.servers.get_mut();
             {
                 let height = terminal_height as usize;
                 if server.current_channel + 1 > height + server.channel_scroll_offset {
@@ -665,12 +665,10 @@ impl TUI {
                 self.previous_channel_unread();
             }
             Key(Ctrl('q')) | Mouse(MouseEvent::Press(MouseButton::WheelUp, ..)) => {
-                let server = &mut self.servers[self.current_server];
-                server.channels[server.current_channel].message_scroll_offset += 1;
+                self.current_channel_mut().message_scroll_offset += 1;
             }
             Key(Ctrl('e')) | Mouse(MouseEvent::Press(MouseButton::WheelDown, ..)) => {
-                let server = &mut self.servers[self.current_server];
-                let chan = &mut server.channels[server.current_channel];
+                let chan = self.current_channel_mut();
                 let previous_offset = chan.message_scroll_offset;
                 chan.message_scroll_offset = previous_offset.saturating_sub(1);
             }
@@ -692,9 +690,7 @@ impl TUI {
                         .split_whitespace()
                         .last()
                     {
-                        self.servers[self.current_server]
-                            .connection
-                            .autocomplete(last_word)
+                        self.servers.get().connection.autocomplete(last_word)
                     } else {
                         Vec::new()
                     }
