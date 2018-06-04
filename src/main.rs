@@ -13,6 +13,8 @@ extern crate serde_derive;
 extern crate chan_signal;
 extern crate chrono;
 extern crate inlinable_string;
+#[macro_use]
+extern crate log;
 extern crate reqwest;
 extern crate serde_json;
 extern crate slack_api;
@@ -24,7 +26,7 @@ extern crate websocket;
 
 #[macro_use]
 mod conn;
-
+mod logger;
 mod tui;
 use tui::TUI as UI;
 
@@ -96,13 +98,16 @@ fn main() {
 
     let tui = UI::new();
 
+    // Init the global logger
+    log::set_boxed_logger(Box::new(logger::Logger::new(tui.sender()))).unwrap();
+
     // Start all the slack connections first, because we can't do the Discord stuff fully async
     if let Some(slack) = config.slack {
         for c in slack {
             let sender = tui.sender();
             thread::spawn(move || match SlackConn::new(c.token, sender.clone()) {
                 Ok(connection) => sender.send(Event::Connected(connection)).unwrap(),
-                Err(err) => sender.send(omnierror!(err)).unwrap(),
+                Err(err) => error!("Failed to create slack connection: {}", err),
             });
         }
     }
@@ -144,12 +149,11 @@ fn main() {
             let (discord_sender, discord_receiver) = spmc::channel();
 
             // Spawn a thread that copies the incoming Discord events out to every omnichat server
-            let error_sender = sender.clone();
             thread::spawn(move || loop {
                 match connection.recv_event() {
                     Ok(ev) => discord_sender.send(ev).unwrap(),
                     Err(discord::Error::Closed(..)) => break,
-                    Err(err) => error_sender.send(omnierror!(err)).unwrap(),
+                    Err(err) => error!("Discord read error: {}", err),
                 }
             });
 
@@ -161,7 +165,7 @@ fn main() {
                 thread::spawn(move || {
                     match DiscordConn::new(dis, info, discord_receiver, &c.name, sender.clone()) {
                         Ok(connection) => sender.send(Event::Connected(connection)).unwrap(),
-                        Err(err) => sender.send(omnierror!(err)).unwrap(),
+                        Err(err) => error!("Unable to connect to Discord server {}:", err),
                     }
                 });
             }

@@ -3,7 +3,7 @@ use conn::{Conn, Event, Message};
 use failure::Error;
 use inlinable_string::InlinableString;
 use regex::Regex;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread;
 
@@ -177,11 +177,11 @@ pub struct SlackConn {
     channel_names: Vec<String>,
     client: Arc<::slack_api::requests::Client>,
     handler: Arc<Handler>,
-    sender: Sender<Event>,
+    _sender: SyncSender<Event>,
 }
 
 impl SlackConn {
-    pub fn new(token: String, sender: Sender<Event>) -> Result<Box<Conn>, Error> {
+    pub fn new(token: String, sender: SyncSender<Event>) -> Result<Box<Conn>, Error> {
         let client = Arc::new(::slack_api::requests::default_client()?);
         let connect_handle = {
             let token = token.clone();
@@ -305,7 +305,7 @@ impl SlackConn {
                                 }
                             }
                             Err(e) => {
-                                thread_sender.send(omnierror!(e)).unwrap();
+                                error!("{}", e);
                                 thread_sender
                                     .send(Event::Error(message.to_string()))
                                     .unwrap();
@@ -352,7 +352,7 @@ impl SlackConn {
                         let messages = match channels::history(&client, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
-                                sender.send(omnierror!(e)).unwrap();
+                                error!("{}", e);
                                 Vec::new()
                             }
                         };
@@ -369,7 +369,7 @@ impl SlackConn {
                         let messages = match groups::history(&client, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
-                                sender.send(omnierror!(e)).unwrap();
+                                error!("{}", e);
                                 Vec::new()
                             }
                         };
@@ -399,7 +399,7 @@ impl SlackConn {
             channels,
             channel_names,
             team_name,
-            sender,
+            _sender: sender,
             handler,
         }))
     }
@@ -423,7 +423,7 @@ impl Conn for SlackConn {
         request.as_user = Some(true);
         if post_message(&self.client, &self.token, &request).is_err() {
             if let Err(e) = post_message(&self.client, &self.token, &request) {
-                self.sender.send(omnierror!(e)).expect("Sender died");
+                error!("{}", e);
             }
         }
     }
@@ -439,7 +439,6 @@ impl Conn for SlackConn {
 
         let client = self.client.clone();
         let token = self.token.clone();
-        let sender = self.sender.clone();
         thread::spawn(move || {
             let unix_ts = ::chrono::offset::Local::now().timestamp() + 1;
             let ts = unix_ts.to_string();
@@ -451,7 +450,7 @@ impl Conn for SlackConn {
                         ts: &ts,
                     };
                     if let Err(e) = channels::mark(&client, &token, &request) {
-                        sender.send(omnierror!(e)).unwrap();
+                        error!("{}", e);
                     }
                 }
                 ChannelOrGroupId::Group(group_id) => {
@@ -460,7 +459,7 @@ impl Conn for SlackConn {
                         ts: &ts,
                     };
                     if let Err(e) = groups::mark(&client, &token, &request) {
-                        sender.send(omnierror!(e)).unwrap();
+                        error!("{}", e);
                     }
                 }
             }

@@ -30,12 +30,6 @@ pub enum ConnError {
     ConnectError,
 }
 
-macro_rules! omnierror {
-    ($e:expr) => {
-        Event::Error(format!("{}\nfile {}, line {}", $e, file!(), line!()))
-    };
-}
-
 pub trait Conn: Send {
     fn name(&self) -> &str;
 

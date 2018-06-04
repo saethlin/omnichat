@@ -4,13 +4,13 @@ use conn::{Conn, Event, Message};
 use discord;
 use discord::model::ChannelId;
 use failure::Error;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
 pub struct DiscordConn {
     discord: Arc<RwLock<discord::Discord>>,
-    sender: Sender<Event>,
+    _sender: SyncSender<Event>,
     name: String,
     channels: BiMap<ChannelId, String>,
     channel_names: Vec<String>,
@@ -64,7 +64,7 @@ impl DiscordConn {
         info: ::discord::model::ReadyEvent,
         event_stream: ::spmc::Receiver<::discord::model::Event>,
         server_name: &str,
-        sender: Sender<Event>,
+        sender: SyncSender<Event>,
     ) -> Result<Box<Conn>, Error> {
         use discord::model::PossibleServer::Online;
 
@@ -170,7 +170,7 @@ impl DiscordConn {
                     .unwrap()
                     .get_messages(id, discord::GetMessages::MostRecent, Some(100))
                     .unwrap_or_else(|e| {
-                        sender.send(omnierror!(e)).expect("Sender died");
+                        error!("{}", e);
                         Vec::new()
                     });
 
@@ -270,7 +270,7 @@ impl DiscordConn {
 
         return Ok(Box::new(DiscordConn {
             discord: discord,
-            sender: sender,
+            _sender: sender,
             name: handler.server_name.clone(),
             channels: handler.channels.clone(),
             channel_names: channel_names,
@@ -291,7 +291,7 @@ impl Conn for DiscordConn {
             "",
             false,
         ) {
-            self.sender.send(omnierror!(err)).expect("Sender died");
+            error!("{}", err);
         }
     }
 

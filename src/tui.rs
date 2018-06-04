@@ -1,5 +1,5 @@
 use conn::{Conn, Event, Message};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
 lazy_static! {
     static ref COLORS: Vec<::termion::color::AnsiValue> = {
@@ -29,12 +29,14 @@ fn djb2(input: &str) -> u64 {
 }
 
 pub struct TUI {
+    // Create a special server and channels, which will enable
+    // all the get-methods to be nofail since we can fall back to them
     servers: Vec<Server>,
     current_server: usize,
     longest_channel_name: u16,
     shutdown: bool,
     events: Receiver<Event>,
-    sender: Sender<Event>,
+    sender: SyncSender<Event>,
     server_scroll_offset: usize,
     autocompletions: Vec<String>,
     autocomplete_index: usize,
@@ -158,7 +160,7 @@ impl TUI {
         let screenguard = ::termion::screen::AlternateScreen::from(::std::io::stdout());
         let rawguard = ::std::io::stdout().into_raw_mode().unwrap();
 
-        let (sender, reciever) = channel();
+        let (sender, reciever) = sync_channel(100);
 
         // Must be called before any threads are launched
         let signal = ::chan_signal::notify(&[::chan_signal::Signal::WINCH]);
@@ -198,13 +200,15 @@ impl TUI {
         tui
     }
 
-    pub fn sender(&self) -> Sender<Event> {
+    pub fn sender(&self) -> SyncSender<Event> {
         self.sender.clone()
     }
 
     fn current_channel(&self) -> &Channel {
-        let server = &self.servers[self.current_server];
-        &server.channels[server.current_channel]
+        self.servers
+            .get(self.current_server)
+            .and_then(|s| s.channels.get(s.current_channel))
+            .unwrap()
     }
 
     fn current_channel_mut(&mut self) -> &mut Channel {
@@ -841,11 +845,11 @@ impl TUI {
 pub struct ClientConn {
     name: String,
     channel_names: Vec<String>,
-    sender: Sender<Event>,
+    sender: SyncSender<Event>,
 }
 
 impl ClientConn {
-    pub fn new(sender: Sender<Event>) -> Box<Conn> {
+    pub fn new(sender: SyncSender<Event>) -> Box<Conn> {
         Box::new(ClientConn {
             name: "Client".to_string(),
             channel_names: vec!["Errors".to_owned(), "Mentions".to_owned()],
@@ -862,10 +866,10 @@ impl Conn for ClientConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         self.sender
             .send(Event::Message(Message {
-                server: "Client".to_string(),
-                channel: channel.to_string(),
-                contents: contents.to_string(),
-                sender: String::new(),
+                server: "Client".to_owned(),
+                channel: channel.to_owned(),
+                contents: contents.to_owned(),
+                sender: "You".to_owned(),
                 is_mention: false,
                 timestamp: 0.0.to_string(),
             }))

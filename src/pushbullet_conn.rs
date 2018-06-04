@@ -1,6 +1,6 @@
 use conn::{Conn, Event};
 use failure::Error;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", tag = "type")]
@@ -28,13 +28,13 @@ struct Notification {
 }
 
 pub struct PushbulletConn {
-    token: String,
-    sender: Sender<Event>,
+    _token: String,
+    _sender: SyncSender<Event>,
     channels: Vec<String>,
 }
 
 impl PushbulletConn {
-    pub fn new(token: String, sender: Sender<Event>) -> Result<Box<PushbulletConn>, Error> {
+    pub fn new(token: String, sender: SyncSender<Event>) -> Result<Box<PushbulletConn>, Error> {
         /*
         let client = reqwest::Client::new();
         let mut header = reqwest::header::Headers::new();
@@ -70,8 +70,8 @@ impl PushbulletConn {
             }
         });
         Ok(Box::new(Self {
-            token,
-            sender,
+            _token: token,
+            _sender: sender,
             channels: vec!["test".to_string()],
         }))
     }
