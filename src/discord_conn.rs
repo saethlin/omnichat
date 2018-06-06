@@ -28,7 +28,7 @@ struct Handler {
 impl Handler {
     pub fn to_omni(&self, message: &::discord::model::Message) -> String {
         let mut text = message.content.clone();
-        for &(ref id, ref human) in self.channel_patterns.iter() {
+        for &(ref id, ref human) in &self.channel_patterns {
             text = text.replace(id, human);
         }
 
@@ -61,7 +61,7 @@ impl Handler {
 impl DiscordConn {
     pub fn new(
         discord: Arc<RwLock<::discord::Discord>>,
-        info: ::discord::model::ReadyEvent,
+        info: &::discord::model::ReadyEvent,
         event_stream: ::spmc::Receiver<::discord::model::Event>,
         server_name: &str,
         sender: SyncSender<Event>,
@@ -72,7 +72,7 @@ impl DiscordConn {
             .servers
             .iter()
             .filter_map(|s| {
-                if let &Online(ref server) = s {
+                if let Online(ref server) = s {
                     Some(server)
                 } else {
                     None
@@ -118,7 +118,7 @@ impl DiscordConn {
                 let is_for_me = match perm_override.kind {
                     ::discord::model::PermissionOverwriteType::Member(user_id) => user_id == my_id,
                     ::discord::model::PermissionOverwriteType::Role(role_id) => {
-                        my_roles.iter().find(|r| r == &&role_id).is_some()
+                        my_roles.iter().any(|r| r == &role_id)
                     }
                 };
                 if is_for_me && perm_override.allow.contains(Permissions::READ_MESSAGES) {
@@ -142,9 +142,9 @@ impl DiscordConn {
 
         let handler = Arc::new(Handler {
             server_name: server_name.to_owned(),
-            channels: channels,
-            mention_patterns: mention_patterns,
-            channel_patterns: channel_patterns,
+            channels,
+            mention_patterns,
+            channel_patterns,
             discord: Arc::clone(&discord),
         });
 
@@ -185,7 +185,7 @@ impl DiscordConn {
                 } else {
                     0
                 };
-                for m in messages.into_iter() {
+                for m in messages {
                     sender
                         .send(Event::HistoryMessage(Message {
                             server: handler.server_name.clone(),
@@ -196,8 +196,7 @@ impl DiscordConn {
                                 .mentions
                                 .iter()
                                 .map(|u| format!("{}", u.id.mention()))
-                                .find(|m| m == &my_mention)
-                                .is_some(),
+                                .any(|m| m == my_mention),
                             timestamp: m.timestamp.timestamp().to_string(), // TODO: jam more precision in here?
                         }))
                         .expect("Sender died");
@@ -227,7 +226,7 @@ impl DiscordConn {
                         if let Some(channel_name) = handler
                             .channels
                             .get_right(&message.channel_id)
-                            .map(|c| c.clone())
+                            .cloned()
                         {
                             sender
                                 .send(Event::Message(Message {
@@ -237,8 +236,7 @@ impl DiscordConn {
                                         .mentions
                                         .iter()
                                         .map(|u| format!("{}", u.id.mention()))
-                                        .find(|m| m == &my_mention)
-                                        .is_some(),
+                                        .any(|m| m == my_mention),
                                     contents: handler.to_omni(&message),
                                     sender: message.author.name,
                                     timestamp: message.timestamp.timestamp().to_string(),
@@ -268,14 +266,14 @@ impl DiscordConn {
             });
         }
 
-        return Ok(Box::new(DiscordConn {
-            discord: discord,
+        Ok(Box::new(DiscordConn {
+            discord,
             _sender: sender,
             name: handler.server_name.clone(),
             channels: handler.channels.clone(),
-            channel_names: channel_names,
-            handler: handler,
-        }));
+            channel_names,
+            handler,
+        }))
     }
 }
 

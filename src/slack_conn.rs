@@ -68,7 +68,7 @@ impl Handler {
                 ts: Some(ts),
                 ..
             }) => (
-                outer_channel.or(channel.map(|c| c.into())),
+                outer_channel.or_else(|| channel.map(|c| c.into())),
                 self.users
                     .get_right(&user)
                     .unwrap_or(&user.to_string().into())
@@ -83,7 +83,7 @@ impl Handler {
                 ts: Some(ts),
                 ..
             }) => (
-                outer_channel.or(channel.map(|c| c.into())),
+                outer_channel.or_else(|| channel.map(|c| c.into())),
                 name.into(),
                 text,
                 ts,
@@ -95,7 +95,7 @@ impl Handler {
                 ts: Some(ts),
                 ..
             }) => (
-                outer_channel.or(channel.map(|c| c.into())),
+                outer_channel.or_else(|| channel.map(|c| c.into())),
                 self.users
                     .get_right(&user)
                     .unwrap_or(&user.to_string().into())
@@ -110,7 +110,7 @@ impl Handler {
                 ts: Some(ts),
                 ..
             }) => (
-                outer_channel.or(channel.map(|c| c.into())),
+                outer_channel.or_else(|| channel.map(|c| c.into())),
                 self.users
                     .get_right(&user)
                     .unwrap_or(&user.to_string().into())
@@ -330,7 +330,7 @@ impl SlackConn {
         });
 
         // Launch threads to populate the message history
-        for (channel_or_group_id, channel_name) in channels.clone().into_iter() {
+        for (channel_or_group_id, channel_name) in channels.clone() {
             let sender = sender.clone();
             let handler = handler.clone();
             let client = client.clone();
@@ -393,7 +393,7 @@ impl SlackConn {
         }
 
         Ok(Box::new(SlackConn {
-            token: token.to_string(),
+            token,
             client,
             users,
             channels,
@@ -432,7 +432,7 @@ impl Conn for SlackConn {
         use slack_api::{channels, groups};
 
         let channel_or_group_id = match self.channels.get_left(channel) {
-            Some(s) => s.clone(),
+            Some(s) => *s,
             None => {
                 error!(
                     "Tried to mark unread for channel {} in server {} but channel does not exist",

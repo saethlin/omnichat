@@ -15,7 +15,7 @@ impl<T> CursorVec<T> {
         if vec.is_empty() {
             None
         } else {
-            Some(Self { index: 0, vec: vec })
+            Some(Self { index: 0, vec })
         }
     }
     pub fn get(&self) -> &T {

@@ -163,7 +163,7 @@ fn main() {
                 let dis = dis.clone();
                 let discord_receiver = discord_receiver.clone();
                 thread::spawn(move || {
-                    match DiscordConn::new(dis, info, discord_receiver, &c.name, sender.clone()) {
+                    match DiscordConn::new(dis, &info, discord_receiver, &c.name, sender.clone()) {
                         Ok(connection) => sender.send(Event::Connected(connection)).unwrap(),
                         Err(err) => error!("Unable to connect to Discord server {}:", err),
                     }

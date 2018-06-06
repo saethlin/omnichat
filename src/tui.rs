@@ -24,9 +24,9 @@ fn djb2(input: &str) -> u64 {
     let mut hash: u64 = 5381;
 
     for c in input.bytes() {
-        hash = (hash << 5).wrapping_add(hash).wrapping_add(c as u64);
+        hash = (hash << 5).wrapping_add(hash).wrapping_add(u64::from(c));
     }
-    return hash;
+    hash
 }
 
 pub struct TUI {
@@ -200,7 +200,7 @@ impl TUI {
             longest_channel_name: 0,
             shutdown: false,
             events: reciever,
-            sender: sender,
+            sender,
             server_scroll_offset: 0,
             autocompletions: Vec::new(),
             autocomplete_index: 0,
@@ -217,12 +217,12 @@ impl TUI {
 
     fn current_channel(&self) -> &Channel {
         let server = self.servers.get();
-        server.channels.get(server.current_channel).unwrap()
+        &server.channels[server.current_channel]
     }
 
     fn current_channel_mut(&mut self) -> &mut Channel {
         let server = self.servers.get_mut();
-        server.channels.get_mut(server.current_channel).unwrap()
+        &mut server.channels[server.current_channel]
     }
 
     fn reset_current_unreads(&mut self) {
@@ -333,7 +333,7 @@ impl TUI {
                 })
                 .collect(),
             name: connection.name().to_string(),
-            connection: connection,
+            connection,
             current_channel: 0,
             channel_scroll_offset: 0,
         });
@@ -426,7 +426,7 @@ impl TUI {
         }
 
         let remaining_width = (terminal_width - CHAN_WIDTH) as usize;
-        for message in self.current_channel_mut().messages.iter_mut() {
+        for message in &mut self.current_channel_mut().messages {
             message.format(remaining_width);
         }
 
@@ -678,7 +678,7 @@ impl TUI {
                 }
             }
             Key(Right) => {
-                if usize::from(self.cursor_pos) < self.current_channel().message_buffer.len() {
+                if self.cursor_pos < self.current_channel().message_buffer.len() {
                     self.cursor_pos += 1;
                 }
             }
@@ -707,7 +707,7 @@ impl TUI {
                     let chosen_completion = self.autocompletions[self.autocomplete_index].clone();
                     self.current_channel_mut()
                         .message_buffer
-                        .extend(chosen_completion.chars());
+                        .push_str(&chosen_completion);
                     self.cursor_pos += chosen_completion.chars().count();
                     self.autocomplete_index += 1;
                 }
@@ -807,11 +807,7 @@ impl TUI {
         use std::time::{Duration, Instant};
         let mut render_buffer = String::new();
         self.draw(&mut render_buffer);
-        loop {
-            let event = match self.events.recv() {
-                Ok(ev) => ev,
-                Err(_) => break,
-            };
+        while let Ok(event) = self.events.recv() {
             self.handle_event(event);
 
             // Now we have another 16 miliseconds to handle other events before anyone notices
@@ -851,7 +847,7 @@ impl ClientConn {
         Box::new(ClientConn {
             name: "Client".to_string(),
             channel_names: vec!["Errors".to_owned(), "Mentions".to_owned()],
-            sender: sender,
+            sender,
         })
     }
 }
