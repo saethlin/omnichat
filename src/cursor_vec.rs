@@ -1,10 +1,13 @@
+/// A continer backed by a Vec with a cursor that always points to a valid element,
+/// and therefore it is always possible to get the current element.
+/// The backing container must never be empty.
 pub struct CursorVec<T> {
     index: usize,
     vec: Vec<T>,
 }
 
 impl<T> CursorVec<T> {
-    // The whole point of this structure is to always be able to get from it
+    /// Construct a CursorVec from a single element
     pub fn new(first: T) -> CursorVec<T> {
         Self {
             index: 0,
