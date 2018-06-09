@@ -88,6 +88,7 @@ impl Handler {
                 text,
                 ts,
             ),
+            /*
             SlackbotResponse(MessageSlackbotResponse {
                 channel,
                 user: Some(user),
@@ -103,6 +104,7 @@ impl Handler {
                 text,
                 ts,
             ),
+            */
             FileShare(MessageFileShare {
                 channel,
                 user: Some(user),
