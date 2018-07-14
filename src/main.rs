@@ -12,9 +12,9 @@ extern crate regex;
 extern crate serde_derive;
 extern crate chan_signal;
 extern crate chrono;
-extern crate inlinable_string;
 #[macro_use]
 extern crate log;
+extern crate dirs;
 extern crate reqwest;
 extern crate serde_json;
 extern crate slack_api;
@@ -105,9 +105,15 @@ fn main() {
     if let Some(slack) = config.slack {
         for c in slack {
             let sender = tui.sender();
-            thread::spawn(move || match SlackConn::new(c.token, sender.clone()) {
-                Ok(connection) => sender.send(Event::Connected(connection)).unwrap(),
-                Err(err) => error!("Failed to create slack connection: {}", err),
+            thread::spawn(move || {
+                if let Err(err) = SlackConn::create_on(c.token, sender.clone()) {
+                    sender
+                        .send(Event::Error(format!(
+                            "Failed to create slack connection: {}",
+                            err
+                        )))
+                        .unwrap();
+                }
             });
         }
     }

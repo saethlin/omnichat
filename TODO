@@ -1,3 +1,5 @@
+Keep an on-disk cache of historical messages so we don't have to download so many every time
+
 Discord: Figure out how to ack messages
 Discord+Slack+TUI: Support for muted channels
 Discord+Slack: Make sure all users are loaded

@@ -1,5 +1,7 @@
 use termion;
 
+pub type DateTime = ::chrono::DateTime<::chrono::Utc>;
+
 #[derive(Debug, Clone)]
 pub struct Message {
     pub server: String,
@@ -7,16 +9,15 @@ pub struct Message {
     pub sender: String,
     pub contents: String,
     pub is_mention: bool,
-    pub timestamp: String,
+    pub timestamp: ::chrono::DateTime<::chrono::Utc>,
 }
 
 pub enum Event {
     Message(Message),
-    HistoryMessage(Message),
     HistoryLoaded {
         server: String,
         channel: String,
-        unread_count: usize,
+        read_at: DateTime,
     },
     Input(termion::event::Event),
     Error(String),

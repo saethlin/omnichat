@@ -12,7 +12,7 @@ pub struct Logger {
 
 impl Logger {
     pub fn new(sender: SyncSender<Event>) -> Self {
-        let log_path = ::std::env::home_dir().unwrap().join(".omnichat_log");
+        let log_path = ::dirs::home_dir().unwrap().join(".omnichat_log");
         Logger {
             file_output: Mutex::new(File::create(&log_path).unwrap()),
             sender,

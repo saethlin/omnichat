@@ -1,4 +1,4 @@
-use conn::{Conn, Event, Message};
+use conn::{Conn, DateTime, Event, Message};
 use cursor_vec::CursorVec;
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
@@ -8,7 +8,7 @@ lazy_static! {
         for r in 1..6 {
             for g in 1..6 {
                 for b in 1..6 {
-                    if r < 2 || g < 2 || g < 2 {
+                    if r < 2 || g < 2 || b < 2 {
                         c.push(::termion::color::AnsiValue::rgb(r, g, b));
                     }
                 }
@@ -59,16 +59,26 @@ struct Server {
 
 impl Server {
     fn has_unreads(&self) -> bool {
-        self.channels.iter().any(|c| c.num_unreads > 0)
+        self.channels.iter().any(|c| c.num_unreads() > 0)
     }
 }
 
 struct Channel {
     messages: Vec<ChanMessage>,
     name: String,
-    num_unreads: usize,
+    read_at: DateTime,
     message_scroll_offset: usize,
     message_buffer: String,
+}
+
+impl Channel {
+    fn num_unreads(&self) -> usize {
+        self.messages
+            .iter()
+            .rev()
+            .filter(|m| m.timestamp > self.read_at)
+            .count()
+    }
 }
 
 struct ChanMessage {
@@ -76,11 +86,12 @@ struct ChanMessage {
     raw: String,
     pub formatted: String,
     pub sender: String,
-    timestamp: String,
+    timestamp: DateTime,
 }
 
+// TODO: This is actually a stupid into implementation
 impl ChanMessage {
-    fn new(sender: String, contents: String, timestamp: String) -> Self {
+    fn new(sender: String, contents: String, timestamp: ::chrono::DateTime<::chrono::Utc>) -> Self {
         ChanMessage {
             formatted_width: None,
             raw: contents,
@@ -187,7 +198,7 @@ impl TUI {
                     .map(|name| Channel {
                         messages: Vec::new(),
                         name: name.to_string(),
-                        num_unreads: 0,
+                        read_at: ::chrono::Utc::now(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
                     })
@@ -227,17 +238,11 @@ impl TUI {
 
     fn reset_current_unreads(&mut self) {
         let server = self.servers.get_mut();
-        if server.channels[server.current_channel].num_unreads > 0 {
-            server.channels[server.current_channel].num_unreads = 0;
+        if server.channels[server.current_channel].num_unreads() > 0 {
+            server.channels[server.current_channel].read_at = ::chrono::Utc::now();
             let current_channel = &server.channels[server.current_channel];
 
-            server.connection.mark_read(
-                &current_channel.name,
-                current_channel
-                    .messages
-                    .last()
-                    .map(|m| m.timestamp.as_str()),
-            );
+            server.connection.mark_read(&current_channel.name, None);
         }
     }
 
@@ -257,7 +262,7 @@ impl TUI {
             let server = self.servers.get_mut();
             (0..server.channels.len())
                 .map(|i| (server.current_channel + i) % server.channels.len())
-                .find(|i| server.channels[*i].num_unreads > 0 && *i != server.current_channel)
+                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -276,7 +281,7 @@ impl TUI {
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
                 })
-                .find(|i| server.channels[*i].num_unreads > 0 && *i != server.current_channel)
+                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -312,9 +317,8 @@ impl TUI {
             .push(ChanMessage::new(
                 String::from("Client"),
                 message.to_owned(),
-                0.0.to_string(),
+                ::chrono::Utc::now(),
             ));
-        self.servers.get_first_mut().channels[0].num_unreads += 1;
     }
 
     pub fn add_server(&mut self, connection: Box<Conn>) {
@@ -327,7 +331,7 @@ impl TUI {
                 .map(|name| Channel {
                     messages: Vec::new(),
                     name: name.to_string(),
-                    num_unreads: 0,
+                    read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to.
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
                 })
@@ -352,7 +356,7 @@ impl TUI {
         }
     }
 
-    fn add_message(&mut self, message: Message, set_unread: bool) -> Result<(), Message> {
+    fn add_message(&mut self, message: Message) -> Result<(), Message> {
         if message.is_mention {
             self.servers.get_first_mut().channels[1]
                 .messages
@@ -361,9 +365,6 @@ impl TUI {
                     message.contents.clone(),
                     message.timestamp.clone(),
                 ));
-            if set_unread {
-                self.servers.get_first_mut().channels[1].num_unreads += 1;
-            }
         }
 
         let server = match self.servers.iter_mut().find(|s| s.name == message.server) {
@@ -378,10 +379,6 @@ impl TUI {
             Some(channel) => channel,
             None => return Err(message),
         };
-
-        if set_unread {
-            channel.num_unreads += 1;
-        }
 
         channel.messages.push(ChanMessage::new(
             message.sender,
@@ -452,7 +449,7 @@ impl TUI {
         let message_area_height = terminal_height - rows as u16 + 1;
 
         // Draw all the messages by looping over them in reverse
-        let num_unreads = self.current_channel().num_unreads;
+        let num_unreads = self.current_channel().num_unreads();
         let mut draw_unread_marker = num_unreads > 0;
 
         let offset = self.current_channel().message_scroll_offset;
@@ -577,7 +574,7 @@ impl TUI {
                     ).unwrap();
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
                     write!(render_buffer, "{}", style::Reset).unwrap();
-                } else if channel.num_unreads > 0 {
+                } else if channel.num_unreads() > 0 {
                     write!(
                         render_buffer,
                         "{}{}",
@@ -754,22 +751,11 @@ impl TUI {
                 self.handle_input(&event);
             }
             Event::Message(message) => {
-                if let Err(message) = self.add_message(message, true) {
+                if let Err(message) = self.add_message(message) {
                     self.add_client_message(&format!(
                         "Failed to add message from {}, {}",
                         message.channel, message.server
                     ));
-                    self.sender.send(Event::Message(message)).unwrap();
-                }
-            }
-            Event::HistoryMessage(message) => {
-                // Attempt to add message, otherwise requeue it
-                if let Err(message) = self.add_message(message, false) {
-                    self.add_client_message(&format!(
-                        "Failed to add message from {}, {}",
-                        message.channel, message.server
-                    ));
-                    self.sender.send(Event::HistoryMessage(message)).unwrap();
                 }
             }
             Event::Error(message) => {
@@ -778,22 +764,22 @@ impl TUI {
             Event::HistoryLoaded {
                 server,
                 channel,
-                unread_count,
-            } => match self
+                read_at,
+            } => if let Some(c) = self
                 .servers
                 .iter_mut()
                 .find(|s| s.name == server)
                 .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
             {
-                Some(c) => c.num_unreads = unread_count,
-                None => self
-                    .sender
-                    .send(Event::HistoryLoaded {
-                        server,
-                        channel,
-                        unread_count,
-                    })
-                    .unwrap(),
+                c.read_at = read_at;
+            } else {
+                // TODO: if add_client_message takes self by shared ref this can just add message
+                self.sender
+                    .send(Event::Error(format!(
+                        "Failed to load history from {}, {}",
+                        channel, server
+                    )))
+                    .unwrap();
             },
             Event::Connected(conn) => {
                 self.add_server(conn);
@@ -865,7 +851,7 @@ impl Conn for ClientConn {
                 contents: contents.to_owned(),
                 sender: "You".to_owned(),
                 is_mention: false,
-                timestamp: 0.0.to_string(),
+                timestamp: ::chrono::Utc::now(),
             }))
             .expect("Sender died");
     }

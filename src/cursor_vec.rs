@@ -14,6 +14,7 @@ impl<T> CursorVec<T> {
             vec: vec![first],
         }
     }
+
     pub fn from_vec(vec: Vec<T>) -> Option<CursorVec<T>> {
         if vec.is_empty() {
             None
@@ -21,50 +22,68 @@ impl<T> CursorVec<T> {
             Some(Self { index: 0, vec })
         }
     }
+
     pub fn get(&self) -> &T {
-        debug_assert!(self.index < self.vec.len());
+        //debug_assert!(self.index < self.vec.len());
         unsafe { self.vec.get_unchecked(self.index) }
     }
+
     pub fn get_mut(&mut self) -> &mut T {
-        debug_assert!(self.index < self.vec.len());
+        //debug_assert!(self.index < self.vec.len());
         unsafe { self.vec.get_unchecked_mut(self.index) }
     }
+
     pub fn next(&mut self) {
         self.index += 1;
         self.index %= self.vec.len();
     }
+
     pub fn prev(&mut self) {
-        self.index -= 1;
-        self.index %= self.vec.len();
+        if self.index == 0 {
+            self.index = self.vec.len() - 1;
+        } else {
+            self.index -= 1;
+            self.index %= self.vec.len();
+        }
     }
+
     pub fn get_first(&self) -> &T {
         unsafe { self.vec.get_unchecked(0) }
     }
+
     pub fn get_first_mut(&mut self) -> &mut T {
         unsafe { self.vec.get_unchecked_mut(0) }
     }
+
     pub fn wrapping_seek(&mut self, index: usize) {
         self.index = index;
         self.index %= self.vec.len();
     }
+
     pub fn try_get_at(&self, index: usize) -> Option<&T> {
         self.vec.get(index)
     }
+
     pub fn push(&mut self, item: T) {
         self.vec.push(item)
     }
+
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.vec.iter()
     }
+
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.vec.iter_mut()
     }
+
     pub fn tell(&self) -> usize {
         self.index
     }
+
     pub fn len(&self) -> usize {
         self.vec.len()
     }
+
     pub fn sort_by_key<K, F>(&mut self, f: F)
     where
         F: FnMut(&T) -> K,

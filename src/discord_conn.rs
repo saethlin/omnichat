@@ -153,19 +153,23 @@ impl DiscordConn {
             let handle = discord.clone();
             let sender = sender.clone();
             let handler = Arc::clone(&handler);
-            let last_read_timestamp = if let Some(ref unread_info) = info.read_state {
-                unread_info
-                    .iter()
-                    .find(|i| i.id == id)
-                    .and_then(|i| i.last_message_id)
-                    .map(|i| i.creation_date())
-            } else {
-                None
-            };
+            // TODO: Figure out how to deal with not having a read state and get rid of the clone
+            let last_read_timestamp = info
+                .read_state
+                .clone()
+                .unwrap()
+                .iter()
+                .find(|i| i.id == id)
+                .and_then(|i| i.last_message_id)
+                .map(|i| i.creation_date())
+                .unwrap();
+
+            let read_at = last_read_timestamp.with_timezone(&::chrono::Utc);
+
             thread::spawn(move || {
                 let current_user = handle.read().unwrap().get_current_user().unwrap();
                 let my_mention = format!("{}", current_user.id.mention());
-                let mut messages = handle
+                let messages = handle
                     .read()
                     .unwrap()
                     .get_messages(id, discord::GetMessages::MostRecent, Some(100))
@@ -174,20 +178,9 @@ impl DiscordConn {
                         Vec::new()
                     });
 
-                // TODO: handle ordering of messages in the frontend
-                messages.sort_by_key(|m| m.timestamp.timestamp());
-                let unread_count = if let Some(ts) = last_read_timestamp {
-                    // TODO: This is totally wrong
-                    messages
-                        .iter()
-                        .filter(|m| m.timestamp.timestamp() > ts.timestamp())
-                        .count()
-                } else {
-                    0
-                };
                 for m in messages {
                     sender
-                        .send(Event::HistoryMessage(Message {
+                        .send(Event::Message(Message {
                             server: handler.server_name.clone(),
                             channel: name.clone(),
                             sender: m.author.name.clone(),
@@ -197,7 +190,7 @@ impl DiscordConn {
                                 .iter()
                                 .map(|u| format!("{}", u.id.mention()))
                                 .any(|m| m == my_mention),
-                            timestamp: m.timestamp.timestamp().to_string(), // TODO: jam more precision in here?
+                            timestamp: m.timestamp.with_timezone(&::chrono::Utc),
                         }))
                         .expect("Sender died");
                 }
@@ -205,7 +198,7 @@ impl DiscordConn {
                     .send(Event::HistoryLoaded {
                         server: handler.server_name.clone(),
                         channel: name.clone(),
-                        unread_count,
+                        read_at,
                     })
                     .expect("sender died");
             });
@@ -223,10 +216,8 @@ impl DiscordConn {
 
                 while let Ok(ev) = event_stream.recv() {
                     if let discord::model::Event::MessageCreate(message) = ev {
-                        if let Some(channel_name) = handler
-                            .channels
-                            .get_right(&message.channel_id)
-                            .cloned()
+                        if let Some(channel_name) =
+                            handler.channels.get_right(&message.channel_id).cloned()
                         {
                             sender
                                 .send(Event::Message(Message {
@@ -239,7 +230,7 @@ impl DiscordConn {
                                         .any(|m| m == my_mention),
                                     contents: handler.to_omni(&message),
                                     sender: message.author.name,
-                                    timestamp: message.timestamp.timestamp().to_string(),
+                                    timestamp: message.timestamp.with_timezone(&::chrono::Utc),
                                 }))
                                 .expect("Sender died");
                             // Ack the message

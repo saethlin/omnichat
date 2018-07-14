@@ -1,7 +1,6 @@
 use bimap::BiMap;
 use conn::{Conn, Event, Message};
 use failure::Error;
-use inlinable_string::InlinableString;
 use regex::Regex;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
@@ -10,6 +9,7 @@ use std::thread;
 lazy_static! {
     pub static ref MENTION_REGEX: Regex = Regex::new(r"<@[A-Z0-9]{9}>").unwrap();
     pub static ref CHANNEL_REGEX: Regex = Regex::new(r"<#[A-Z0-9]{9}\|(?P<n>.*?)>").unwrap();
+    pub static ref CLIENT: Arc<::slack_api::Client> = Arc::new(::slack_api::default_client());
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -43,7 +43,7 @@ impl Into<ChannelOrGroupId> for ::slack_api::GroupId {
 #[derive(Clone)]
 struct Handler {
     channels: BiMap<ChannelOrGroupId, String>,
-    users: BiMap<::slack_api::UserId, InlinableString>,
+    users: BiMap<::slack_api::UserId, String>,
     server_name: String,
     my_mention: String,
     my_name: String,
@@ -88,7 +88,6 @@ impl Handler {
                 text,
                 ts,
             ),
-            /*
             SlackbotResponse(MessageSlackbotResponse {
                 channel,
                 user: Some(user),
@@ -104,24 +103,32 @@ impl Handler {
                 text,
                 ts,
             ),
-            */
-            FileShare(MessageFileShare {
-                channel,
-                user: Some(user),
-                text: Some(text),
-                ts: Some(ts),
-                ..
-            }) => (
-                outer_channel.or_else(|| channel.map(|c| c.into())),
-                self.users
-                    .get_right(&user)
-                    .unwrap_or(&user.to_string().into())
-                    .clone(),
-                text,
-                ts,
-            ),
+            FileShare(message_boxed) => {
+                if let MessageFileShare {
+                    channel,
+                    user: Some(user),
+                    ts: Some(ts),
+                    text: Some(text),
+                    ..
+                } = *message_boxed
+                {
+                    (
+                        outer_channel.or_else(|| channel.map(|c| c.into())),
+                        self.users
+                            .get_right(&user)
+                            .unwrap_or(&user.to_string().into())
+                            .clone(),
+                        text,
+                        ts,
+                    )
+                } else {
+                    return None;
+                }
+            }
             _ => return None,
         };
+
+        error!("{:?}", ts);
 
         text = text.replace("&amp;", "&");
         text = text.replace("&lt;", "<");
@@ -129,7 +136,7 @@ impl Handler {
 
         text = MENTION_REGEX
             .replace_all(&text, |caps: &::regex::Captures| {
-                if let Some(name) = self.users.get_right(&caps[0].as_bytes()[2..11].into()) {
+                if let Some(name) = self.users.get_right(&caps[0][2..11].into()) {
                     format!("@{}", name)
                 } else {
                     format!("@{}", &caps[0][2..11])
@@ -141,13 +148,13 @@ impl Handler {
 
         let user = user.to_string();
         if let Some(channel) = channel.and_then(|c| self.channels.get_right(&c)) {
-            return Some(Message {
+            return Some(::conn::Message {
                 server: self.server_name.clone(),
                 channel: channel.clone(),
                 sender: user,
                 is_mention: text.contains(&self.my_name),
                 contents: text,
-                timestamp: ts.to_string(),
+                timestamp: ts.into(),
             });
         } else {
             return None;
@@ -174,20 +181,18 @@ impl Handler {
 pub struct SlackConn {
     token: String,
     team_name: String,
-    users: BiMap<::slack_api::UserId, InlinableString>,
+    users: BiMap<::slack_api::UserId, String>,
     channels: BiMap<ChannelOrGroupId, String>,
     channel_names: Vec<String>,
-    client: Arc<::slack_api::requests::Client>,
     handler: Arc<Handler>,
     _sender: SyncSender<Event>,
 }
 
 impl SlackConn {
-    pub fn new(token: String, sender: SyncSender<Event>) -> Result<Box<Conn>, Error> {
-        let client = Arc::new(::slack_api::requests::default_client()?);
+    pub fn create_on(token: String, sender: SyncSender<Event>) -> Result<(), Error> {
         let connect_handle = {
             let token = token.clone();
-            let client = client.clone();
+            let client = CLIENT.clone();
             thread::spawn(
                 move || -> Result<::slack_api::rtm::ConnectResponse, Error> {
                     Ok(::slack_api::rtm::connect(
@@ -201,7 +206,7 @@ impl SlackConn {
 
         let users_handle = {
             let token = token.clone();
-            let client = client.clone();
+            let client = CLIENT.clone();
             thread::spawn(move || -> Result<_, Error> {
                 let users_response = ::slack_api::users::list(
                     &client,
@@ -209,7 +214,7 @@ impl SlackConn {
                     &::slack_api::users::ListRequest::default(),
                 )?;
 
-                let mut users = BiMap::new();
+                let mut users: BiMap<::slack_api::UserId, String> = BiMap::new();
                 for user in users_response.members {
                     users.insert(user.id, user.name);
                 }
@@ -220,7 +225,7 @@ impl SlackConn {
 
         let channels_handle = {
             let token = token.clone();
-            let client = client.clone();
+            let client = CLIENT.clone();
             thread::spawn(move || -> Result<_, Error> {
                 let channels = ::slack_api::channels::list(
                     &client,
@@ -246,7 +251,7 @@ impl SlackConn {
 
         let groups_handle = {
             let token = token.clone();
-            let client = client.clone();
+            let client = CLIENT.clone();
             thread::spawn(move || -> Result<_, Error> {
                 Ok(::slack_api::groups::list(
                     &client,
@@ -258,6 +263,7 @@ impl SlackConn {
 
         // Slack private channels are actually groups
         let (mut channel_names, mut channels) = channels_handle.join().unwrap()?;
+
         for group in groups_handle
             .join()
             .unwrap()?
@@ -270,9 +276,11 @@ impl SlackConn {
             channel_names.push(name.clone());
             channels.insert(ChannelOrGroupId::Group(id), name);
         }
+
         channel_names.sort();
 
         let users = users_handle.join().unwrap()?;
+        //let users = BiMap::new();
 
         let response = connect_handle.join().unwrap()?;
 
@@ -288,6 +296,18 @@ impl SlackConn {
             my_name: slf.name.clone(),
             my_mention: format!("<@{}>", slf.id.clone()),
         });
+
+        sender
+            .send(Event::Connected(Box::new(SlackConn {
+                token: token.clone(),
+                users,
+                channels: channels.clone(),
+                channel_names,
+                team_name: team_name.clone(),
+                _sender: sender.clone(),
+                handler: handler.clone(),
+            })))
+            .unwrap();
 
         let thread_sender = sender.clone();
         let thread_handler = Arc::clone(&handler);
@@ -335,75 +355,73 @@ impl SlackConn {
         for (channel_or_group_id, channel_name) in channels.clone() {
             let sender = sender.clone();
             let handler = handler.clone();
-            let client = client.clone();
+            let client = CLIENT.clone();
             let token = token.clone();
             let server_name = team_name.clone();
 
             thread::spawn(move || {
                 use slack_api::{channels, groups};
-
-                let (messages, unread_count) = match channel_or_group_id {
+                use std::error::Error;
+                let (messages, read_at) = match channel_or_group_id {
                     ChannelOrGroupId::Channel(channel_id) => {
                         let mut req = ::slack_api::channels::InfoRequest::default();
                         req.channel = channel_id;
                         let info = ::slack_api::channels::info(&client, &token, &req);
-                        let unread_count = info.unwrap().channel.unread_count.unwrap();
-
+                        let read_at = info.unwrap().channel.last_read.unwrap();
+                        // TODO: Use the unread cursor instead
                         let mut req = channels::HistoryRequest::default();
                         req.channel = channel_id;
+                        req.count = Some(1000);
                         let messages = match channels::history(&client, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
+                                sender
+                                    .send(Event::Error(format!("{:?}", e.cause())))
+                                    .unwrap();
                                 error!("{}", e);
                                 Vec::new()
                             }
                         };
-                        (messages, unread_count)
+                        (messages, read_at)
                     }
                     ChannelOrGroupId::Group(group_id) => {
                         let mut req = ::slack_api::groups::InfoRequest::default();
                         req.channel = group_id;
                         let info = ::slack_api::groups::info(&client, &token, &req);
-                        let unread_count = info.unwrap().group.unread_count.unwrap();
+                        let read_at = info.unwrap().group.last_read.unwrap();
 
                         let mut req = groups::HistoryRequest::default();
                         req.channel = group_id;
                         let messages = match groups::history(&client, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
+                                sender
+                                    .send(Event::Error(format!("{:?}", e.cause())))
+                                    .unwrap();
                                 error!("{}", e);
                                 Vec::new()
                             }
                         };
-                        (messages, unread_count)
+                        (messages, read_at)
                     }
                 };
 
                 for mut message in messages.into_iter().rev() {
                     if let Some(message) = handler.to_omni(message, Some(channel_or_group_id)) {
-                        sender.send(Event::HistoryMessage(message)).unwrap();
+                        sender.send(Event::Message(message)).unwrap();
                     }
                 }
                 sender
                     .send(Event::HistoryLoaded {
                         server: server_name,
                         channel: channel_name,
-                        unread_count: unread_count as usize,
+                        read_at: read_at.into(),
                     })
                     .unwrap();
             });
         }
 
-        Ok(Box::new(SlackConn {
-            token,
-            client,
-            users,
-            channels,
-            channel_names,
-            team_name,
-            _sender: sender,
-            handler,
-        }))
+        Ok(())
     }
 }
 
@@ -423,8 +441,8 @@ impl Conn for SlackConn {
         request.channel = channel;
         request.text = &contents;
         request.as_user = Some(true);
-        if post_message(&self.client, &self.token, &request).is_err() {
-            if let Err(e) = post_message(&self.client, &self.token, &request) {
+        if post_message(&CLIENT, &self.token, &request).is_err() {
+            if let Err(e) = post_message(&CLIENT, &self.token, &request) {
                 error!("{}", e);
             }
         }
@@ -445,7 +463,7 @@ impl Conn for SlackConn {
             }
         };
 
-        let client = self.client.clone();
+        let client = CLIENT.clone();
         let token = self.token.clone();
         let ts = timestamp
             .map(|t| t.to_owned())
