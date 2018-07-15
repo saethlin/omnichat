@@ -713,7 +713,7 @@ impl TUI {
                     self.current_channel_mut()
                         .message_buffer
                         .push_str(&chosen_completion);
-                    self.cursor_pos += chosen_completion.chars().count();
+                    self.cursor_pos = self.current_channel().message_buffer.len();
                     self.autocomplete_index += 1;
                 }
             }
