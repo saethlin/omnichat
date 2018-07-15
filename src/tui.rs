@@ -1,6 +1,8 @@
 use conn::{Conn, DateTime, Event, Message};
 use cursor_vec::CursorVec;
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use inlinable_string::InlinableString as IString;
+use chrono::Timelike;
 
 lazy_static! {
     static ref COLORS: Vec<::termion::color::AnsiValue> = {
@@ -52,7 +54,7 @@ pub struct TUI {
 struct Server {
     channels: Vec<Channel>,
     connection: Box<Conn>,
-    name: String,
+    name: IString,
     current_channel: usize,
     channel_scroll_offset: usize,
 }
@@ -85,25 +87,26 @@ struct ChanMessage {
     formatted_width: Option<usize>,
     raw: String,
     pub formatted: String,
-    pub sender: String,
+    pub sender: IString,
     timestamp: DateTime,
 }
 
-// TODO: This is actually a stupid into implementation
-impl ChanMessage {
-    fn new(sender: String, contents: String, timestamp: ::chrono::DateTime<::chrono::Utc>) -> Self {
+impl From<::conn::Message> for ChanMessage {
+    fn from(message: ::conn::Message) -> ChanMessage {
         ChanMessage {
             formatted_width: None,
-            raw: contents,
+            raw: message.contents,
             formatted: String::new(),
-            sender,
-            timestamp,
+            sender: message.sender,
+            timestamp: message.timestamp,
         }
     }
+}
 
+impl ChanMessage {
     fn format(&mut self, width: usize) {
         use std::fmt::Write;
-        use termion::color::{Fg, Reset};
+        use termion::color::{Fg, Reset, AnsiValue};
         use textwrap::{NoHyphenation, Wrapper};
 
         if Some(width) == self.formatted_width {
@@ -113,7 +116,8 @@ impl ChanMessage {
         self.formatted_width = Some(width);
         self.formatted.clear();
         let indent_str = "    ";
-        let sender_spacer = " ".repeat(self.sender.chars().count() + 2);
+        // 2 for the `: ` after the name, 8 for the time
+        let sender_spacer = " ".repeat(self.sender.chars().count() + 2 + 8);
         let wrapper = Wrapper::with_splitter(width, NoHyphenation)
             .subsequent_indent(indent_str)
             .initial_indent(indent_str)
@@ -133,6 +137,13 @@ impl ChanMessage {
                 for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
                 {
                     if l == 0 {
+                        write!(self.formatted, 
+                               "{}({:02}:{:02}) ",
+                               Fg(AnsiValue::grayscale(8)),
+                                self.timestamp.time().hour(),
+                                self.timestamp.time().minute(),
+                        ).unwrap();
+
                         write!(
                             self.formatted,
                             "{}{}{}: ",
@@ -206,7 +217,7 @@ impl TUI {
                 connection: ClientConn::new(sender.clone()),
                 channel_scroll_offset: 0,
                 current_channel: 0,
-                name: String::from("Client"),
+                name: IString::from("Client"),
             }),
             longest_channel_name: 0,
             shutdown: false,
@@ -311,14 +322,17 @@ impl TUI {
         }
     }
 
-    fn add_client_message(&mut self, message: &str) {
+    // Take by value because we need to own the allocation
+    fn add_client_message(&mut self, message: String) {
         self.servers.get_first_mut().channels[0]
             .messages
-            .push(ChanMessage::new(
-                String::from("Client"),
-                message.to_owned(),
-                ::chrono::Utc::now(),
-            ));
+            .push(ChanMessage {
+                formatted: String::new(),
+                formatted_width: None,
+                raw: message,
+                sender: "Client".into(),
+                timestamp: ::chrono::Utc::now(),
+            });
     }
 
     pub fn add_server(&mut self, connection: Box<Conn>) {
@@ -336,7 +350,7 @@ impl TUI {
                     message_buffer: String::new(),
                 })
                 .collect(),
-            name: connection.name().to_string(),
+            name: connection.name().into(),
             connection,
             current_channel: 0,
             channel_scroll_offset: 0,
@@ -360,11 +374,7 @@ impl TUI {
         if message.is_mention {
             self.servers.get_first_mut().channels[1]
                 .messages
-                .push(ChanMessage::new(
-                    message.sender.clone(),
-                    message.contents.clone(),
-                    message.timestamp.clone(),
-                ));
+                .push(message.clone().into());
         }
 
         let server = match self.servers.iter_mut().find(|s| s.name == message.server) {
@@ -380,13 +390,11 @@ impl TUI {
             None => return Err(message),
         };
 
-        channel.messages.push(ChanMessage::new(
-            message.sender,
-            message.contents,
-            message.timestamp,
-        ));
+        channel.messages.push(message.into());
 
-        channel.messages.sort_by_key(|m| m.timestamp.clone());
+        channel
+            .messages
+            .sort_unstable_by(|m1, m2| m1.timestamp.cmp(&m2.timestamp));
 
         Ok(())
     }
@@ -737,7 +745,7 @@ impl TUI {
                     .unwrap(),
 
                 _ => {
-                    self.add_client_message(&format!("{:?}", bytes));
+                    self.add_client_message(format!("{:?}", bytes));
                 }
             },
             _ => {}
@@ -752,14 +760,14 @@ impl TUI {
             }
             Event::Message(message) => {
                 if let Err(message) = self.add_message(message) {
-                    self.add_client_message(&format!(
+                    self.add_client_message(format!(
                         "Failed to add message from {}, {}",
                         message.channel, message.server
                     ));
                 }
             }
             Event::Error(message) => {
-                self.add_client_message(&message);
+                self.add_client_message(message);
             }
             Event::HistoryLoaded {
                 server,
@@ -846,10 +854,10 @@ impl Conn for ClientConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         self.sender
             .send(Event::Message(Message {
-                server: "Client".to_owned(),
-                channel: channel.to_owned(),
-                contents: contents.to_owned(),
-                sender: "You".to_owned(),
+                server: "Client".into(),
+                channel: channel.into(),
+                contents: contents.into(),
+                sender: "You".into(),
                 is_mention: false,
                 timestamp: ::chrono::Utc::now(),
             }))

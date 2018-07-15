@@ -7,21 +7,22 @@ use failure::Error;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
+use inlinable_string::InlinableString as IString;
 
 pub struct DiscordConn {
     discord: Arc<RwLock<discord::Discord>>,
     _sender: SyncSender<Event>,
-    name: String,
-    channels: BiMap<ChannelId, String>,
-    channel_names: Vec<String>,
+    name: IString,
+    channels: BiMap<ChannelId, IString>,
+    channel_names: Vec<IString>,
     handler: Arc<Handler>,
 }
 
 struct Handler {
-    server_name: String,
-    channels: BiMap<ChannelId, String>,
-    mention_patterns: Vec<(String, String)>,
-    channel_patterns: Vec<(String, String)>,
+    server_name: IString,
+    channels: BiMap<ChannelId, IString>,
+    mention_patterns: Vec<(IString, IString)>,
+    channel_patterns: Vec<(IString, IString)>,
     discord: Arc<RwLock<discord::Discord>>,
 }
 
@@ -29,7 +30,7 @@ impl Handler {
     pub fn to_omni(&self, message: &::discord::model::Message) -> String {
         let mut text = message.content.clone();
         for &(ref id, ref human) in &self.channel_patterns {
-            text = text.replace(id, human);
+            text = text.replace(id.as_ref(), human);
         }
 
         for user in &message.mentions {
@@ -52,7 +53,7 @@ impl Handler {
             .iter()
             .chain(self.channel_patterns.iter())
         {
-            text = text.replace(human, id);
+            text = text.replace(human.as_ref(), id);
         }
         text
     }
@@ -85,10 +86,10 @@ impl DiscordConn {
         let mut mention_patterns = Vec::new();
         for member in &server.members {
             let human = member.display_name();
-            mention_patterns.push((format!("{}", member.user.mention()), format!("@{}", human)));
+            mention_patterns.push((format!("{}", member.user.mention()).into(), format!("@{}", human).into()));
             if member.nick.is_some() {
                 let id = &member.user.id;
-                mention_patterns.push((format!("<@!{}>", id), format!("@{}", human)));
+                mention_patterns.push((format!("<@!{}>", id).into(), format!("@{}", human).into()));
             }
         }
 
@@ -107,7 +108,7 @@ impl DiscordConn {
         let mut channel_patterns = Vec::new();
         // Build a HashMap of all the channels we're permitted access to
         for channel in &server.channels {
-            channel_patterns.push((format!("<#{}>", channel.id), format!("#{}", channel.name)));
+            channel_patterns.push((format!("<#{}>", channel.id).into(), format!("#{}", channel.name).into()));
 
             // Check permissions
             let channel_perms = server.permissions_for(channel.id, my_id);
@@ -133,7 +134,7 @@ impl DiscordConn {
                 && channel.kind != ChannelType::Category
                 && channel.kind != ChannelType::Voice
             {
-                channel_names.push(channel.name.clone());
+                channel_names.push(channel.name.as_str().into());
                 channel_ids.push(channel.id);
             }
         }
@@ -141,7 +142,7 @@ impl DiscordConn {
         let channels = BiMap::from(&channel_ids, &channel_names);
 
         let handler = Arc::new(Handler {
-            server_name: server_name.to_owned(),
+            server_name: server_name.into(),
             channels,
             mention_patterns,
             channel_patterns,
@@ -183,7 +184,7 @@ impl DiscordConn {
                         .send(Event::Message(Message {
                             server: handler.server_name.clone(),
                             channel: name.clone(),
-                            sender: m.author.name.clone(),
+                            sender: m.author.name.as_str().into(),
                             contents: handler.to_omni(&m),
                             is_mention: m
                                 .mentions
@@ -229,7 +230,7 @@ impl DiscordConn {
                                         .map(|u| format!("{}", u.id.mention()))
                                         .any(|m| m == my_mention),
                                     contents: handler.to_omni(&message),
-                                    sender: message.author.name,
+                                    sender: message.author.name.into(),
                                     timestamp: message.timestamp.with_timezone(&::chrono::Utc),
                                 }))
                                 .expect("Sender died");
@@ -273,7 +274,7 @@ impl Conn for DiscordConn {
         let dis = self.discord.write().unwrap();
         if let Err(err) = dis.send_message(
             self.channels
-                .get_left(&String::from(channel))
+                .get_left(channel)
                 .unwrap()
                 .clone(),
             &self.handler.to_discord(contents.to_string()),
@@ -285,7 +286,7 @@ impl Conn for DiscordConn {
     }
 
     fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        Box::new(self.channel_names.iter().map(|s| s.as_str()))
+        Box::new(self.channel_names.iter().map(|s| s.as_ref()))
     }
 
     fn name(&self) -> &str {

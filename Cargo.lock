@@ -504,6 +504,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "inlinable_string"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
 name = "iovec"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -750,6 +755,7 @@ dependencies = [
  "discord 0.9.0 (git+https://github.com/tinaun/discord-rs?branch=async_internals)",
  "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.23 (registry+https://github.com/rust-lang/crates.io-index)",
+ "inlinable_string 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "irc 0.13.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1682,6 +1688,7 @@ dependencies = [
 "checksum hyper 0.11.27 (registry+https://github.com/rust-lang/crates.io-index)" = "34a590ca09d341e94cddf8e5af0bbccde205d5fbc2fa3c09dd67c7f85cea59d7"
 "checksum hyper-tls 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)" = "a5aa51f6ae9842239b0fac14af5f22123b8432b4cc774a44ff059fcba0f675ca"
 "checksum idna 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)" = "38f09e0f0b1fb55fdee1f17470ad800da77af5186a1a76c026b679358b7e844e"
+"checksum inlinable_string 0.1.10 (registry+https://github.com/rust-lang/crates.io-index)" = "ee79c89e76de0c42c07b2d2815a47d6951b365dd16abc8689bef5d5a36d8acd9"
 "checksum iovec 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "dbe6e417e7d0975db6512b90796e8ce223145ac4e33c377e4a42882a0e88bb08"
 "checksum irc 0.13.5 (registry+https://github.com/rust-lang/crates.io-index)" = "a30eb0fe918d4aa89c28e19240dd0935ec2c1a667036dc3d41f0ee3ccc599288"
 "checksum itoa 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)" = "8324a32baf01e2ae060e9de58ed0bc2320c9a2833491ee36cd3b4c414de4db8c"

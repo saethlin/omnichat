@@ -23,6 +23,7 @@ extern crate termion;
 extern crate textwrap;
 extern crate toml;
 extern crate websocket;
+extern crate inlinable_string;
 
 #[macro_use]
 mod conn;

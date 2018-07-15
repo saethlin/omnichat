@@ -5,6 +5,7 @@ use regex::Regex;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread;
+use inlinable_string::InlinableString as IString;
 
 lazy_static! {
     pub static ref MENTION_REGEX: Regex = Regex::new(r"<@[A-Z0-9]{9}>").unwrap();
@@ -42,11 +43,11 @@ impl Into<ChannelOrGroupId> for ::slack_api::GroupId {
 
 #[derive(Clone)]
 struct Handler {
-    channels: BiMap<ChannelOrGroupId, String>,
-    users: BiMap<::slack_api::UserId, String>,
-    server_name: String,
+    channels: BiMap<ChannelOrGroupId, IString>,
+    users: BiMap<::slack_api::UserId, IString>,
+    server_name: IString,
     my_mention: String,
-    my_name: String,
+    my_name: IString,
 }
 
 impl Handler {
@@ -149,10 +150,10 @@ impl Handler {
         let user = user.to_string();
         if let Some(channel) = channel.and_then(|c| self.channels.get_right(&c)) {
             return Some(::conn::Message {
-                server: self.server_name.clone(),
+                server: self.server_name.as_ref().into(),
                 channel: channel.clone(),
-                sender: user,
-                is_mention: text.contains(&self.my_name),
+                sender: user.into(),
+                is_mention: text.contains(self.my_name.as_ref()),
                 contents: text,
                 timestamp: ts.into(),
             });
@@ -180,10 +181,10 @@ impl Handler {
 
 pub struct SlackConn {
     token: String,
-    team_name: String,
-    users: BiMap<::slack_api::UserId, String>,
-    channels: BiMap<ChannelOrGroupId, String>,
-    channel_names: Vec<String>,
+    team_name: IString,
+    users: BiMap<::slack_api::UserId, IString>,
+    channels: BiMap<ChannelOrGroupId, IString>,
+    channel_names: Vec<IString>,
     handler: Arc<Handler>,
     _sender: SyncSender<Event>,
 }
@@ -214,9 +215,9 @@ impl SlackConn {
                     &::slack_api::users::ListRequest::default(),
                 )?;
 
-                let mut users: BiMap<::slack_api::UserId, String> = BiMap::new();
+                let mut users: BiMap<::slack_api::UserId, IString> = BiMap::new();
                 for user in users_response.members {
-                    users.insert(user.id, user.name);
+                    users.insert(user.id, IString::from(user.name));
                 }
 
                 Ok(users)
@@ -241,8 +242,8 @@ impl SlackConn {
                     .filter(|c| c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true))
                 {
                     let ::slack_api::Channel { id, name, .. } = channel;
-                    channel_names.push(name.clone());
-                    channels_map.insert(ChannelOrGroupId::Channel(id), name);
+                    channel_names.push(name.as_str().into());
+                    channels_map.insert(ChannelOrGroupId::Channel(id), IString::from(name));
                 }
 
                 Ok((channel_names, channels_map))
@@ -273,8 +274,8 @@ impl SlackConn {
             .filter(|g| !g.is_mpim.unwrap())
         {
             let ::slack_api::Group { id, name, .. } = group;
-            channel_names.push(name.clone());
-            channels.insert(ChannelOrGroupId::Group(id), name);
+            channel_names.push(name.as_str().into());
+            channels.insert(ChannelOrGroupId::Group(id), IString::from(name));
         }
 
         channel_names.sort();
@@ -292,8 +293,8 @@ impl SlackConn {
         let handler = Arc::new(Handler {
             channels: channels.clone(),
             users: users.clone(),
-            server_name: team_name.clone(),
-            my_name: slf.name.clone(),
+            server_name: team_name.as_str().into(),
+            my_name: slf.name.into(),
             my_mention: format!("<@{}>", slf.id.clone()),
         });
 
@@ -303,7 +304,7 @@ impl SlackConn {
                 users,
                 channels: channels.clone(),
                 channel_names,
-                team_name: team_name.clone(),
+                team_name: team_name.as_str().into(),
                 _sender: sender.clone(),
                 handler: handler.clone(),
             })))
@@ -357,7 +358,7 @@ impl SlackConn {
             let handler = handler.clone();
             let client = CLIENT.clone();
             let token = token.clone();
-            let server_name = team_name.clone();
+            let server_name = team_name.as_str().into();
 
             thread::spawn(move || {
                 use slack_api::{channels, groups};
@@ -431,7 +432,7 @@ impl Conn for SlackConn {
     }
 
     fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        Box::new(self.channel_names.iter().map(|s| s.as_str()))
+        Box::new(self.channel_names.iter().map(|s| s.as_ref()))
     }
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {

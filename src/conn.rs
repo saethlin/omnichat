@@ -1,22 +1,23 @@
 use termion;
+use inlinable_string::InlinableString as IString;
 
 pub type DateTime = ::chrono::DateTime<::chrono::Utc>;
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub server: String,
-    pub channel: String,
-    pub sender: String,
+    pub server: IString,
+    pub channel: IString,
+    pub sender: IString,
     pub contents: String,
     pub is_mention: bool,
-    pub timestamp: ::chrono::DateTime<::chrono::Utc>,
+    pub timestamp: DateTime,
 }
 
 pub enum Event {
     Message(Message),
     HistoryLoaded {
-        server: String,
-        channel: String,
+        server: IString,
+        channel: IString,
         read_at: DateTime,
     },
     Input(termion::event::Event),
