@@ -15,6 +15,7 @@ extern crate chrono;
 #[macro_use]
 extern crate log;
 extern crate dirs;
+extern crate inlinable_string;
 extern crate reqwest;
 extern crate serde_json;
 extern crate slack_api;
@@ -23,7 +24,6 @@ extern crate termion;
 extern crate textwrap;
 extern crate toml;
 extern crate websocket;
-extern crate inlinable_string;
 
 #[macro_use]
 mod conn;

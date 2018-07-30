@@ -1,5 +1,5 @@
-use termion;
 use inlinable_string::InlinableString as IString;
+use termion;
 
 pub type DateTime = ::chrono::DateTime<::chrono::Utc>;
 

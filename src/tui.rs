@@ -1,8 +1,8 @@
+use chrono::Timelike;
 use conn::{Conn, DateTime, Event, Message};
 use cursor_vec::CursorVec;
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use inlinable_string::InlinableString as IString;
-use chrono::Timelike;
+use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
 lazy_static! {
     static ref COLORS: Vec<::termion::color::AnsiValue> = {
@@ -106,7 +106,7 @@ impl From<::conn::Message> for ChanMessage {
 impl ChanMessage {
     fn format(&mut self, width: usize) {
         use std::fmt::Write;
-        use termion::color::{Fg, Reset, AnsiValue};
+        use termion::color::{AnsiValue, Fg, Reset};
         use textwrap::{NoHyphenation, Wrapper};
 
         if Some(width) == self.formatted_width {
@@ -137,11 +137,12 @@ impl ChanMessage {
                 for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
                 {
                     if l == 0 {
-                        write!(self.formatted, 
-                               "{}({:02}:{:02}) ",
-                               Fg(AnsiValue::grayscale(8)),
-                                self.timestamp.time().hour(),
-                                self.timestamp.time().minute(),
+                        write!(
+                            self.formatted,
+                            "{}({:02}:{:02}) ",
+                            Fg(AnsiValue::grayscale(8)),
+                            self.timestamp.time().hour(),
+                            self.timestamp.time().minute(),
                         ).unwrap();
 
                         write!(

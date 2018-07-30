@@ -4,10 +4,10 @@ use conn::{Conn, Event, Message};
 use discord;
 use discord::model::ChannelId;
 use failure::Error;
+use inlinable_string::InlinableString as IString;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use inlinable_string::InlinableString as IString;
 
 pub struct DiscordConn {
     discord: Arc<RwLock<discord::Discord>>,
@@ -86,7 +86,10 @@ impl DiscordConn {
         let mut mention_patterns = Vec::new();
         for member in &server.members {
             let human = member.display_name();
-            mention_patterns.push((format!("{}", member.user.mention()).into(), format!("@{}", human).into()));
+            mention_patterns.push((
+                format!("{}", member.user.mention()).into(),
+                format!("@{}", human).into(),
+            ));
             if member.nick.is_some() {
                 let id = &member.user.id;
                 mention_patterns.push((format!("<@!{}>", id).into(), format!("@{}", human).into()));
@@ -108,7 +111,10 @@ impl DiscordConn {
         let mut channel_patterns = Vec::new();
         // Build a HashMap of all the channels we're permitted access to
         for channel in &server.channels {
-            channel_patterns.push((format!("<#{}>", channel.id).into(), format!("#{}", channel.name).into()));
+            channel_patterns.push((
+                format!("<#{}>", channel.id).into(),
+                format!("#{}", channel.name).into(),
+            ));
 
             // Check permissions
             let channel_perms = server.permissions_for(channel.id, my_id);
@@ -273,10 +279,7 @@ impl Conn for DiscordConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let dis = self.discord.write().unwrap();
         if let Err(err) = dis.send_message(
-            self.channels
-                .get_left(channel)
-                .unwrap()
-                .clone(),
+            self.channels.get_left(channel).unwrap().clone(),
             &self.handler.to_discord(contents.to_string()),
             "",
             false,

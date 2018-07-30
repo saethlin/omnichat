@@ -15,21 +15,11 @@ impl<T> CursorVec<T> {
         }
     }
 
-    pub fn from_vec(vec: Vec<T>) -> Option<CursorVec<T>> {
-        if vec.is_empty() {
-            None
-        } else {
-            Some(Self { index: 0, vec })
-        }
-    }
-
     pub fn get(&self) -> &T {
-        //debug_assert!(self.index < self.vec.len());
         unsafe { self.vec.get_unchecked(self.index) }
     }
 
     pub fn get_mut(&mut self) -> &mut T {
-        //debug_assert!(self.index < self.vec.len());
         unsafe { self.vec.get_unchecked_mut(self.index) }
     }
 

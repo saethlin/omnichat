@@ -1,16 +1,16 @@
 use bimap::BiMap;
 use conn::{Conn, Event, Message};
 use failure::Error;
+use inlinable_string::InlinableString as IString;
 use regex::Regex;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread;
-use inlinable_string::InlinableString as IString;
 
 lazy_static! {
     pub static ref MENTION_REGEX: Regex = Regex::new(r"<@[A-Z0-9]{9}>").unwrap();
     pub static ref CHANNEL_REGEX: Regex = Regex::new(r"<#[A-Z0-9]{9}\|(?P<n>.*?)>").unwrap();
-    pub static ref CLIENT: Arc<::slack_api::Client> = Arc::new(::slack_api::default_client());
+    pub static ref CLIENT: ::slack_api::Client = ::slack_api::default_client();
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -147,7 +147,6 @@ impl Handler {
 
         text = CHANNEL_REGEX.replace_all(&text, "#$n").into_owned();
 
-        let user = user.to_string();
         if let Some(channel) = channel.and_then(|c| self.channels.get_right(&c)) {
             return Some(::conn::Message {
                 server: self.server_name.as_ref().into(),
@@ -193,11 +192,10 @@ impl SlackConn {
     pub fn create_on(token: String, sender: SyncSender<Event>) -> Result<(), Error> {
         let connect_handle = {
             let token = token.clone();
-            let client = CLIENT.clone();
             thread::spawn(
                 move || -> Result<::slack_api::rtm::ConnectResponse, Error> {
                     Ok(::slack_api::rtm::connect(
-                        &client,
+                        &CLIENT,
                         &token,
                         &::slack_api::rtm::ConnectRequest::default(),
                     )?)
@@ -207,15 +205,14 @@ impl SlackConn {
 
         let users_handle = {
             let token = token.clone();
-            let client = CLIENT.clone();
             thread::spawn(move || -> Result<_, Error> {
                 let users_response = ::slack_api::users::list(
-                    &client,
+                    &CLIENT,
                     &token,
                     &::slack_api::users::ListRequest::default(),
                 )?;
 
-                let mut users: BiMap<::slack_api::UserId, IString> = BiMap::new();
+                let mut users = BiMap::new();
                 for user in users_response.members {
                     users.insert(user.id, IString::from(user.name));
                 }
@@ -226,10 +223,9 @@ impl SlackConn {
 
         let channels_handle = {
             let token = token.clone();
-            let client = CLIENT.clone();
             thread::spawn(move || -> Result<_, Error> {
                 let channels = ::slack_api::channels::list(
-                    &client,
+                    &CLIENT,
                     &token,
                     &::slack_api::channels::ListRequest::default(),
                 )?;
@@ -252,10 +248,9 @@ impl SlackConn {
 
         let groups_handle = {
             let token = token.clone();
-            let client = CLIENT.clone();
             thread::spawn(move || -> Result<_, Error> {
                 Ok(::slack_api::groups::list(
-                    &client,
+                    &CLIENT,
                     &token,
                     &::slack_api::groups::ListRequest::default(),
                 )?)
@@ -356,7 +351,6 @@ impl SlackConn {
         for (channel_or_group_id, channel_name) in channels.clone() {
             let sender = sender.clone();
             let handler = handler.clone();
-            let client = CLIENT.clone();
             let token = token.clone();
             let server_name = team_name.as_str().into();
 
@@ -367,13 +361,13 @@ impl SlackConn {
                     ChannelOrGroupId::Channel(channel_id) => {
                         let mut req = ::slack_api::channels::InfoRequest::default();
                         req.channel = channel_id;
-                        let info = ::slack_api::channels::info(&client, &token, &req);
+                        let info = ::slack_api::channels::info(&CLIENT, &token, &req);
                         let read_at = info.unwrap().channel.last_read.unwrap();
                         // TODO: Use the unread cursor instead
                         let mut req = channels::HistoryRequest::default();
                         req.channel = channel_id;
                         req.count = Some(1000);
-                        let messages = match channels::history(&client, &token, &req) {
+                        let messages = match channels::history(&CLIENT, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
                                 sender
@@ -388,12 +382,12 @@ impl SlackConn {
                     ChannelOrGroupId::Group(group_id) => {
                         let mut req = ::slack_api::groups::InfoRequest::default();
                         req.channel = group_id;
-                        let info = ::slack_api::groups::info(&client, &token, &req);
+                        let info = ::slack_api::groups::info(&CLIENT, &token, &req);
                         let read_at = info.unwrap().group.last_read.unwrap();
 
                         let mut req = groups::HistoryRequest::default();
                         req.channel = group_id;
-                        let messages = match groups::history(&client, &token, &req) {
+                        let messages = match groups::history(&CLIENT, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
                                 sender
@@ -464,7 +458,6 @@ impl Conn for SlackConn {
             }
         };
 
-        let client = CLIENT.clone();
         let token = self.token.clone();
         let ts = timestamp
             .map(|t| t.to_owned())
@@ -476,7 +469,7 @@ impl Conn for SlackConn {
                     channel: channel_id,
                     ts: &ts,
                 };
-                if let Err(e) = channels::mark(&client, &token, &request) {
+                if let Err(e) = channels::mark(&CLIENT, &token, &request) {
                     error!("{}", e);
                 }
             }
@@ -485,7 +478,7 @@ impl Conn for SlackConn {
                     channel: group_id,
                     ts: &ts,
                 };
-                if let Err(e) = groups::mark(&client, &token, &request) {
+                if let Err(e) = groups::mark(&CLIENT, &token, &request) {
                     error!("{}", e);
                 }
             }
