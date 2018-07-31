@@ -2,6 +2,7 @@ use inlinable_string::InlinableString as IString;
 use termion;
 
 pub type DateTime = ::chrono::DateTime<::chrono::Utc>;
+pub type LocalDateTime = ::chrono::DateTime<::chrono::offset::Local>;
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -13,6 +14,7 @@ pub struct Message {
     pub timestamp: DateTime,
 }
 
+/// Events that a connection can send to a frontend
 pub enum Event {
     Message(Message),
     HistoryLoaded {
@@ -23,6 +25,11 @@ pub enum Event {
     Input(termion::event::Event),
     Error(String),
     Connected(Box<Conn>),
+    MarkChannelRead {
+        server: IString,
+        channel: IString,
+        read_at: DateTime,
+    },
     Resize,
 }
 

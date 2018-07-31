@@ -78,8 +78,7 @@ impl DiscordConn {
                 } else {
                     None
                 }
-            })
-            .find(|s| s.name == server_name)
+            }).find(|s| s.name == server_name)
             .ok_or(ConnectError)?
             .clone();
 
@@ -198,16 +197,14 @@ impl DiscordConn {
                                 .map(|u| format!("{}", u.id.mention()))
                                 .any(|m| m == my_mention),
                             timestamp: m.timestamp.with_timezone(&::chrono::Utc),
-                        }))
-                        .expect("Sender died");
+                        })).expect("Sender died");
                 }
                 sender
                     .send(Event::HistoryLoaded {
                         server: handler.server_name.clone(),
                         channel: name.clone(),
                         read_at,
-                    })
-                    .expect("sender died");
+                    }).expect("sender died");
             });
         }
 
@@ -238,8 +235,7 @@ impl DiscordConn {
                                     contents: handler.to_omni(&message),
                                     sender: message.author.name.into(),
                                     timestamp: message.timestamp.with_timezone(&::chrono::Utc),
-                                }))
-                                .expect("Sender died");
+                                })).expect("Sender died");
                             // Ack the message
                             handler
                                 .discord

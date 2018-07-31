@@ -113,6 +113,10 @@ impl ChanMessage {
             return;
         }
 
+        use chrono::TimeZone;
+        let timezone = ::chrono::offset::Local::now().timezone();
+        let localtime = timezone.from_utc_datetime(&self.timestamp.naive_utc());
+
         self.formatted_width = Some(width);
         self.formatted.clear();
         let indent_str = "    ";
@@ -141,8 +145,8 @@ impl ChanMessage {
                             self.formatted,
                             "{}({:02}:{:02}) ",
                             Fg(AnsiValue::grayscale(8)),
-                            self.timestamp.time().hour(),
-                            self.timestamp.time().minute(),
+                            localtime.time().hour(),
+                            localtime.time().minute(),
                         ).unwrap();
 
                         write!(
@@ -213,8 +217,7 @@ impl TUI {
                         read_at: ::chrono::Utc::now(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
-                    })
-                    .collect(),
+                    }).collect(),
                 connection: ClientConn::new(sender.clone()),
                 channel_scroll_offset: 0,
                 current_channel: 0,
@@ -292,8 +295,7 @@ impl TUI {
             (0..server.channels.len())
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
-                })
-                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+                }).find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -362,7 +364,8 @@ impl TUI {
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
-            .unwrap_or(0) as u16 + 1;
+            .unwrap_or(0) as u16
+            + 1;
 
         let previous_server_name = self.servers.get().name.clone();
         self.servers.sort_by_key(|s| s.name.clone());
@@ -391,11 +394,20 @@ impl TUI {
             None => return Err(message),
         };
 
+        let needs_sort = channel
+            .messages
+            .last()
+            .map(|m| m.timestamp)
+            .unwrap_or(message.timestamp.clone())
+            > message.timestamp;
+
         channel.messages.push(message.into());
 
-        channel
-            .messages
-            .sort_unstable_by(|m1, m2| m1.timestamp.cmp(&m2.timestamp));
+        if needs_sort {
+            channel
+                .messages
+                .sort_unstable_by(|m1, m2| m1.timestamp.cmp(&m2.timestamp));
+        }
 
         Ok(())
     }
@@ -734,16 +746,14 @@ impl TUI {
                         MouseButton::WheelUp,
                         1,
                         1,
-                    ))))
-                    .unwrap(),
+                    )))).unwrap(),
                 [27, 79, 66] => self
                     .sender
                     .send(Event::Input(Mouse(MouseEvent::Press(
                         MouseButton::WheelDown,
                         1,
                         1,
-                    ))))
-                    .unwrap(),
+                    )))).unwrap(),
 
                 _ => {
                     self.add_client_message(format!("{:?}", bytes));
@@ -787,11 +797,27 @@ impl TUI {
                     .send(Event::Error(format!(
                         "Failed to load history from {}, {}",
                         channel, server
-                    )))
-                    .unwrap();
+                    ))).unwrap();
             },
             Event::Connected(conn) => {
                 self.add_server(conn);
+            }
+            Event::MarkChannelRead {
+                server,
+                channel,
+                read_at,
+            } => {
+                let current_channel_name = self.current_channel().name.clone();
+                if let Some(c) = self
+                    .servers
+                    .iter_mut()
+                    .find(|s| s.name == server)
+                    .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+                {
+                    if current_channel_name != c.name {
+                        c.read_at = read_at;
+                    }
+                }
             }
         }
     }
@@ -861,8 +887,7 @@ impl Conn for ClientConn {
                 sender: "You".into(),
                 is_mention: false,
                 timestamp: ::chrono::Utc::now(),
-            }))
-            .expect("Sender died");
+            })).expect("Sender died");
     }
 
     fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {

@@ -63,8 +63,7 @@ impl PushbulletConn {
                             .send(Event::Error(format!(
                                 "{}: {}",
                                 notification.title, notification.body
-                            )))
-                            .unwrap();
+                            ))).unwrap();
                     }
                 }
             }
