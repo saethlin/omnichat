@@ -33,12 +33,13 @@ impl Handler {
             MessageBotMessage, MessageFileShare, MessageSlackbotResponse, MessageStandard,
         };
         // TODO: Add more success cases to this
-        let (channel, user, mut text, ts) = match message {
+        let (channel, user, mut text, ts, reactions) = match message {
             Standard(MessageStandard {
                 channel,
                 user: Some(user),
                 text: Some(text),
                 ts: Some(ts),
+                reactions,
                 ..
             }) => (
                 outer_channel.or_else(|| channel.map(|c| c.into())),
@@ -48,24 +49,34 @@ impl Handler {
                     .clone(),
                 text,
                 ts,
+                reactions
+                    .iter()
+                    .map(|r| (r.name.as_str().into(), r.count.unwrap_or_default() as usize))
+                    .collect(),
             ),
             BotMessage(MessageBotMessage {
                 channel,
                 username: Some(name),
                 text: Some(text),
                 ts: Some(ts),
+                reactions,
                 ..
             }) => (
                 outer_channel.or_else(|| channel.map(|c| c.into())),
                 name.into(),
                 text,
                 ts,
+                reactions
+                    .iter()
+                    .map(|r| (r.name.as_str().into(), r.count.unwrap_or_default() as usize))
+                    .collect(),
             ),
             SlackbotResponse(MessageSlackbotResponse {
                 channel,
                 user: Some(user),
                 text: Some(text),
                 ts: Some(ts),
+                reactions,
                 ..
             }) => (
                 outer_channel.or_else(|| channel.map(|c| c.into())),
@@ -75,6 +86,10 @@ impl Handler {
                     .clone(),
                 text,
                 ts,
+                reactions
+                    .iter()
+                    .map(|r| (r.name.as_str().into(), r.count.unwrap_or_default() as usize))
+                    .collect(),
             ),
             FileShare(message_boxed) => {
                 if let MessageFileShare {
@@ -82,6 +97,7 @@ impl Handler {
                     user: Some(user),
                     ts: Some(ts),
                     text: Some(text),
+                    reactions,
                     ..
                 } = *message_boxed
                 {
@@ -93,6 +109,10 @@ impl Handler {
                             .clone(),
                         text,
                         ts,
+                        reactions
+                            .iter()
+                            .map(|r| (r.name.as_str().into(), r.count.unwrap_or_default() as usize))
+                            .collect(),
                     )
                 } else {
                     return None;
@@ -100,8 +120,6 @@ impl Handler {
             }
             _ => return None,
         };
-
-        error!("{:?}", ts);
 
         text = text.replace("&amp;", "&");
         text = text.replace("&lt;", "<");
@@ -126,6 +144,7 @@ impl Handler {
                 is_mention: text.contains(self.my_name.as_ref()),
                 contents: text,
                 timestamp: ts.into(),
+                reactions,
             });
         } else {
             return None;
@@ -291,16 +310,33 @@ impl SlackConn {
                         match ::serde_json::from_str::<::slack_api::Event>(&message) {
                             // Deserialized into a slack message, try to convert into an omnimessage
                             Ok(::slack_api::Event::Message(slack_message)) => {
-                                if let Some(omnimessage) =
+                                use slack_api::MessageMessageChanged;
+                                if let ::slack_api::Message::MessageChanged(
+                                    MessageMessageChanged {
+                                        channel,
+                                        message: Some(message),
+                                        previous_message: Some(previous_message),
+                                        ..
+                                    },
+                                ) = slack_message
+                                {
+                                    thread_sender
+                                        .send(Event::MessageEdited {
+                                            server: thread_handler.server_name.clone(),
+                                            channel: thread_handler
+                                                .channels
+                                                .get_right(&channel.into())
+                                                .unwrap()
+                                                .clone(),
+                                            timestamp: previous_message.ts.into(),
+                                            contents: message.text.unwrap_or_default(),
+                                        }).unwrap();
+                                } else if let Some(omnimessage) =
                                     thread_handler.to_omni(slack_message, None)
                                 {
                                     thread_sender.send(Event::Message(omnimessage)).unwrap()
                                 } else {
-                                    thread_sender
-                                        .send(Event::Error(format!(
-                                            "Failed to convert message\n{}",
-                                            message
-                                        ))).unwrap();
+                                    error!("Failed to convert message:\n{}", message);
                                 }
                             }
 
@@ -312,7 +348,7 @@ impl SlackConn {
                                         channel: thread_handler
                                             .channels
                                             .get_right(&markevent.channel.into())
-                                            .unwrap()
+                                            .unwrap_or(&markevent.channel.to_string().into())
                                             .clone(),
                                         read_at: markevent.ts.into(),
                                     }).unwrap();
@@ -335,25 +371,17 @@ impl SlackConn {
 
                             // Don't yet support this thing
                             Err(e) => {
-                                thread_sender
-                                    .send(Event::Error(format!(
-                                        "failed to parse:\n{}\n{}",
-                                        message, e
-                                    ))).unwrap();
+                                error!("Failed to parse:\n{}\n{}", message, e);
                             }
                         }
                     }
                     Ok(Ping(data)) => {
                         websocket.send_message(&Pong(data)).unwrap_or_else(|_| {
-                            thread_sender
-                                .send(Event::Error("Failed to Pong".to_string()))
-                                .unwrap()
+                            error!("Failed to Pong");
                         });
                     }
                     Ok(Close(_)) => {
-                        thread_sender
-                            .send(Event::Error("Websocket closed".to_owned()))
-                            .unwrap();
+                        error!("Slack websocket closed");
                     }
                     _ => {}
                 }
@@ -383,10 +411,7 @@ impl SlackConn {
                         let messages = match channels::history(&CLIENT, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
-                                sender
-                                    .send(Event::Error(format!("{:?}", e.cause())))
-                                    .unwrap();
-                                error!("{}", e);
+                                error!("{:?}", e.cause());
                                 Vec::new()
                             }
                         };
@@ -403,10 +428,7 @@ impl SlackConn {
                         let messages = match groups::history(&CLIENT, &token, &req) {
                             Ok(response) => response.messages,
                             Err(e) => {
-                                sender
-                                    .send(Event::Error(format!("{:?}", e.cause())))
-                                    .unwrap();
-                                error!("{}", e);
+                                error!("{:?}", e.cause());
                                 Vec::new()
                             }
                         };

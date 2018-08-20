@@ -1,3 +1,4 @@
+#![feature(nll)]
 extern crate backoff;
 extern crate discord;
 #[macro_use]
@@ -100,18 +101,15 @@ fn main() {
 
     // Init the global logger
     log::set_boxed_logger(Box::new(logger::Logger::new(tui.sender()))).unwrap();
+    log::set_max_level(log::LevelFilter::Warn);
 
     // Start all the slack connections first, because we can't do the Discord stuff fully async
     if let Some(slack) = config.slack {
         for c in slack {
             let sender = tui.sender();
             thread::spawn(move || {
-                if let Err(err) = SlackConn::create_on(c.token, sender.clone()) {
-                    sender
-                        .send(Event::Error(format!(
-                            "Failed to create slack connection: {}",
-                            err
-                        ))).unwrap();
+                if let Err(err) = SlackConn::create_on(c.token.clone(), sender.clone()) {
+                    error!("Failed to create slack connection: {}\n{:#?}", err, c);
                 }
             });
         }

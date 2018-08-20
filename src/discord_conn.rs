@@ -197,6 +197,7 @@ impl DiscordConn {
                                 .map(|u| format!("{}", u.id.mention()))
                                 .any(|m| m == my_mention),
                             timestamp: m.timestamp.with_timezone(&::chrono::Utc),
+                            reactions: Vec::new(), // TODO: read reactions
                         })).expect("Sender died");
                 }
                 sender
@@ -235,6 +236,7 @@ impl DiscordConn {
                                     contents: handler.to_omni(&message),
                                     sender: message.author.name.into(),
                                     timestamp: message.timestamp.with_timezone(&::chrono::Utc),
+                                    reactions: Vec::new(), // TODO: Add reactions
                                 })).expect("Sender died");
                             // Ack the message
                             handler
@@ -246,14 +248,6 @@ impl DiscordConn {
                         } else {
                             // TODO: Messages from other servers end up here
                             // And they really shouldn't even be sent to us in the first place
-                            /*
-                            sender
-                                .send(Event::Error(format!(
-                                    "Got a message from unknown discord channel: {:?}\n{}",
-                                    &message.channel_id, &message.content,
-                                )))
-                                .unwrap();
-                            */
                         }
                     }
                 }

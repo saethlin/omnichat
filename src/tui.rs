@@ -89,6 +89,7 @@ struct ChanMessage {
     pub formatted: String,
     pub sender: IString,
     timestamp: DateTime,
+    reactions: Vec<(IString, usize)>,
 }
 
 impl From<::conn::Message> for ChanMessage {
@@ -99,6 +100,7 @@ impl From<::conn::Message> for ChanMessage {
             formatted: String::new(),
             sender: message.sender,
             timestamp: message.timestamp,
+            reactions: message.reactions,
         }
     }
 }
@@ -171,6 +173,15 @@ impl ChanMessage {
                 }
             }
         }
+
+        if !self.reactions.is_empty() {
+            let _ = write!(self.formatted, "{}", indent_str);
+        }
+
+        for (r, count) in &self.reactions {
+            let _ = write!(self.formatted, "{}({}) ", r, count);
+        }
+
         // Clean trailing whitespace from messages
         while self.formatted.ends_with(|p: char| p.is_whitespace()) {
             self.formatted.pop();
@@ -335,6 +346,7 @@ impl TUI {
                 raw: message,
                 sender: "Client".into(),
                 timestamp: ::chrono::Utc::now(),
+                reactions: Vec::new(),
             });
     }
 
@@ -351,8 +363,7 @@ impl TUI {
                     read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to.
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                })
-                .collect(),
+                }).collect(),
             name: connection.name().into(),
             connection,
             current_channel: 0,
@@ -777,6 +788,64 @@ impl TUI {
                     ));
                 }
             }
+            Event::MessageEdited {
+                server,
+                channel,
+                contents,
+                timestamp,
+            } => {
+                if let Some(msg) = self
+                    .servers
+                    .iter_mut()
+                    .find(|s| s.name == server)
+                    .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+                    .and_then(|c| {
+                        c.messages
+                            .iter_mut()
+                            .rev()
+                            .find(|m| m.timestamp == timestamp)
+                    }) {
+                    msg.raw = contents;
+                    msg.formatted_width = None; // Force a reformat on next draw
+                } else {
+                    error!(
+                        "Failed to process edit request: channel: {}, server: {}, timestamp: {}",
+                        channel, server, timestamp
+                    );
+                }
+            }
+            Event::ReactionAdded {
+                server,
+                channel,
+                timestamp,
+                reaction,
+            } => {
+                if let Some(msg) = self
+                    .servers
+                    .iter_mut()
+                    .find(|s| s.name == server)
+                    .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+                    .and_then(|c| {
+                        c.messages
+                            .iter_mut()
+                            .rev()
+                            .find(|m| m.timestamp == timestamp)
+                    }) {
+                    let mut found = false;
+                    if let Some(r) = msg.reactions.iter_mut().find(|rxn| rxn.0 == reaction) {
+                        r.1 += 1;
+                        found = true;
+                    }
+                    if !found {
+                        msg.reactions.push((reaction, 1));
+                    }
+                } else {
+                    error!(
+                        "Failed to process edit request: channel: {}, server: {}, timestamp: {}",
+                        channel, server, timestamp
+                    );
+                }
+            }
             Event::Error(message) => {
                 self.add_client_message(message);
             }
@@ -792,12 +861,7 @@ impl TUI {
             {
                 c.read_at = read_at;
             } else {
-                // TODO: if add_client_message takes self by shared ref this can just add message
-                self.sender
-                    .send(Event::Error(format!(
-                        "Failed to load history from {}, {}",
-                        channel, server
-                    ))).unwrap();
+                error!("Failed to load history from {}, {}", channel, server);
             },
             Event::Connected(conn) => {
                 self.add_server(conn);
@@ -887,6 +951,7 @@ impl Conn for ClientConn {
                 sender: "You".into(),
                 is_mention: false,
                 timestamp: ::chrono::Utc::now(),
+                reactions: Vec::new(),
             })).expect("Sender died");
     }
 

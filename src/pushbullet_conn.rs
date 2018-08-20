@@ -45,9 +45,7 @@ impl PushbulletConn {
             .headers(header)
             .send()?
             .text()?;
-        sender.send(Event::Error(format!("{}", res))).unwrap();
         */
-        let thread_sender = sender.clone();
         let url = format!("wss://stream.pushbullet.com/websocket/{}", token);
         let mut websocket = ::websocket::ClientBuilder::new(&url)?.connect_secure(None)?;
         ::std::thread::spawn(move || {
@@ -59,11 +57,7 @@ impl PushbulletConn {
                 }) = ::serde_json::from_str::<Message>(&message_text)
                 {
                     for notification in notifications {
-                        thread_sender
-                            .send(Event::Error(format!(
-                                "{}: {}",
-                                notification.title, notification.body
-                            ))).unwrap();
+                        error!("{}: {}", notification.title, notification.body);
                     }
                 }
             }
