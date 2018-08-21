@@ -42,6 +42,12 @@ pub enum Event {
         timestamp: DateTime,
         reaction: IString,
     },
+    ReactionRemoved {
+        server: IString,
+        channel: IString,
+        timestamp: DateTime,
+        reaction: IString,
+    },
     Resize,
 }
 

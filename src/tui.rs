@@ -175,11 +175,18 @@ impl ChanMessage {
         }
 
         if !self.reactions.is_empty() {
-            let _ = write!(self.formatted, "{}", indent_str);
-        }
+            let _ = write!(
+                self.formatted,
+                "{}{}",
+                indent_str,
+                Fg(AnsiValue::grayscale(12))
+            );
 
-        for (r, count) in &self.reactions {
-            let _ = write!(self.formatted, "{}({}) ", r, count);
+            for (r, count) in &self.reactions {
+                let _ = write!(self.formatted, "{}({}) ", r, count);
+            }
+
+            let _ = write!(self.formatted, "{}", Fg(Reset));
         }
 
         // Clean trailing whitespace from messages
@@ -766,9 +773,7 @@ impl TUI {
                         1,
                     )))).unwrap(),
 
-                _ => {
-                    self.add_client_message(format!("{:?}", bytes));
-                }
+                _ => {}
             },
             _ => {}
         }
@@ -782,10 +787,10 @@ impl TUI {
             }
             Event::Message(message) => {
                 if let Err(message) = self.add_message(message) {
-                    self.add_client_message(format!(
+                    error!(
                         "Failed to add message from {}, {}",
                         message.channel, message.server
-                    ));
+                    );
                 }
             }
             Event::MessageEdited {
@@ -839,6 +844,36 @@ impl TUI {
                     if !found {
                         msg.reactions.push((reaction, 1));
                     }
+                    msg.formatted_width = None;
+                } else {
+                    error!(
+                        "Failed to process edit request: channel: {}, server: {}, timestamp: {}",
+                        channel, server, timestamp
+                    );
+                }
+            }
+            Event::ReactionRemoved {
+                server,
+                channel,
+                timestamp,
+                reaction,
+            } => {
+                if let Some(msg) = self
+                    .servers
+                    .iter_mut()
+                    .find(|s| s.name == server)
+                    .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+                    .and_then(|c| {
+                        c.messages
+                            .iter_mut()
+                            .rev()
+                            .find(|m| m.timestamp == timestamp)
+                    }) {
+                    if let Some(r) = msg.reactions.iter_mut().find(|rxn| rxn.0 == reaction) {
+                        r.1 = r.1.saturating_sub(1);
+                    }
+                    msg.reactions = msg.reactions.iter().cloned().filter(|r| r.1 > 0).collect();
+                    msg.formatted_width = None;
                 } else {
                     error!(
                         "Failed to process edit request: channel: {}, server: {}, timestamp: {}",

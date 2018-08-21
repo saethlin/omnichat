@@ -1123,7 +1123,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "slack_api"
 version = "0.19.0"
-source = "git+https://github.com/saethlin/slack-rs-api?branch=types#57f898b52213f2e36dc3b85073ce059b53e6cc7a"
+source = "git+https://github.com/saethlin/slack-rs-api?branch=types#58545c63f6b489da6bd948b062efc92497bbedc9"
 dependencies = [
  "chrono 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "flame 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",

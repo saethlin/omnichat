@@ -36,28 +36,31 @@ impl Handler {
         let (channel, user, mut text, ts, reactions) = match message {
             Standard(MessageStandard {
                 channel,
-                user: Some(user),
-                text: Some(text),
+                user,
+                text,
                 ts: Some(ts),
                 reactions,
                 ..
-            }) => (
-                outer_channel.or_else(|| channel.map(|c| c.into())),
-                self.users
-                    .get_right(&user)
-                    .unwrap_or(&user.to_string().into())
-                    .clone(),
-                text,
-                ts,
-                reactions
-                    .iter()
-                    .map(|r| (r.name.as_str().into(), r.count.unwrap_or_default() as usize))
-                    .collect(),
-            ),
+            }) => {
+                let user = user.unwrap_or("UNKNOWNUS".into());
+                (
+                    outer_channel.or_else(|| channel.map(|c| c.into())),
+                    self.users
+                        .get_right(&user)
+                        .unwrap_or(&user.to_string().into())
+                        .clone(),
+                    text,
+                    ts,
+                    reactions
+                        .iter()
+                        .map(|r| (r.name.as_str().into(), r.count.unwrap_or_default() as usize))
+                        .collect(),
+                )
+            }
             BotMessage(MessageBotMessage {
                 channel,
                 username: Some(name),
-                text: Some(text),
+                text,
                 ts: Some(ts),
                 reactions,
                 ..
@@ -74,7 +77,7 @@ impl Handler {
             SlackbotResponse(MessageSlackbotResponse {
                 channel,
                 user: Some(user),
-                text: Some(text),
+                text,
                 ts: Some(ts),
                 reactions,
                 ..
@@ -96,7 +99,7 @@ impl Handler {
                     channel,
                     user: Some(user),
                     ts: Some(ts),
-                    text: Some(text),
+                    text,
                     reactions,
                     ..
                 } = *message_boxed
@@ -176,10 +179,16 @@ pub struct SlackConn {
     channel_names: Vec<IString>,
     handler: Arc<Handler>,
     _sender: SyncSender<Event>,
+    emoji: Vec<IString>,
 }
 
 impl SlackConn {
     pub fn create_on(token: String, sender: SyncSender<Event>) -> Result<(), Error> {
+        let emoji_handle = {
+            let token = token.clone();
+            thread::spawn(move || ::slack_api::emoji::list(&CLIENT, &token))
+        };
+
         let connect_handle = {
             let token = token.clone();
             thread::spawn(
@@ -286,6 +295,16 @@ impl SlackConn {
             my_mention: format!("<@{}>", slf.id.clone()),
         });
 
+        // Give the emoji handle as long as possible to complete
+        let emoji = emoji_handle
+            .join()
+            .unwrap()?
+            .emoji
+            .unwrap_or_default()
+            .keys()
+            .map(|e| IString::from(e.as_str()))
+            .collect();
+
         sender
             .send(Event::Connected(Box::new(SlackConn {
                 token: token.clone(),
@@ -295,6 +314,7 @@ impl SlackConn {
                 team_name: team_name.as_str().into(),
                 _sender: sender.clone(),
                 handler: handler.clone(),
+                emoji,
             }))).unwrap();
 
         let thread_sender = sender.clone();
@@ -308,30 +328,61 @@ impl SlackConn {
                     Ok(Text(message)) => {
                         // parse the message and add it to events
                         match ::serde_json::from_str::<::slack_api::Event>(&message) {
-                            // Deserialized into a slack message, try to convert into an omnimessage
-                            Ok(::slack_api::Event::Message(slack_message)) => {
-                                use slack_api::MessageMessageChanged;
-                                if let ::slack_api::Message::MessageChanged(
-                                    MessageMessageChanged {
+                            Ok(::slack_api::Event::Message(
+                                ::slack_api::Message::MessageChanged(
+                                    ::slack_api::MessageMessageChanged {
                                         channel,
                                         message: Some(message),
                                         previous_message: Some(previous_message),
                                         ..
                                     },
-                                ) = slack_message
-                                {
-                                    thread_sender
-                                        .send(Event::MessageEdited {
-                                            server: thread_handler.server_name.clone(),
-                                            channel: thread_handler
-                                                .channels
-                                                .get_right(&channel.into())
-                                                .unwrap()
-                                                .clone(),
-                                            timestamp: previous_message.ts.into(),
-                                            contents: message.text.unwrap_or_default(),
-                                        }).unwrap();
-                                } else if let Some(omnimessage) =
+                                ),
+                            )) => {
+                                thread_sender
+                                    .send(Event::MessageEdited {
+                                        server: thread_handler.server_name.clone(),
+                                        channel: thread_handler
+                                            .channels
+                                            .get_right(&channel.into())
+                                            .unwrap()
+                                            .clone(),
+                                        timestamp: previous_message.ts.into(),
+                                        contents: message.text,
+                                    }).unwrap();
+                            }
+                            Ok(::slack_api::Event::ReactionAdded(
+                                ::slack_api::EventReactionAdded { item, reaction, .. },
+                            )) => {
+                                if let ::slack_api::Event::Message(message) = *item {
+                                    if let Some(omnimessage) = thread_handler.to_omni(message, None)
+                                    {
+                                        let _ = thread_sender.send(Event::ReactionAdded {
+                                            server: omnimessage.server,
+                                            channel: omnimessage.channel,
+                                            timestamp: omnimessage.timestamp,
+                                            reaction: reaction.into(),
+                                        });
+                                    }
+                                }
+                            }
+                            Ok(::slack_api::Event::ReactionRemoved(
+                                ::slack_api::EventReactionRemoved { item, reaction, .. },
+                            )) => {
+                                if let ::slack_api::Event::Message(message) = *item {
+                                    if let Some(omnimessage) = thread_handler.to_omni(message, None)
+                                    {
+                                        let _ = thread_sender.send(Event::ReactionRemoved {
+                                            server: omnimessage.server,
+                                            channel: omnimessage.channel,
+                                            timestamp: omnimessage.timestamp,
+                                            reaction: reaction.into(),
+                                        });
+                                    }
+                                }
+                            }
+                            // Miscellaneous slack messages that should appear as normal messages
+                            Ok(::slack_api::Event::Message(slack_message)) => {
+                                if let Some(omnimessage) =
                                     thread_handler.to_omni(slack_message, None)
                                 {
                                     thread_sender.send(Event::Message(omnimessage)).unwrap()
@@ -436,7 +487,7 @@ impl SlackConn {
                     }
                 };
 
-                for mut message in messages.into_iter().rev() {
+                for message in messages.into_iter().rev() {
                     if let Some(message) = handler.to_omni(message, Some(channel_or_group_id)) {
                         sender.send(Event::Message(message)).unwrap();
                     }
