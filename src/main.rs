@@ -1,4 +1,3 @@
-#![feature(nll)]
 extern crate backoff;
 extern crate discord;
 #[macro_use]

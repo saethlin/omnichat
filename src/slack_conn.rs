@@ -95,6 +95,7 @@ impl Handler {
                     .collect(),
             ),
             FileShare(message_boxed) => {
+                let message = *message_boxed;
                 if let MessageFileShare {
                     channel,
                     user: Some(user),
@@ -102,7 +103,7 @@ impl Handler {
                     text,
                     reactions,
                     ..
-                } = *message_boxed
+                } = message
                 {
                     (
                         outer_channel.or_else(|| channel.map(|c| c.into())),
@@ -590,7 +591,15 @@ impl Conn for SlackConn {
                 .filter(|name| name.starts_with(&word[1..]))
                 .map(|s| String::from("#") + s)
                 .collect(),
+            Some(':') => self
+                .emoji
+                .iter()
+                .filter(|name| name.starts_with(&word[1..]))
+                .map(|s| format!(":{}:", s))
+                .collect(),
             _ => Vec::new(),
         }
     }
+
+    fn add_reaction(&self, reaction: &str, timestamp: ::conn::DateTime) {}
 }

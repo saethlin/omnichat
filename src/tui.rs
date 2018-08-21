@@ -2,6 +2,7 @@ use chrono::Timelike;
 use conn::{Conn, DateTime, Event, Message};
 use cursor_vec::CursorVec;
 use inlinable_string::InlinableString as IString;
+use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
 lazy_static! {
@@ -32,8 +33,6 @@ fn djb2(input: &str) -> u64 {
 }
 
 pub struct TUI {
-    // Create a special server and channels, which will enable
-    // all the get-methods to be nofail since we can fall back to them
     servers: CursorVec<Server>,
     longest_channel_name: u16,
     shutdown: bool,
@@ -235,7 +234,8 @@ impl TUI {
                         read_at: ::chrono::Utc::now(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
-                    }).collect(),
+                    })
+                    .collect(),
                 connection: ClientConn::new(sender.clone()),
                 channel_scroll_offset: 0,
                 current_channel: 0,
@@ -282,11 +282,13 @@ impl TUI {
     fn next_server(&mut self) {
         self.reset_current_unreads();
         self.servers.next();
+        self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
 
     fn previous_server(&mut self) {
         self.reset_current_unreads();
         self.servers.prev();
+        self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
 
     fn next_channel_unread(&mut self) {
@@ -304,6 +306,7 @@ impl TUI {
                 self.servers.get_mut().current_channel = index;
             }
         }
+        self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
 
     fn previous_channel_unread(&mut self) {
@@ -313,7 +316,8 @@ impl TUI {
             (0..server.channels.len())
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
-                }).find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+                })
+                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -322,25 +326,34 @@ impl TUI {
                 self.servers.get_mut().current_channel = index;
             }
         }
+        self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
 
     fn next_channel(&mut self) {
         self.reset_current_unreads();
-        let server = self.servers.get_mut();
-        server.current_channel += 1;
-        if server.current_channel >= server.channels.len() {
-            server.current_channel = 0;
+        // NLL HACK
+        {
+            let server = self.servers.get_mut();
+            server.current_channel += 1;
+            if server.current_channel >= server.channels.len() {
+                server.current_channel = 0;
+            }
         }
+        self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
 
     fn previous_channel(&mut self) {
         self.reset_current_unreads();
-        let server = &mut self.servers.get_mut();
-        if server.current_channel > 0 {
-            server.current_channel -= 1;
-        } else {
-            server.current_channel = server.channels.len() - 1;
+        // NLL HACK
+        {
+            let server = &mut self.servers.get_mut();
+            if server.current_channel > 0 {
+                server.current_channel -= 1;
+            } else {
+                server.current_channel = server.channels.len() - 1;
+            }
         }
+        self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
 
     // Take by value because we need to own the allocation
@@ -370,7 +383,8 @@ impl TUI {
                     read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to.
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                }).collect(),
+                })
+                .collect(),
             name: connection.name().into(),
             connection,
             current_channel: 0,
@@ -382,8 +396,7 @@ impl TUI {
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
-            .unwrap_or(0) as u16
-            + 1;
+            .unwrap_or(0) as u16 + 1;
 
         let previous_server_name = self.servers.get().name.clone();
         self.servers.sort_by_key(|s| s.name.clone());
@@ -416,8 +429,7 @@ impl TUI {
             .messages
             .last()
             .map(|m| m.timestamp)
-            .unwrap_or(message.timestamp.clone())
-            > message.timestamp;
+            .unwrap_or(message.timestamp.clone()) > message.timestamp;
 
         channel.messages.push(message.into());
 
@@ -529,7 +541,6 @@ impl TUI {
 
         // If we didn't draw the unread marker, put it at the top of the screen
         if draw_unread_marker {
-            use std::cmp::max;
             write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, max(2, row))).unwrap();
             write!(render_buffer, "{}", Fg(color::Red)).unwrap();
             render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
@@ -764,14 +775,16 @@ impl TUI {
                         MouseButton::WheelUp,
                         1,
                         1,
-                    )))).unwrap(),
+                    ))))
+                    .unwrap(),
                 [27, 79, 66] => self
                     .sender
                     .send(Event::Input(Mouse(MouseEvent::Press(
                         MouseButton::WheelDown,
                         1,
                         1,
-                    )))).unwrap(),
+                    ))))
+                    .unwrap(),
 
                 _ => {}
             },
@@ -987,7 +1000,8 @@ impl Conn for ClientConn {
                 is_mention: false,
                 timestamp: ::chrono::Utc::now(),
                 reactions: Vec::new(),
-            })).expect("Sender died");
+            }))
+            .expect("Sender died");
     }
 
     fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {

@@ -71,4 +71,6 @@ pub trait Conn: Send {
     fn autocomplete(&self, _word: &str) -> Vec<String> {
         Vec::new()
     }
+
+    fn add_reaction(&self, _reaction: &str, _timestamp: DateTime) {}
 }
