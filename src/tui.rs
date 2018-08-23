@@ -161,13 +161,13 @@ impl ChanMessage {
                         self.formatted
                             .extend(wrapped_line.chars().skip_while(|c| c.is_whitespace()));
                     } else {
-                        self.formatted.extend(wrapped_line.chars());
+                        self.formatted.push_str(&wrapped_line);
                     }
                     self.formatted.push('\n');
                 }
             } else {
                 for wrapped_line in wrapper.wrap_iter(&line) {
-                    self.formatted.extend(wrapped_line.chars());
+                    self.formatted.push_str(&wrapped_line);
                     self.formatted.push('\n');
                 }
             }
@@ -380,7 +380,7 @@ impl TUI {
                 .map(|name| Channel {
                     messages: Vec::new(),
                     name: name.to_string(),
-                    read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to.
+                    read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
                 })
@@ -445,10 +445,19 @@ impl TUI {
     fn send_message(&mut self) {
         let contents = self.current_channel().message_buffer.clone();
         let current_channel_name = self.current_channel().name.clone();
-        self.servers
-            .get_mut()
-            .connection
-            .send_channel_message(&current_channel_name, &contents);
+        if contents.starts_with("+:") {
+            let reaction = &contents[2..contents.len() - 1];
+            self.servers.get().connection.add_reaction(
+                reaction,
+                &current_channel_name,
+                self.current_channel().messages.last().unwrap().timestamp,
+            );
+        } else {
+            self.servers
+                .get_mut()
+                .connection
+                .send_channel_message(&current_channel_name, &contents);
+        }
     }
 
     fn draw(&mut self, render_buffer: &mut String) {
@@ -970,7 +979,7 @@ impl TUI {
 }
 
 pub struct ClientConn {
-    name: String,
+    name: IString,
     channel_names: Vec<String>,
     sender: SyncSender<Event>,
 }
@@ -978,8 +987,8 @@ pub struct ClientConn {
 impl ClientConn {
     pub fn new(sender: SyncSender<Event>) -> Box<Conn> {
         Box::new(ClientConn {
-            name: "Client".to_string(),
-            channel_names: vec!["Errors".to_owned(), "Mentions".to_owned()],
+            name: "Client".into(),
+            channel_names: vec!["Errors".into(), "Mentions".into()],
             sender,
         })
     }

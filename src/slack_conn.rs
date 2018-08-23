@@ -60,7 +60,7 @@ impl Handler {
             BotMessage(MessageBotMessage {
                 channel,
                 username: Some(name),
-                text,
+                text: Some(text),
                 ts: Some(ts),
                 reactions,
                 ..
@@ -136,7 +136,8 @@ impl Handler {
                 } else {
                     format!("@{}", &caps[0][2..11])
                 }
-            }).into_owned();
+            })
+            .into_owned();
 
         text = CHANNEL_REGEX.replace_all(&text, "#$n").into_owned();
 
@@ -316,7 +317,8 @@ impl SlackConn {
                 _sender: sender.clone(),
                 handler: handler.clone(),
                 emoji,
-            }))).unwrap();
+            })))
+            .unwrap();
 
         let thread_sender = sender.clone();
         let thread_handler = Arc::clone(&handler);
@@ -349,7 +351,8 @@ impl SlackConn {
                                             .clone(),
                                         timestamp: previous_message.ts.into(),
                                         contents: message.text,
-                                    }).unwrap();
+                                    })
+                                    .unwrap();
                             }
                             Ok(::slack_api::Event::ReactionAdded(
                                 ::slack_api::EventReactionAdded { item, reaction, .. },
@@ -403,7 +406,8 @@ impl SlackConn {
                                             .unwrap_or(&markevent.channel.to_string().into())
                                             .clone(),
                                         read_at: markevent.ts.into(),
-                                    }).unwrap();
+                                    })
+                                    .unwrap();
                             }
 
                             Ok(::slack_api::Event::GroupMarked(markevent)) => {
@@ -416,7 +420,8 @@ impl SlackConn {
                                             .unwrap()
                                             .clone(),
                                         read_at: markevent.ts.into(),
-                                    }).unwrap();
+                                    })
+                                    .unwrap();
                             }
 
                             Ok(_) => {}
@@ -498,7 +503,8 @@ impl SlackConn {
                         server: server_name,
                         channel: channel_name,
                         read_at: read_at.into(),
-                    }).unwrap();
+                    })
+                    .unwrap();
             });
         }
 
@@ -597,9 +603,47 @@ impl Conn for SlackConn {
                 .filter(|name| name.starts_with(&word[1..]))
                 .map(|s| format!(":{}:", s))
                 .collect(),
+            Some('+') => if word.chars().count() > 2 {
+                self.emoji
+                    .iter()
+                    .filter(|name| name.starts_with(&word[2..]))
+                    .map(|s| format!("+:{}:", s))
+                    .collect()
+            } else {
+                Vec::new()
+            },
             _ => Vec::new(),
         }
     }
 
-    fn add_reaction(&self, reaction: &str, timestamp: ::conn::DateTime) {}
+    fn add_reaction(&self, reaction: &str, channel: &str, timestamp: ::conn::DateTime) {
+        let token = self.token.clone();
+        let name = IString::from(reaction);
+
+        let channel = match self.channels.get_left(channel) {
+            Some(c) => c.to_string(),
+            None => {
+                error!("internal error, invalid channel name {}", channel);
+                return;
+            }
+        };
+
+        let timestamp = format!("{:.6}", (timestamp.timestamp_nanos() as f64) / 1e9);
+
+        thread::spawn(move || {
+            if let Err(e) = ::slack_api::reactions::add(
+                &CLIENT,
+                &token,
+                &::slack_api::reactions::AddRequest {
+                    name: &name,
+                    file: None,
+                    file_comment: None,
+                    channel: Some(&channel),
+                    timestamp: Some(&timestamp),
+                },
+            ) {
+                error!("{:?}", e);
+            }
+        });
+    }
 }

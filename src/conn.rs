@@ -72,5 +72,5 @@ pub trait Conn: Send {
         Vec::new()
     }
 
-    fn add_reaction(&self, _reaction: &str, _timestamp: DateTime) {}
+    fn add_reaction(&self, _reaction: &str, _channel: &str, _timestamp: DateTime) {}
 }

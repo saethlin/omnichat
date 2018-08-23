@@ -38,7 +38,7 @@ impl Log for Logger {
             record.line().unwrap()
         );
         let mut file_handle = self.file_output.lock().unwrap();
-        write!(file_handle, "{}\n", message);
+        let _ = write!(file_handle, "{}\n", message);
         file_handle.flush().unwrap();
         self.sender.send(Event::Error(message)).unwrap();
     }
