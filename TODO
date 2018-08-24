@@ -1,28 +1,15 @@
+wrap emoji display as best we can
+include default emoji in autocomplete results
+command to upload a file
+command to copy last url
+
 Keep an on-disk cache of historical messages so we don't have to download so many every time
 
 Discord: Figure out how to ack messages
 Discord+Slack+TUI: Support for muted channels
 Discord+Slack: Make sure all users are loaded
-Discord: Handle attachment-only messages
+Discord+Slack: Handle attachment-only messages
 
 Wrap or scroll server names
 Send "user is typing" messages
-
-New slack type
-type: user_change
-user: User
-cache_ts: Timestamp
-event_ts: Timestamp
-
-New slack type:
-type: team_join
-user: User
-cache_ts: Timestamp
-event_ts: Timestamp
-
-New slack type:
-type: im_created
-user: UserId
-channel: Channel
-event_ts: Timestamp
 
