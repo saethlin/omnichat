@@ -64,7 +64,7 @@ pub trait Conn: Send {
 
     fn send_channel_message(&mut self, _channel: &str, _contents: &str) {}
 
-    fn mark_read(&self, _channel: &str, _timestamp: Option<&str>) {}
+    fn mark_read(&self, _channel: &str) {}
 
     fn handle_cmd(&mut self, _cmd: &str) {}
 

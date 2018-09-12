@@ -234,8 +234,7 @@ impl TUI {
                         read_at: ::chrono::Utc::now(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
-                    })
-                    .collect(),
+                    }).collect(),
                 connection: ClientConn::new(sender.clone()),
                 channel_scroll_offset: 0,
                 current_channel: 0,
@@ -275,7 +274,7 @@ impl TUI {
             server.channels[server.current_channel].read_at = ::chrono::Utc::now();
             let current_channel = &server.channels[server.current_channel];
 
-            server.connection.mark_read(&current_channel.name, None);
+            server.connection.mark_read(&current_channel.name);
         }
     }
 
@@ -316,8 +315,7 @@ impl TUI {
             (0..server.channels.len())
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
-                })
-                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+                }).find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -383,8 +381,7 @@ impl TUI {
                     read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                })
-                .collect(),
+                }).collect(),
             name: connection.name().into(),
             connection,
             current_channel: 0,
@@ -396,7 +393,8 @@ impl TUI {
             .iter()
             .flat_map(|s| s.channels.iter().map(|c| c.name.len()))
             .max()
-            .unwrap_or(0) as u16 + 1;
+            .unwrap_or(0) as u16
+            + 1;
 
         let previous_server_name = self.servers.get().name.clone();
         self.servers.sort_by_key(|s| s.name.clone());
@@ -405,7 +403,7 @@ impl TUI {
         }
     }
 
-    fn add_message(&mut self, message: Message) -> Result<(), Message> {
+    fn add_message(&mut self, message: Message) {
         if message.is_mention {
             self.servers.get_first_mut().channels[1]
                 .messages
@@ -414,22 +412,36 @@ impl TUI {
 
         let server = match self.servers.iter_mut().find(|s| s.name == message.server) {
             Some(server) => server,
-            None => return Err(message),
+            None => {
+                error!(
+                    "Got a message for server {} but don't know it",
+                    message.server
+                );
+                return;
+            }
         };
+
         let channel = match server
             .channels
             .iter_mut()
             .find(|c| c.name == message.channel)
         {
             Some(channel) => channel,
-            None => return Err(message),
+            None => {
+                error!(
+                    "Got a message for channel {} but don't know about it",
+                    message.channel
+                );
+                return;
+            }
         };
 
         let needs_sort = channel
             .messages
             .last()
             .map(|m| m.timestamp)
-            .unwrap_or(message.timestamp.clone()) > message.timestamp;
+            .unwrap_or(message.timestamp.clone())
+            > message.timestamp;
 
         channel.messages.push(message.into());
 
@@ -438,8 +450,6 @@ impl TUI {
                 .messages
                 .sort_unstable_by(|m1, m2| m1.timestamp.cmp(&m2.timestamp));
         }
-
-        Ok(())
     }
 
     fn send_message(&mut self) {
@@ -784,16 +794,14 @@ impl TUI {
                         MouseButton::WheelUp,
                         1,
                         1,
-                    ))))
-                    .unwrap(),
+                    )))).unwrap(),
                 [27, 79, 66] => self
                     .sender
                     .send(Event::Input(Mouse(MouseEvent::Press(
                         MouseButton::WheelDown,
                         1,
                         1,
-                    ))))
-                    .unwrap(),
+                    )))).unwrap(),
 
                 _ => {}
             },
@@ -808,12 +816,7 @@ impl TUI {
                 self.handle_input(&event);
             }
             Event::Message(message) => {
-                if let Err(message) = self.add_message(message) {
-                    error!(
-                        "Failed to add message from {}, {}",
-                        message.channel, message.server
-                    );
-                }
+                self.add_message(message);
             }
             Event::MessageEdited {
                 server,
@@ -1009,8 +1012,7 @@ impl Conn for ClientConn {
                 is_mention: false,
                 timestamp: ::chrono::Utc::now(),
                 reactions: Vec::new(),
-            }))
-            .expect("Sender died");
+            })).expect("Sender died");
     }
 
     fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {

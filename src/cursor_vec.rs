@@ -37,21 +37,8 @@ impl<T> CursorVec<T> {
         }
     }
 
-    pub fn get_first(&self) -> &T {
-        unsafe { self.vec.get_unchecked(0) }
-    }
-
     pub fn get_first_mut(&mut self) -> &mut T {
         unsafe { self.vec.get_unchecked_mut(0) }
-    }
-
-    pub fn wrapping_seek(&mut self, index: usize) {
-        self.index = index;
-        self.index %= self.vec.len();
-    }
-
-    pub fn try_get_at(&self, index: usize) -> Option<&T> {
-        self.vec.get(index)
     }
 
     pub fn push(&mut self, item: T) {

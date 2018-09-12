@@ -85,7 +85,8 @@ fn main() {
                 config_path
             );
             std::process::exit(1)
-        }).read_to_string(&mut contents)
+        })
+        .read_to_string(&mut contents)
         .unwrap_or_else(|_| {
             println!("Unable to read config file at {:?}", &config_path);
             std::process::exit(1)
@@ -182,7 +183,8 @@ fn main() {
             sender
                 .send(Event::Connected(
                     PushbulletConn::new(pushbullet_config.token, pb_sender).unwrap(),
-                )).unwrap();
+                ))
+                .unwrap();
         });
     }
     tui.run();
