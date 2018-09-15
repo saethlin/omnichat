@@ -410,27 +410,24 @@ impl TUI {
                 .push(message.clone().into());
         }
 
-        let server = match self.servers.iter_mut().find(|s| s.name == message.server) {
-            Some(server) => server,
-            None => {
-                error!(
-                    "Got a message for server {} but don't know it",
-                    message.server
-                );
-                return;
-            }
-        };
-
-        let channel = match server
-            .channels
+        let channel = match self
+            .servers
             .iter_mut()
-            .find(|c| c.name == message.channel)
-        {
-            Some(channel) => channel,
+            .find(|s| s.name == message.server)
+            .or_else(|| {
+                error!("Unable to add message, no server named {}", message.server);
+                None
+            }).and_then(|server| {
+                server
+                    .channels
+                    .iter_mut()
+                    .find(|c| c.name == message.channel)
+            }) {
+            Some(c) => c,
             None => {
                 error!(
-                    "Got a message for channel {} but don't know about it",
-                    message.channel
+                    "Unable to add message, no channel named {} in server {}",
+                    message.channel, message.server
                 );
                 return;
             }
@@ -828,20 +825,30 @@ impl TUI {
                     .servers
                     .iter_mut()
                     .find(|s| s.name == server)
-                    .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
-                    .and_then(|c| {
+                    .or_else(|| {
+                        error!("Couldn't process edit request: No server named {}", server);
+                        None
+                    }).and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+                    .or_else(|| {
+                        error!(
+                            "Couldn't process edit request: No channel named {} in server {}",
+                            channel, server
+                        );
+                        None
+                    }).and_then(|c| {
                         c.messages
                             .iter_mut()
                             .rev()
                             .find(|m| m.timestamp == timestamp)
+                    }).or_else(|| {
+                        error!(
+                            "Couldn't process edit request: No message with timestamp {} in server: {}, channel: {}",
+                            timestamp, server, channel,
+                        );
+                        None
                     }) {
                     msg.raw = contents;
                     msg.formatted_width = None; // Force a reformat on next draw
-                } else {
-                    error!(
-                        "Failed to process edit request: channel: {}, server: {}, timestamp: {}",
-                        channel, server, timestamp
-                    );
                 }
             }
             Event::ReactionAdded {
