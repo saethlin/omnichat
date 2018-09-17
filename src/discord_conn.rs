@@ -1,10 +1,9 @@
 use bimap::BiMap;
 use conn::ConnError::ConnectError;
-use conn::{Conn, Event, Message};
+use conn::{Conn, Event, IString, Message};
 use discord;
 use discord::model::ChannelId;
 use failure::Error;
-use inlinable_string::InlinableString as IString;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -278,9 +277,14 @@ impl Conn for DiscordConn {
         }
     }
 
+    fn channels(&self) -> &[IString] {
+        &self.channel_names
+    }
+    /*
     fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
         Box::new(self.channel_names.iter().map(|s| s.as_ref()))
     }
+    */
 
     fn name(&self) -> &str {
         &self.name

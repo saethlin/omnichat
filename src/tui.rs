@@ -1,38 +1,12 @@
-use chrono::Timelike;
-use conn::{Conn, DateTime, Event, Message};
+use chan_message::ChanMessage;
+use conn::{Conn, DateTime, Event, IString, Message};
 use cursor_vec::CursorVec;
-use inlinable_string::InlinableString as IString;
 use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
-lazy_static! {
-    static ref COLORS: Vec<::termion::color::AnsiValue> = {
-        let mut c = Vec::with_capacity(45);
-        for r in 1..6 {
-            for g in 1..6 {
-                for b in 1..6 {
-                    if r < 2 || g < 2 || b < 2 {
-                        c.push(::termion::color::AnsiValue::rgb(r, g, b));
-                    }
-                }
-            }
-        }
-        c
-    };
-}
-
 const CHAN_WIDTH: u16 = 20;
 
-fn djb2(input: &str) -> u64 {
-    let mut hash: u64 = 5381;
-
-    for c in input.bytes() {
-        hash = (hash << 5).wrapping_add(hash).wrapping_add(u64::from(c));
-    }
-    hash
-}
-
-pub struct TUI {
+pub struct Tui {
     servers: CursorVec<Server>,
     longest_channel_name: u16,
     shutdown: bool,
@@ -66,7 +40,7 @@ impl Server {
 
 struct Channel {
     messages: Vec<ChanMessage>,
-    name: String,
+    name: IString,
     read_at: DateTime,
     message_scroll_offset: usize,
     message_buffer: String,
@@ -77,125 +51,12 @@ impl Channel {
         self.messages
             .iter()
             .rev()
-            .filter(|m| m.timestamp > self.read_at)
+            .take_while(|m| m.timestamp() > &self.read_at)
             .count()
     }
 }
 
-struct ChanMessage {
-    formatted_width: Option<usize>,
-    raw: String,
-    pub formatted: String,
-    pub sender: IString,
-    timestamp: DateTime,
-    reactions: Vec<(IString, usize)>,
-}
-
-impl From<::conn::Message> for ChanMessage {
-    fn from(message: ::conn::Message) -> ChanMessage {
-        ChanMessage {
-            formatted_width: None,
-            raw: message.contents,
-            formatted: String::new(),
-            sender: message.sender,
-            timestamp: message.timestamp,
-            reactions: message.reactions,
-        }
-    }
-}
-
-impl ChanMessage {
-    fn format(&mut self, width: usize) {
-        use std::fmt::Write;
-        use termion::color::{AnsiValue, Fg, Reset};
-        use textwrap::{NoHyphenation, Wrapper};
-
-        if Some(width) == self.formatted_width {
-            return;
-        }
-
-        use chrono::TimeZone;
-        let timezone = ::chrono::offset::Local::now().timezone();
-        let localtime = timezone.from_utc_datetime(&self.timestamp.naive_utc());
-
-        self.formatted_width = Some(width);
-        self.formatted.clear();
-        let indent_str = "    ";
-        // 2 for the `: ` after the name, 8 for the time
-        let sender_spacer = " ".repeat(self.sender.chars().count() + 2 + 8);
-        let wrapper = Wrapper::with_splitter(width, NoHyphenation)
-            .subsequent_indent(indent_str)
-            .initial_indent(indent_str)
-            .break_words(true);
-        let first_line_wrapper = Wrapper::with_splitter(width, NoHyphenation)
-            .subsequent_indent(indent_str)
-            .initial_indent(&sender_spacer)
-            .break_words(true);
-
-        for (l, line) in self.raw.lines().enumerate() {
-            // wrap_iter produces nothing on an empty line, so we have to supply the required newline
-            if line == "" {
-                self.formatted.push('\n');
-            }
-
-            if l == 0 {
-                for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
-                {
-                    if l == 0 {
-                        write!(
-                            self.formatted,
-                            "{}({:02}:{:02}) ",
-                            Fg(AnsiValue::grayscale(8)),
-                            localtime.time().hour(),
-                            localtime.time().minute(),
-                        ).unwrap();
-
-                        write!(
-                            self.formatted,
-                            "{}{}{}: ",
-                            Fg(COLORS[djb2(&self.sender) as usize % COLORS.len()]),
-                            self.sender,
-                            Fg(Reset),
-                        ).unwrap();
-
-                        self.formatted
-                            .extend(wrapped_line.chars().skip_while(|c| c.is_whitespace()));
-                    } else {
-                        self.formatted.push_str(&wrapped_line);
-                    }
-                    self.formatted.push('\n');
-                }
-            } else {
-                for wrapped_line in wrapper.wrap_iter(&line) {
-                    self.formatted.push_str(&wrapped_line);
-                    self.formatted.push('\n');
-                }
-            }
-        }
-
-        if !self.reactions.is_empty() {
-            let _ = write!(
-                self.formatted,
-                "{}{}",
-                indent_str,
-                Fg(AnsiValue::grayscale(12))
-            );
-
-            for (r, count) in &self.reactions {
-                let _ = write!(self.formatted, "{}({}) ", r, count);
-            }
-
-            let _ = write!(self.formatted, "{}", Fg(Reset));
-        }
-
-        // Clean trailing whitespace from messages
-        while self.formatted.ends_with(|p: char| p.is_whitespace()) {
-            self.formatted.pop();
-        }
-    }
-}
-
-impl TUI {
+impl Tui {
     pub fn new() -> Self {
         use std::thread;
         use termion::input::TermRead;
@@ -230,7 +91,7 @@ impl TUI {
                     .iter()
                     .map(|name| Channel {
                         messages: Vec::new(),
-                        name: name.to_string(),
+                        name: (*name).into(),
                         read_at: ::chrono::Utc::now(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
@@ -358,26 +219,27 @@ impl TUI {
     fn add_client_message(&mut self, message: String) {
         self.servers.get_first_mut().channels[0]
             .messages
-            .push(ChanMessage {
-                formatted: String::new(),
-                formatted_width: None,
-                raw: message,
-                sender: "Client".into(),
+            .push(ChanMessage::from(::conn::Message {
+                server: "Client".into(),
+                channel: "Errors".into(),
+                contents: message,
+                is_mention: false,
                 timestamp: ::chrono::Utc::now(),
+                sender: "Client".into(),
                 reactions: Vec::new(),
-            });
+            }));
     }
 
     pub fn add_server(&mut self, connection: Box<Conn>) {
-        let mut channels: Vec<String> = connection.channels().map(|s| s.to_string()).collect();
+        let mut channels = connection.channels().to_vec();
         channels.sort();
 
         self.servers.push(Server {
             channels: channels
-                .iter()
+                .into_iter()
                 .map(|name| Channel {
                     messages: Vec::new(),
-                    name: name.to_string(),
+                    name: name,
                     read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
@@ -436,7 +298,7 @@ impl TUI {
         let needs_sort = channel
             .messages
             .last()
-            .map(|m| m.timestamp)
+            .map(|m| *m.timestamp())
             .unwrap_or(message.timestamp.clone())
             > message.timestamp;
 
@@ -445,7 +307,7 @@ impl TUI {
         if needs_sort {
             channel
                 .messages
-                .sort_unstable_by(|m1, m2| m1.timestamp.cmp(&m2.timestamp));
+                .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
         }
     }
 
@@ -457,7 +319,7 @@ impl TUI {
             self.servers.get().connection.add_reaction(
                 reaction,
                 &current_channel_name,
-                self.current_channel().messages.last().unwrap().timestamp,
+                *self.current_channel().messages.last().unwrap().timestamp(),
             );
         } else {
             self.servers
@@ -490,9 +352,11 @@ impl TUI {
         }
 
         let remaining_width = (terminal_width - CHAN_WIDTH) as usize;
+        /*
         for message in &mut self.current_channel_mut().messages {
             message.format(remaining_width);
         }
+        */
 
         // Draw the message input area
         // We need this message area height to render the channel messages
@@ -523,7 +387,13 @@ impl TUI {
 
         let mut row = message_area_height - 1;
         let mut skipped = 0;
-        'outer: for (m, message) in self.current_channel().messages.iter().rev().enumerate() {
+        'outer: for (m, message) in self
+            .current_channel_mut()
+            .messages
+            .iter_mut()
+            .rev()
+            .enumerate()
+        {
             // Unread marker
             if (draw_unread_marker) && (m == num_unreads) {
                 write!(
@@ -541,7 +411,7 @@ impl TUI {
                 }
             }
 
-            for line in message.formatted.lines().rev() {
+            for line in message.formatted_to(remaining_width).lines().rev() {
                 if skipped < offset {
                     skipped += 1;
                     continue;
@@ -839,7 +709,7 @@ impl TUI {
                         c.messages
                             .iter_mut()
                             .rev()
-                            .find(|m| m.timestamp == timestamp)
+                            .find(|m| m.timestamp() == &timestamp)
                     }).or_else(|| {
                         error!(
                             "Couldn't process edit request: No message with timestamp {} in server: {}, channel: {}",
@@ -847,9 +717,8 @@ impl TUI {
                         );
                         None
                     }) {
-                    msg.raw = contents;
-                    msg.formatted_width = None; // Force a reformat on next draw
-                }
+                    msg.edit_to(contents);
+                    }
             }
             Event::ReactionAdded {
                 server,
@@ -866,17 +735,9 @@ impl TUI {
                         c.messages
                             .iter_mut()
                             .rev()
-                            .find(|m| m.timestamp == timestamp)
+                            .find(|m| m.timestamp() == &timestamp)
                     }) {
-                    let mut found = false;
-                    if let Some(r) = msg.reactions.iter_mut().find(|rxn| rxn.0 == reaction) {
-                        r.1 += 1;
-                        found = true;
-                    }
-                    if !found {
-                        msg.reactions.push((reaction, 1));
-                    }
-                    msg.formatted_width = None;
+                    msg.add_reaction(&reaction);
                 } else {
                     error!(
                         "Couldn't add reaction {} to message: server: {}, channel: {}, timestamp: {}",
@@ -899,13 +760,9 @@ impl TUI {
                         c.messages
                             .iter_mut()
                             .rev()
-                            .find(|m| m.timestamp == timestamp)
+                            .find(|m| m.timestamp() == &timestamp)
                     }) {
-                    if let Some(r) = msg.reactions.iter_mut().find(|rxn| rxn.0 == reaction) {
-                        r.1 = r.1.saturating_sub(1);
-                    }
-                    msg.reactions = msg.reactions.iter().cloned().filter(|r| r.1 > 0).collect();
-                    msg.formatted_width = None;
+                        msg.remove_reaction(&reaction);
                 } else {
                     error!(
                         "Couldn't remove reaction {} from message server: {}, channel: {}, timestamp: {}",
@@ -990,11 +847,15 @@ impl TUI {
 
 pub struct ClientConn {
     sender: SyncSender<Event>,
+    channel_names: [IString; 2],
 }
 
 impl ClientConn {
     pub fn new(sender: SyncSender<Event>) -> Box<Conn> {
-        Box::new(ClientConn { sender })
+        Box::new(ClientConn {
+            sender,
+            channel_names: ["Errors".into(), "Messages".into()],
+        })
     }
 }
 
@@ -1015,8 +876,7 @@ impl Conn for ClientConn {
         }));
     }
 
-    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        use std::iter::once;
-        Box::new(once("Errors").chain(once("Mentions")))
+    fn channels(&self) -> &[IString] {
+        &self.channel_names
     }
 }

@@ -1,5 +1,6 @@
 use conn::{Conn, Event};
 use failure::Error;
+use inlinable_string::InlinableString as IString;
 use std::sync::mpsc::SyncSender;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -30,7 +31,7 @@ struct Notification {
 pub struct PushbulletConn {
     _token: String,
     _sender: SyncSender<Event>,
-    channels: Vec<String>,
+    channels: Vec<IString>,
 }
 
 impl PushbulletConn {
@@ -65,7 +66,7 @@ impl PushbulletConn {
         Ok(Box::new(Self {
             _token: token,
             _sender: sender,
-            channels: vec!["test".to_string()],
+            channels: vec!["test".into()],
         }))
     }
 }
@@ -75,7 +76,7 @@ impl Conn for PushbulletConn {
         "Pushbullet"
     }
 
-    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        Box::new(self.channels.iter().map(|s| s.as_str()))
+    fn channels(&self) -> &[IString] {
+        &self.channels
     }
 }

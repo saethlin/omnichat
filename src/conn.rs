@@ -1,4 +1,4 @@
-use inlinable_string::InlinableString as IString;
+pub use inlinable_string::InlinableString as IString;
 use termion;
 
 pub type DateTime = ::chrono::DateTime<::chrono::Utc>;
@@ -60,7 +60,7 @@ pub enum ConnError {
 pub trait Conn: Send {
     fn name(&self) -> &str;
 
-    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a>;
+    fn channels(&self) -> &[IString];
 
     fn send_channel_message(&mut self, _channel: &str, _contents: &str) {}
 

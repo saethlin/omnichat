@@ -27,14 +27,14 @@ extern crate websocket;
 
 #[macro_use]
 mod conn;
-mod logger;
-mod tui;
-use tui::TUI as UI;
 mod bimap;
+mod chan_message;
 mod cursor_vec;
 mod discord_conn;
+mod logger;
 mod pushbullet_conn;
 mod slack_conn;
+mod tui;
 
 #[derive(Debug, Deserialize, Clone)]
 struct SlackConfig {
@@ -96,7 +96,7 @@ fn main() {
         std::process::exit(1)
     });
 
-    let tui = UI::new();
+    let tui = tui::Tui::new();
 
     // Init the global logger
     log::set_boxed_logger(Box::new(logger::Logger::new(tui.sender()))).unwrap();

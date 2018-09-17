@@ -1,7 +1,6 @@
 use bimap::BiMap;
-use conn::{Conn, Event, Message};
+use conn::{Conn, Event, IString, Message};
 use failure::Error;
-use inlinable_string::InlinableString as IString;
 use regex::Regex;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
@@ -45,7 +44,7 @@ impl Handler {
                     outer_channel.or_else(|| channel.map(|c| c.into())),
                     self.users
                         .get_right(&user)
-                        .unwrap_or(&user.to_string().into())
+                        .unwrap_or(&user.as_str().into())
                         .clone(),
                     text,
                     ts,
@@ -83,7 +82,7 @@ impl Handler {
                 outer_channel.or_else(|| channel.map(|c| c.into())),
                 self.users
                     .get_right(&user)
-                    .unwrap_or(&user.to_string().into())
+                    .unwrap_or(&user.as_str().into())
                     .clone(),
                 text,
                 ts,
@@ -249,7 +248,7 @@ impl SlackConn {
             .unwrap()?
             .groups
             .into_iter()
-            .filter(|g| !g.is_archived.unwrap())
+            .filter(|g| !g.is_archived.unwrap_or(true))
         {
             let ::slack_api::Group { id, name, .. } = group;
             channel_names.push(name.as_str().into());
@@ -267,7 +266,10 @@ impl SlackConn {
             .filter(|d| !d.is_user_deleted.unwrap_or(false))
         {
             let ::slack_api::Im { id, user, .. } = dm;
-            let username = users.get_right(&user).unwrap().clone();
+            let username = users
+                .get_right(&user)
+                .unwrap_or(&IString::from(user.as_str()))
+                .clone();
             channel_names.push(username.clone());
             channels.insert(::slack_api::ConversationId::DirectMessage(id), username);
         }
@@ -300,17 +302,16 @@ impl SlackConn {
             .collect::<Vec<_>>();
         emoji.sort();
 
-        sender
-            .send(Event::Connected(Box::new(SlackConn {
-                token: token.clone(),
-                users,
-                channels: channels.clone(),
-                channel_names,
-                team_name: team_name.as_str().into(),
-                _sender: sender.clone(),
-                handler: handler.clone(),
-                emoji,
-            }))).unwrap();
+        let _ = sender.send(Event::Connected(Box::new(SlackConn {
+            token: token.clone(),
+            users,
+            channels: channels.clone(),
+            channel_names,
+            team_name: team_name.as_str().into(),
+            _sender: sender.clone(),
+            handler: handler.clone(),
+            emoji,
+        })));
 
         let thread_sender = sender.clone();
         let thread_handler = Arc::clone(&handler);
@@ -333,17 +334,16 @@ impl SlackConn {
                                     },
                                 ),
                             )) => {
-                                thread_sender
-                                    .send(Event::MessageEdited {
-                                        server: thread_handler.server_name.clone(),
-                                        channel: thread_handler
-                                            .channels
-                                            .get_right(&channel.into())
-                                            .unwrap()
-                                            .clone(),
-                                        timestamp: previous_message.ts.into(),
-                                        contents: message.text,
-                                    }).unwrap();
+                                let _ = thread_sender.send(Event::MessageEdited {
+                                    server: thread_handler.server_name.clone(),
+                                    channel: thread_handler
+                                        .channels
+                                        .get_right(&channel.into())
+                                        .unwrap_or(&IString::from(channel.as_str()))
+                                        .clone(),
+                                    timestamp: previous_message.ts.into(),
+                                    contents: message.text,
+                                });
                             }
                             Ok(::slack_api::Event::ReactionAdded(
                                 ::slack_api::EventReactionAdded { item, reaction, .. },
@@ -380,7 +380,7 @@ impl SlackConn {
                                 if let Some(omnimessage) =
                                     thread_handler.to_omni(slack_message, None)
                                 {
-                                    thread_sender.send(Event::Message(omnimessage)).unwrap()
+                                    let _ = thread_sender.send(Event::Message(omnimessage));
                                 } else {
                                     error!("Failed to convert message:\n{}", message);
                                 }
@@ -388,29 +388,27 @@ impl SlackConn {
 
                             // Got some other kind of event we haven't handled yet
                             Ok(::slack_api::Event::ChannelMarked(markevent)) => {
-                                thread_sender
-                                    .send(Event::MarkChannelRead {
-                                        server: thread_handler.server_name.clone(),
-                                        channel: thread_handler
-                                            .channels
-                                            .get_right(&markevent.channel.into())
-                                            .unwrap_or(&markevent.channel.to_string().into())
-                                            .clone(),
-                                        read_at: markevent.ts.into(),
-                                    }).unwrap();
+                                let _ = thread_sender.send(Event::MarkChannelRead {
+                                    server: thread_handler.server_name.clone(),
+                                    channel: thread_handler
+                                        .channels
+                                        .get_right(&markevent.channel.into())
+                                        .unwrap_or(&markevent.channel.as_str().into())
+                                        .clone(),
+                                    read_at: markevent.ts.into(),
+                                });
                             }
 
                             Ok(::slack_api::Event::GroupMarked(markevent)) => {
-                                thread_sender
-                                    .send(Event::MarkChannelRead {
-                                        server: thread_handler.server_name.clone(),
-                                        channel: thread_handler
-                                            .channels
-                                            .get_right(&markevent.channel.into())
-                                            .unwrap()
-                                            .clone(),
-                                        read_at: markevent.ts.into(),
-                                    }).unwrap();
+                                let _ = thread_sender.send(Event::MarkChannelRead {
+                                    server: thread_handler.server_name.clone(),
+                                    channel: thread_handler
+                                        .channels
+                                        .get_right(&markevent.channel.into())
+                                        .unwrap_or(&IString::from(markevent.channel.as_str()))
+                                        .clone(),
+                                    read_at: markevent.ts.into(),
+                                });
                             }
 
                             Ok(::slack_api::Event::FileShared(fileshare)) => {
@@ -419,16 +417,19 @@ impl SlackConn {
                                     channel: thread_handler
                                         .channels
                                         .get_right(&fileshare.channel_id.into())
-                                        .unwrap()
+                                        .unwrap_or(&fileshare.channel_id.as_str().into())
                                         .clone(),
                                     sender: thread_handler
                                         .users
                                         .get_right(&fileshare.user_id)
-                                        .unwrap()
+                                        .unwrap_or(&fileshare.channel_id.as_str().into())
                                         .clone(),
                                     contents: fileshare.file_id.to_string(),
                                     is_mention: false,
-                                    timestamp: fileshare.ts.unwrap().into(),
+                                    timestamp: fileshare
+                                        .ts
+                                        .map(|t| t.into())
+                                        .unwrap_or(::chrono::Utc::now()),
                                     reactions: Vec::new(),
                                 }));
                             }
@@ -515,15 +516,14 @@ impl SlackConn {
 
                 for message in messages.into_iter().rev() {
                     if let Some(message) = handler.to_omni(message, Some(conversation_id)) {
-                        sender.send(Event::Message(message)).unwrap();
+                        let _ = sender.send(Event::Message(message));
                     }
                 }
-                sender
-                    .send(Event::HistoryLoaded {
-                        server: server_name,
-                        channel: conversation_name,
-                        read_at: read_at.into(),
-                    }).unwrap();
+                let _ = sender.send(Event::HistoryLoaded {
+                    server: server_name,
+                    channel: conversation_name,
+                    read_at: read_at.into(),
+                });
             });
         }
 
@@ -536,9 +536,14 @@ impl Conn for SlackConn {
         &self.team_name
     }
 
-    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        Box::new(self.channel_names.iter().map(|s| s.as_ref()))
+    fn channels(&self) -> &[IString] {
+        &self.channel_names
     }
+    /*
+    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
+        //Box::new(self.channel_names.iter().map(|s| s.as_ref()))
+    }
+    */
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let token = self.token.clone();
