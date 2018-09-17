@@ -879,8 +879,8 @@ impl TUI {
                     msg.formatted_width = None;
                 } else {
                     error!(
-                        "Failed to process edit request: channel: {}, server: {}, timestamp: {}",
-                        channel, server, timestamp
+                        "Couldn't add reaction {} to message: server: {}, channel: {}, timestamp: {}",
+                        reaction, server, channel, timestamp
                     );
                 }
             }
@@ -908,8 +908,8 @@ impl TUI {
                     msg.formatted_width = None;
                 } else {
                     error!(
-                        "Failed to process edit request: channel: {}, server: {}, timestamp: {}",
-                        channel, server, timestamp
+                        "Couldn't remove reaction {} from message server: {}, channel: {}, timestamp: {}",
+                        reaction, server, channel, timestamp
                     );
                 }
             }
@@ -989,40 +989,34 @@ impl TUI {
 }
 
 pub struct ClientConn {
-    name: IString,
-    channel_names: Vec<String>,
     sender: SyncSender<Event>,
 }
 
 impl ClientConn {
     pub fn new(sender: SyncSender<Event>) -> Box<Conn> {
-        Box::new(ClientConn {
-            name: "Client".into(),
-            channel_names: vec!["Errors".into(), "Mentions".into()],
-            sender,
-        })
+        Box::new(ClientConn { sender })
     }
 }
 
 impl Conn for ClientConn {
     fn name(&self) -> &str {
-        &self.name
+        "Client"
     }
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
-        self.sender
-            .send(Event::Message(Message {
-                server: "Client".into(),
-                channel: channel.into(),
-                contents: contents.into(),
-                sender: "You".into(),
-                is_mention: false,
-                timestamp: ::chrono::Utc::now(),
-                reactions: Vec::new(),
-            })).expect("Sender died");
+        let _ = self.sender.send(Event::Message(Message {
+            server: "Client".into(),
+            channel: channel.into(),
+            contents: contents.into(),
+            sender: "You".into(),
+            is_mention: false,
+            timestamp: ::chrono::Utc::now(),
+            reactions: Vec::new(),
+        }));
     }
 
     fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        Box::new(self.channel_names.iter().map(|s| s.as_str()))
+        use std::iter::once;
+        Box::new(once("Errors").chain(once("Mentions")))
     }
 }
