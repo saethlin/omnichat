@@ -240,12 +240,13 @@ impl SlackConn {
             })
         };
 
-        // Slack private channels are actually groups
-        let (mut channel_names, mut channels) = channels_handle.join().unwrap()?;
+        let (mut channel_names, mut channels) = channels_handle
+            .join()
+            .map_err(|e| format_err!("{:?}", e))??;
 
         for group in groups_handle
             .join()
-            .unwrap()?
+            .map_err(|e| format_err!("{:?}", e))??
             .groups
             .into_iter()
             .filter(|g| !g.is_archived.unwrap_or(true))
@@ -256,11 +257,12 @@ impl SlackConn {
         }
 
         // Must have users before we can figure out who each DM is for
-        let users: BiMap<::slack_api::UserId, IString> = users_handle.join().unwrap()?;
+        let users: BiMap<::slack_api::UserId, IString> =
+            users_handle.join().map_err(|e| format_err!("{:?}", e))??;
 
         for dm in dms_handle
             .join()
-            .unwrap()?
+            .map_err(|e| format_err!("{:?}", e))??
             .ims
             .into_iter()
             .filter(|d| !d.is_user_deleted.unwrap_or(false))
@@ -276,7 +278,9 @@ impl SlackConn {
 
         channel_names.sort();
 
-        let response = connect_handle.join().unwrap()?;
+        let response = connect_handle
+            .join()
+            .map_err(|e| format_err!("{:?}", e))??;
 
         let mut websocket = ::websocket::ClientBuilder::new(&response.url)?.connect_secure(None)?;
 
@@ -294,7 +298,7 @@ impl SlackConn {
         // Give the emoji handle as long as possible to complete
         let mut emoji = emoji_handle
             .join()
-            .unwrap()?
+            .map_err(|e| format_err!("{:?}", e))??
             .emoji
             .unwrap_or_default()
             .keys()
@@ -468,9 +472,15 @@ impl SlackConn {
                 let (messages, read_at) = match conversation_id {
                     ::slack_api::ConversationId::Channel(channel_id) => {
                         let req = channels::InfoRequest::new(channel_id);
-                        let info = channels::info(&*CLIENT, &token, &req);
-                        let read_at = info.unwrap().channel.last_read.unwrap();
-                        // TODO: Use the unread cursor instead
+                        let read_at = channels::info(&*CLIENT, &token, &req)
+                            .and_then(|info| {
+                                info.channel.last_read.ok_or(::slack_api::Error::Slack(
+                                    "timestamp missing".to_owned(),
+                                ))
+                            }).unwrap_or_else(|e| {
+                                error!("{:?}", e);
+                                ::chrono::Utc::now().into()
+                            });
                         let mut req = channels::HistoryRequest::new(channel_id);
                         req.count = Some(1000);
                         let messages = match channels::history(&*CLIENT, &token, &req) {
@@ -484,8 +494,15 @@ impl SlackConn {
                     }
                     ::slack_api::ConversationId::Group(group_id) => {
                         let mut req = groups::InfoRequest::new(group_id);
-                        let info = groups::info(&*CLIENT, &token, &req);
-                        let read_at = info.unwrap().group.last_read.unwrap();
+                        let read_at = groups::info(&*CLIENT, &token, &req)
+                            .and_then(|info| {
+                                info.group.last_read.ok_or(::slack_api::Error::Slack(
+                                    "timestamp missing".to_owned(),
+                                ))
+                            }).unwrap_or_else(|e| {
+                                error!("{:?}", e);
+                                ::chrono::Utc::now().into()
+                            });
 
                         let mut req = groups::HistoryRequest::new(group_id);
                         req.count = Some(1000);
@@ -539,26 +556,24 @@ impl Conn for SlackConn {
     fn channels(&self) -> &[IString] {
         &self.channel_names
     }
-    /*
-    fn channels<'a>(&'a self) -> Box<Iterator<Item = &'a str> + 'a> {
-        //Box::new(self.channel_names.iter().map(|s| s.as_ref()))
-    }
-    */
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let token = self.token.clone();
         let contents = self.handler.to_slack(contents.to_string());
-        //let channel = channel.to_string();
-        let channel = self
-            .handler
-            .channels
-            .get_left(channel.into())
-            .unwrap()
-            .clone();
+        let channel = match self.handler.channels.get_left(channel.into()) {
+            Some(id) => id.clone(),
+            None => {
+                error!("Unknown channel: {}", channel);
+                return;
+            }
+        };
+
         ::std::thread::spawn(move || {
             use slack_api::chat::post_message;
             let mut request = ::slack_api::chat::PostMessageRequest::new(channel, &contents);
             request.as_user = Some(true);
+            // This is a hack because the reqwest client randomly disconnects; re-sending the
+            // request makes it reconnect
             if post_message(&*CLIENT, &token, &request).is_err() {
                 if let Err(e) = post_message(&*CLIENT, &token, &request) {
                     error!("{}", e);

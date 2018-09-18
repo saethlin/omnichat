@@ -23,7 +23,8 @@ chrono = "0.4"
 reqwest = "0.8"
 log = {version="0.4", features=["std"]}
 termion = "1.5"
-chan-signal = "0.3"
+libc = "0.2"
+signal-hook = "0.1"
 textwrap = "0.10"
 dirs = "1.0"
 slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types", features=["reqwest", "chrono"]}

@@ -12,14 +12,17 @@ pub struct Logger {
 
 impl Logger {
     pub fn new(sender: SyncSender<Event>) -> Self {
-        let log_path = ::dirs::home_dir().unwrap().join(".omnichat_log");
+        let log_path = ::dirs::home_dir()
+            .expect("You must have a home directory")
+            .join(".omnichat_log");
+
         Logger {
             file_output: Mutex::new(
                 OpenOptions::new()
                     .create(true)
                     .append(true)
                     .open(&log_path)
-                    .unwrap(),
+                    .expect("Couldn't open the path for the log file at $HOME/.omnichat_log"),
             ),
             sender,
         }
@@ -30,19 +33,25 @@ impl Log for Logger {
     fn enabled(&self, _metadata: &Metadata) -> bool {
         true
     }
+
     fn log(&self, record: &Record) {
         let message = format!(
             "{}, {}, {}",
             record.args(),
-            record.file().unwrap(),
-            record.line().unwrap()
+            record.file().unwrap_or("?"),
+            record.line().unwrap_or(0)
         );
-        let mut file_handle = self.file_output.lock().unwrap();
-        let _ = write!(file_handle, "{}\n", message);
-        file_handle.flush().unwrap();
-        self.sender.send(Event::Error(message)).unwrap();
+
+        if let Ok(mut file_handle) = self.file_output.lock() {
+            let _ = write!(file_handle, "{}\n", message);
+            let _ = file_handle.flush();
+        }
+        let _ = self.sender.send(Event::Error(message));
     }
+
     fn flush(&self) {
-        self.file_output.lock().unwrap().flush().unwrap();
+        if let Ok(mut f) = self.file_output.lock() {
+            let _ = f.flush();
+        }
     }
 }

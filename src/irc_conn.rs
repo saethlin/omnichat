@@ -1,13 +1,13 @@
-use std::sync::mpsc::Sender;
-use std::thread;
-use std::sync::{Arc, RwLock};
-use conn::{Conn, Event, Message};
 use conn::ConnError::IrcError;
+use conn::{Conn, Event, Message};
 use failure::Error;
-use irc::client::IrcClient;
-use irc::client::Client;
-use futures::Stream;
 use futures::Future;
+use futures::Stream;
+use irc::client::Client;
+use irc::client::IrcClient;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, RwLock};
+use std::thread;
 
 pub struct IrcConn {
     sender: Sender<Event>,
@@ -41,19 +41,16 @@ impl IrcConn {
                         ..
                     } = ev
                     {
-                        thread_sender
-                            .send(Event::Message(Message {
-                                sender: source,
-                                contents: contents,
-                                channel: "test".to_string(),
-                                is_mention: false,
-                                server: server_name.clone(),
-                            }))
-                            .unwrap();
+                        let _ = thread_sender.send(Event::Message(Message {
+                            sender: source,
+                            contents: contents,
+                            channel: "test".to_string(),
+                            is_mention: false,
+                            server: server_name.clone(),
+                        }));
                     }
                     Ok(())
-                })
-                .wait()
+                }).wait()
                 .unwrap();
         });
 

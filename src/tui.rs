@@ -63,16 +63,19 @@ impl Tui {
         use termion::raw::IntoRawMode;
 
         let screenguard = ::termion::screen::AlternateScreen::from(::std::io::stdout());
-        let rawguard = ::std::io::stdout().into_raw_mode().unwrap();
+        let rawguard = ::std::io::stdout()
+            .into_raw_mode()
+            .expect("Couldn't put the terminal in raw mode");
 
         let (sender, reciever) = sync_channel(100);
 
         // Must be called before any threads are launched
-        let signal = ::chan_signal::notify(&[::chan_signal::Signal::WINCH]);
         let winch_send = sender.clone();
+        let signals = ::signal_hook::iterator::Signals::new(&[::libc::SIGWINCH])
+            .expect("Couldn't register resize signal handler");
         thread::spawn(move || {
-            for _ in signal {
-                winch_send.send(Event::Resize).unwrap();
+            for _ in &signals {
+                let _ = winch_send.send(Event::Resize);
             }
         });
 
@@ -80,7 +83,7 @@ impl Tui {
         thread::spawn(move || {
             for event in ::std::io::stdin().events() {
                 if let Ok(ev) = event {
-                    send.send(Event::Input(ev)).unwrap();
+                    let _ = send.send(Event::Input(ev));
                 }
             }
         });
@@ -315,12 +318,23 @@ impl Tui {
         let contents = self.current_channel().message_buffer.clone();
         let current_channel_name = self.current_channel().name.clone();
         if contents.starts_with("+:") {
-            let reaction = &contents[2..contents.len() - 1];
-            self.servers.get().connection.add_reaction(
-                reaction,
-                &current_channel_name,
-                *self.current_channel().messages.last().unwrap().timestamp(),
-            );
+            if let Some(ts) = self
+                .current_channel()
+                .messages
+                .last()
+                .map(|m| m.timestamp().clone())
+            {
+                let reaction = &contents[2..contents.len() - 1];
+                self.servers
+                    .get()
+                    .connection
+                    .add_reaction(reaction, &current_channel_name, ts);
+            } else {
+                self.add_client_message(
+                    "Can't react to most recent message if there are no messages in this channel!"
+                        .to_string(),
+                );
+            }
         } else {
             self.servers
                 .get_mut()
@@ -340,10 +354,10 @@ impl Tui {
 
         if terminal_height != self.previous_terminal_height {
             render_buffer.clear();
-            write!(render_buffer, "{}", ::termion::clear::All).unwrap();
+            let _ = write!(render_buffer, "{}", ::termion::clear::All);
 
             for i in 1..terminal_height + 1 {
-                write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i)).unwrap();
+                let _ = write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i));
             }
             self.truncate_buffer_to = render_buffer.len();
             self.previous_terminal_height = terminal_height;
@@ -364,11 +378,11 @@ impl Tui {
         let total_chars = self.current_channel().message_buffer.chars().count();
         let rows = (total_chars / remaining_width) + 1;
         for row in (0..rows).rev() {
-            write!(
+            let _ = write!(
                 render_buffer,
                 "{}",
                 Goto(CHAN_WIDTH + 1, terminal_height - (rows - row - 1) as u16)
-            ).unwrap();
+            );
             render_buffer.extend(
                 self.current_channel()
                     .message_buffer
@@ -396,14 +410,14 @@ impl Tui {
         {
             // Unread marker
             if (draw_unread_marker) && (m == num_unreads) {
-                write!(
+                let _ = write!(
                     render_buffer,
                     "{}{}",
                     Goto(CHAN_WIDTH + 1, row),
                     Fg(color::Red)
-                ).unwrap();
+                );
                 render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
-                write!(render_buffer, "{}", Fg(color::Reset)).unwrap();
+                let _ = write!(render_buffer, "{}", Fg(color::Reset));
                 row -= 1;
                 draw_unread_marker = false;
                 if row == 1 {
@@ -416,7 +430,7 @@ impl Tui {
                     skipped += 1;
                     continue;
                 }
-                write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, row)).unwrap();
+                let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, row));
                 render_buffer.push_str(line);
                 row -= 1;
                 if row == 1 {
@@ -427,14 +441,14 @@ impl Tui {
 
         // If we didn't draw the unread marker, put it at the top of the screen
         if draw_unread_marker {
-            write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, max(2, row))).unwrap();
-            write!(render_buffer, "{}", Fg(color::Red)).unwrap();
+            let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, max(2, row)));
+            let _ = write!(render_buffer, "{}", Fg(color::Red));
             render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
-            write!(render_buffer, "{}", Fg(color::Reset)).unwrap();
+            let _ = write!(render_buffer, "{}", Fg(color::Reset));
         }
 
         // Draw all the server names across the top
-        write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, 1)).unwrap(); // Move to the top-right corner
+        let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
         for (s, server) in self
             .servers
@@ -443,35 +457,35 @@ impl Tui {
             .skip(self.server_scroll_offset)
         {
             if s == self.servers.tell() {
-                write!(
+                let _ = write!(
                     render_buffer,
                     "{}{}{}",
                     style::Bold,
                     server.name,
                     style::Reset
-                ).unwrap();
+                );
             } else if server.has_unreads() {
-                write!(
+                let _ = write!(
                     render_buffer,
                     "{}{}{}",
                     Fg(color::Red),
                     server.name,
                     Fg(color::Reset),
-                ).unwrap();
+                );
             } else {
-                write!(
+                let _ = write!(
                     render_buffer,
                     "{}{}{}",
                     Fg(color::AnsiValue::rgb(3, 3, 3)),
                     server.name,
                     Fg(color::Reset),
-                ).unwrap();
+                );
             }
-            write!(
+            let _ = write!(
                 render_buffer,
                 "{}",
                 if s == num_servers - 1 { "" } else { " • " }
-            ).unwrap();
+            );
         }
 
         {
@@ -488,7 +502,7 @@ impl Tui {
 
             fn write_shortened_name(f: &mut String, name: &str, max_len: usize) {
                 if name.chars().count() < max_len {
-                    write!(f, "{}", name).unwrap()
+                    let _ = write!(f, "{}", name);
                 } else {
                     f.extend(name.chars().take(max_len - 4).chain("...".chars()));
                 }
@@ -502,38 +516,38 @@ impl Tui {
                 .take(terminal_height as usize)
             {
                 if c == server.current_channel {
-                    write!(
+                    let _ = write!(
                         render_buffer,
                         "{}{}",
                         Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
                         style::Bold
-                    ).unwrap();
+                    );
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    write!(render_buffer, "{}", style::Reset).unwrap();
+                    let _ = write!(render_buffer, "{}", style::Reset);
                 } else if channel.num_unreads() > 0 {
-                    write!(
+                    let _ = write!(
                         render_buffer,
                         "{}{}",
                         Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
                         Fg(color::Red)
-                    ).unwrap();
+                    );
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    write!(render_buffer, "{}", style::Reset).unwrap();
+                    let _ = write!(render_buffer, "{}", style::Reset);
                 } else {
                     let gray = color::AnsiValue::rgb(3, 3, 3);
-                    write!(
+                    let _ = write!(
                         render_buffer,
                         "{}{}",
                         Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
                         Fg(gray)
-                    ).unwrap();
+                    );
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    write!(render_buffer, "{}", style::Reset).unwrap();
+                    let _ = write!(render_buffer, "{}", style::Reset);
                 }
             }
         }
 
-        write!(
+        let _ = write!(
             render_buffer,
             "{}",
             Goto(
@@ -541,13 +555,14 @@ impl Tui {
                 terminal_height - (total_chars / remaining_width) as u16
                     + (self.cursor_pos / remaining_width) as u16
             )
-        ).unwrap();
+        );
         {
             use std::io::Write;
             let out = ::std::io::stdout();
             let mut lock = out.lock();
-            lock.write_all(render_buffer.as_bytes()).unwrap();
-            lock.flush().unwrap();
+            lock.write_all(render_buffer.as_bytes())
+                .expect("Unable to write to stdout");
+            let _ = lock.flush();
         }
     }
 
@@ -655,20 +670,20 @@ impl Tui {
                 self.cursor_pos += 1;
             }
             Unsupported(ref bytes) => match bytes.as_slice() {
-                [27, 79, 65] => self
-                    .sender
-                    .send(Event::Input(Mouse(MouseEvent::Press(
+                [27, 79, 65] => {
+                    let _ = self.sender.send(Event::Input(Mouse(MouseEvent::Press(
                         MouseButton::WheelUp,
                         1,
                         1,
-                    )))).unwrap(),
-                [27, 79, 66] => self
-                    .sender
-                    .send(Event::Input(Mouse(MouseEvent::Press(
+                    ))));
+                }
+                [27, 79, 66] => {
+                    let _ = self.sender.send(Event::Input(Mouse(MouseEvent::Press(
                         MouseButton::WheelDown,
                         1,
                         1,
-                    )))).unwrap(),
+                    ))));
+                }
 
                 _ => {}
             },

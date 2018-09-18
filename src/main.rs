@@ -10,8 +10,9 @@ extern crate openssl_probe;
 extern crate regex;
 #[macro_use]
 extern crate serde_derive;
-extern crate chan_signal;
 extern crate chrono;
+extern crate libc;
+extern crate signal_hook;
 #[macro_use]
 extern crate log;
 extern crate dirs;
@@ -99,7 +100,8 @@ fn main() {
     let tui = tui::Tui::new();
 
     // Init the global logger
-    log::set_boxed_logger(Box::new(logger::Logger::new(tui.sender()))).unwrap();
+    log::set_boxed_logger(Box::new(logger::Logger::new(tui.sender())))
+        .expect("Unable to create global logger");
     log::set_max_level(log::LevelFilter::Warn);
 
     // Start all the slack connections first, because we can't do the Discord stuff fully async
@@ -153,7 +155,9 @@ fn main() {
             // Spawn a thread that copies the incoming Discord events out to every omnichat server
             thread::spawn(move || loop {
                 match connection.recv_event() {
-                    Ok(ev) => discord_sender.send(ev).unwrap(),
+                    Ok(ev) => {
+                        let _ = discord_sender.send(ev);
+                    }
                     Err(discord::Error::Closed(..)) => break,
                     Err(err) => error!("Discord read error: {}", err),
                 }
@@ -166,8 +170,10 @@ fn main() {
                 let discord_receiver = discord_receiver.clone();
                 thread::spawn(move || {
                     match DiscordConn::new(dis, &info, discord_receiver, &c.name, sender.clone()) {
-                        Ok(connection) => sender.send(Event::Connected(connection)).unwrap(),
-                        Err(err) => error!("Unable to connect to Discord server {}:", err),
+                        Ok(connection) => {
+                            let _ = sender.send(Event::Connected(connection));
+                        }
+                        Err(err) => error!("Unable to connect to Discord server: {}", err),
                     }
                 });
             }
@@ -178,12 +184,14 @@ fn main() {
     if let Some(pushbullet_config) = config.pushbullet {
         let pb_sender = tui.sender();
         let sender = tui.sender();
-        thread::spawn(move || {
-            sender
-                .send(Event::Connected(
-                    PushbulletConn::new(pushbullet_config.token, pb_sender).unwrap(),
-                )).unwrap();
-        });
+        thread::spawn(
+            move || match PushbulletConn::new(pushbullet_config.token, pb_sender) {
+                Ok(connection) => {
+                    let _ = sender.send(Event::Connected(connection));
+                }
+                Err(err) => error!("Unable to connect to Pushbullet: {}", err),
+            },
+        );
     }
     tui.run();
 }
