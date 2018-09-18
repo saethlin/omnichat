@@ -22,11 +22,12 @@ openssl-probe = "0.1"
 chrono = "0.4"
 reqwest = "0.8"
 log = {version="0.4", features=["std"]}
-termion = "1.5"
 libc = "0.2"
 signal-hook = "0.1"
 textwrap = "0.10"
 dirs = "1.0"
+pancurses = "0.16"
+termion = "*"
 slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types", features=["reqwest", "chrono"]}
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
 openssl = { version = "0.10", features = ["vendored"] }

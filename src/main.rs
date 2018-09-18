@@ -17,6 +17,7 @@ extern crate signal_hook;
 extern crate log;
 extern crate dirs;
 extern crate inlinable_string;
+extern crate pancurses;
 extern crate reqwest;
 extern crate serde_json;
 extern crate slack_api;

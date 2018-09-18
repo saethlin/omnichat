@@ -59,8 +59,6 @@ impl Channel {
 impl Tui {
     pub fn new() -> Self {
         use std::thread;
-        use termion::input::TermRead;
-        use termion::raw::IntoRawMode;
 
         let screenguard = ::termion::screen::AlternateScreen::from(::std::io::stdout());
         let rawguard = ::std::io::stdout()
@@ -76,15 +74,6 @@ impl Tui {
         thread::spawn(move || {
             for _ in &signals {
                 let _ = winch_send.send(Event::Resize);
-            }
-        });
-
-        let send = sender.clone();
-        thread::spawn(move || {
-            for event in ::std::io::stdin().events() {
-                if let Ok(ev) = event {
-                    let _ = send.send(Event::Input(ev));
-                }
             }
         });
 

@@ -1,5 +1,4 @@
 pub use inlinable_string::InlinableString as IString;
-use termion;
 
 pub type DateTime = ::chrono::DateTime<::chrono::Utc>;
 
@@ -28,7 +27,7 @@ pub enum Event {
         channel: IString,
         read_at: DateTime,
     },
-    Input(termion::event::Event),
+    Input(::termion::event::Event),
     Error(String),
     Connected(Box<Conn>),
     MarkChannelRead {
