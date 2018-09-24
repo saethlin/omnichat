@@ -27,7 +27,6 @@ pub enum Event {
         channel: IString,
         read_at: DateTime,
     },
-    Input(::termion::event::Event),
     Error(String),
     Connected(Box<Conn>),
     MarkChannelRead {

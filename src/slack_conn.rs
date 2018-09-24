@@ -670,6 +670,8 @@ impl Conn for SlackConn {
             }
         };
 
+        error!("{:?} {:?}", name, timestamp);
+
         thread::spawn(move || {
             use slack_api::reactions::Reactable;
             let request = ::slack_api::reactions::AddRequest::new(

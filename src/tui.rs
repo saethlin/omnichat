@@ -1,6 +1,7 @@
 use chan_message::ChanMessage;
 use conn::{Conn, DateTime, Event, IString, Message};
 use cursor_vec::CursorVec;
+use pancurses::{endwin, initscr};
 use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
@@ -16,10 +17,7 @@ pub struct Tui {
     autocompletions: Vec<String>,
     autocomplete_index: usize,
     cursor_pos: usize,
-    _guards: (
-        ::termion::screen::AlternateScreen<::std::io::Stdout>,
-        ::termion::raw::RawTerminal<::std::io::Stdout>,
-    ),
+    window: ::pancurses::Window,
     previous_terminal_height: u16,
     truncate_buffer_to: usize,
 }
@@ -59,12 +57,6 @@ impl Channel {
 impl Tui {
     pub fn new() -> Self {
         use std::thread;
-
-        let screenguard = ::termion::screen::AlternateScreen::from(::std::io::stdout());
-        let rawguard = ::std::io::stdout()
-            .into_raw_mode()
-            .expect("Couldn't put the terminal in raw mode");
-
         let (sender, reciever) = sync_channel(100);
 
         // Must be called before any threads are launched
@@ -101,7 +93,7 @@ impl Tui {
             autocompletions: Vec::new(),
             autocomplete_index: 0,
             cursor_pos: 0,
-            _guards: (screenguard, rawguard),
+            window: initscr(),
             truncate_buffer_to: 0,
             previous_terminal_height: 0,
         }
@@ -555,50 +547,48 @@ impl Tui {
         }
     }
 
-    fn handle_input(&mut self, event: &::termion::event::Event) {
-        use termion::event::Event::*;
-        use termion::event::Key::*;
-        use termion::event::{MouseButton, MouseEvent};
-
-        match *event {
-            Key(Char('\n')) => {
+    fn handle_input(&mut self, event: ::pancurses::Input) {
+        use pancurses::Input::*;
+        match event {
+            Character('\n') => {
                 if !self.current_channel().message_buffer.is_empty() {
                     self.send_message();
                     self.current_channel_mut().message_buffer.clear();
                     self.cursor_pos = 0;
                 }
             }
-            Key(Backspace) => {
+            KeyBackspace => {
                 if self.cursor_pos > 0 {
                     let remove_pos = self.cursor_pos as usize - 1;
                     self.current_channel_mut().message_buffer.remove(remove_pos);
                     self.cursor_pos -= 1;
                 }
             }
-            Key(Delete) => {
+            KeyBackspace => {
                 let buffer_chars = self.current_channel().message_buffer.chars().count();
                 if buffer_chars > 0 && self.cursor_pos < buffer_chars {
                     let remove_pos = self.cursor_pos;
                     self.current_channel_mut().message_buffer.remove(remove_pos);
                 }
             }
-            Key(Ctrl('c')) => self.shutdown = true,
-            Key(Up) => {
+            //Key(Ctrl('c')) => self.shutdown = true,
+            KeyUp => {
                 self.previous_channel();
             }
-            Key(Down) => {
+            KeyDown => {
                 self.next_channel();
             }
-            Key(Ctrl('d')) => {
+            KeyRight => {
                 self.next_server();
             }
-            Key(Ctrl('a')) => {
+            KeyLeft => {
                 self.previous_server();
             }
-            Key(PageDown) | Key(Ctrl('s')) => {
+            /*
+            Key(Ctrl('s')) => {
                 self.next_channel_unread();
             }
-            Key(PageUp) | Key(Ctrl('w')) => {
+            Key(Ctrl('w')) => {
                 self.previous_channel_unread();
             }
             Key(Ctrl('q')) | Mouse(MouseEvent::Press(MouseButton::WheelUp, ..)) => {
@@ -609,17 +599,18 @@ impl Tui {
                 let previous_offset = chan.message_scroll_offset;
                 chan.message_scroll_offset = previous_offset.saturating_sub(1);
             }
-            Key(Left) => {
+            KeyLeft => {
                 if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                 }
             }
-            Key(Right) => {
+            KeyRight => {
                 if self.cursor_pos < self.current_channel().message_buffer.len() {
                     self.cursor_pos += 1;
                 }
             }
-            Key(Char('\t')) => {
+            */
+            Character('\t') => {
                 if self.autocompletions.is_empty() {
                     self.autocompletions = if let Some(last_word) = self
                         .current_channel()
@@ -649,7 +640,7 @@ impl Tui {
                     self.autocomplete_index += 1;
                 }
             }
-            Key(Char(c)) => {
+            Character(c) => {
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
                 let current_pos = self.cursor_pos as usize;
@@ -658,6 +649,7 @@ impl Tui {
                     .insert(current_pos, c);
                 self.cursor_pos += 1;
             }
+            /*
             Unsupported(ref bytes) => match bytes.as_slice() {
                 [27, 79, 65] => {
                     let _ = self.sender.send(Event::Input(Mouse(MouseEvent::Press(
@@ -676,6 +668,7 @@ impl Tui {
 
                 _ => {}
             },
+            */
             _ => {}
         }
     }
@@ -683,9 +676,6 @@ impl Tui {
     fn handle_event(&mut self, event: Event) {
         match event {
             Event::Resize => {} // Will be redrawn because we got an event
-            Event::Input(event) => {
-                self.handle_input(&event);
-            }
             Event::Message(message) => {
                 self.add_message(message);
             }
@@ -814,36 +804,31 @@ impl Tui {
         }
     }
 
+    fn pancurses_draw(&mut self) {}
+
     // This is basically a game loop, we could use a temporary storage allocator
     // If that were possible
     pub fn run(mut self) {
         use std::time::{Duration, Instant};
-        let mut render_buffer = String::new();
-        self.draw(&mut render_buffer);
-        while let Ok(event) = self.events.recv() {
-            self.handle_event(event);
 
-            // Now we have another 16 miliseconds to handle other events before anyone notices
-            let start_instant = Instant::now();
-            while let Some(remaining_time) =
-                Duration::from_millis(16).checked_sub(start_instant.elapsed())
-            {
-                let event = match self.events.recv_timeout(remaining_time) {
-                    Ok(ev) => ev,
-                    Err(RecvTimeoutError::Timeout) => break,
-                    Err(_) => {
-                        self.shutdown = true;
-                        break;
-                    }
-                };
-
+        self.pancurses_draw();
+        loop {
+            let start = Instant::now();
+            //TODO: There is an error condition here, the channel can hang up
+            while let Ok(event) = self.events.try_recv() {
                 self.handle_event(event);
             }
-
-            self.draw(&mut render_buffer);
+            while let Some(event) = self.window.getch() {
+                self.handle_input(event);
+            }
+            self.pancurses_draw();
+            let duration = Instant::now() - start;
+            if duration < Duration::from_millis(16) {
+                ::std::thread::sleep(Duration::from_millis(16) - duration);
+            }
 
             if self.shutdown {
-                break;
+                return;
             }
         }
     }
