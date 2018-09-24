@@ -20,7 +20,7 @@ irc = "0.13"
 futures = "0.1"
 openssl-probe = "0.1"
 chrono = "0.4"
-reqwest = "0.8"
+reqwest = "0.9"
 log = {version="0.4", features=["std"]}
 termion = "1.5"
 libc = "0.2"

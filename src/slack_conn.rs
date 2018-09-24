@@ -490,6 +490,11 @@ impl SlackConn {
                                 Vec::new()
                             }
                         };
+                        for m in messages.iter() {
+                            if let ::slack_api::Message::Tombstone(ref msg) = m {
+                                error!("{:#?}", msg);
+                            }
+                        }
                         (messages, read_at)
                     }
                     ::slack_api::ConversationId::Group(group_id) => {
