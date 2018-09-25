@@ -1,25 +1,12 @@
 use chan_message::ChanMessage;
 use conn::{Conn, DateTime, Event, IString, Message};
 use cursor_vec::CursorVec;
-use pancurses::{
-    COLOR_BLACK, COLOR_BLUE, COLOR_CYAN, COLOR_GREEN, COLOR_MAGENTA, COLOR_RED, COLOR_WHITE,
-    COLOR_YELLOW,
-};
 use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 const CHAN_WIDTH: i32 = 20;
-
-const COLOR_TABLE: [i16; 8] = [
-    COLOR_BLACK,
-    COLOR_BLUE,
-    COLOR_GREEN,
-    COLOR_CYAN,
-    COLOR_RED,
-    COLOR_MAGENTA,
-    COLOR_YELLOW,
-    COLOR_WHITE,
-];
+const RED: ::pancurses::ColorPair = ::pancurses::ColorPair(::pancurses::COLOR_RED as u8);
+const WHITE: ::pancurses::ColorPair = ::pancurses::ColorPair(::pancurses::COLOR_WHITE as u8);
 
 pub struct Tui {
     servers: CursorVec<Server>,
@@ -367,9 +354,9 @@ impl Tui {
             // Unread marker
             if (draw_unread_marker) && (m == num_unreads) {
                 window.mv(row, CHAN_WIDTH + 1);
-                window.attrset(::pancurses::COLOR_PAIR(4));
+                window.attrset(RED);
                 window.hline('-', remaining_width as i32);
-                window.attrset(::pancurses::COLOR_PAIR(7));
+                window.attrset(WHITE);
 
                 row -= 1;
                 draw_unread_marker = false;
@@ -399,19 +386,19 @@ impl Tui {
                 window.attrset(::pancurses::COLOR_PAIR(8));
                 window.mvaddstr(row + 1, CHAN_WIDTH + 1, &message.timestamp_str());
                 window.attrset(::pancurses::COLOR_PAIR(
-                    ::chan_message::djb2(&message.sender) as u32 % 91 + 9,
+                    (::chan_message::djb2(&message.sender) % 216 + 17) as u32,
                 ));
                 window.mvaddstr(row + 1, CHAN_WIDTH + 1 + 8, &message.sender);
-                window.attrset(::pancurses::COLOR_PAIR(7));
+                window.attrset(WHITE);
             }
         }
 
         // If we didn't draw the unread marker, put it at the top of the screen
         if draw_unread_marker {
             window.mv(max(2, row), CHAN_WIDTH + 1); // TODO: unclear on this 2
-            window.attrset(::pancurses::COLOR_PAIR(4));
+            window.attrset(RED);
             window.hline('-', remaining_width as i32);
-            window.attrset(::pancurses::COLOR_PAIR(7));
+            window.attrset(WHITE);
         }
 
         // Draw all the server names across the top
@@ -424,13 +411,13 @@ impl Tui {
             .skip(self.server_scroll_offset)
         {
             if s == self.servers.tell() {
-                window.attrset(::pancurses::Attribute::Bold);
+                window.attrset(::pancurses::A_BOLD);
                 window.addstr(&server.name);
-                window.attrset(::pancurses::Attribute::Normal);
+                window.attrset(::pancurses::A_NORMAL);
             } else if server.has_unreads() {
-                window.attrset(::pancurses::COLOR_PAIR(4));
+                window.attrset(RED);
                 window.addstr(&server.name);
-                window.attrset(::pancurses::COLOR_PAIR(7));
+                window.attrset(WHITE);
             } else {
                 window.addstr(&server.name);
             }
@@ -471,10 +458,10 @@ impl Tui {
                     add_shortened_name(&window, &channel.name);
                     window.attroff(::pancurses::A_BOLD);
                 } else if channel.num_unreads() > 0 {
-                    window.attrset(::pancurses::COLOR_PAIR(4));
+                    window.attrset(RED);
                     window.mv((c - server.channel_scroll_offset) as i32, 0);
                     add_shortened_name(&window, &channel.name);
-                    window.attrset(::pancurses::COLOR_PAIR(7));
+                    window.attrset(WHITE);
                 } else {
                     window.mv((c - server.channel_scroll_offset) as i32, 0);
                     add_shortened_name(&window, &channel.name);
@@ -578,7 +565,6 @@ impl Tui {
                 }
             }
             Character(c) => {
-                error!("{:x}", c as u64);
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
                 let current_pos = self.cursor_pos as usize;
@@ -728,31 +714,14 @@ impl Tui {
         ::pancurses::noecho();
         window.nodelay(true);
 
-        if ::pancurses::has_colors() {
-            ::pancurses::start_color();
-        }
+        ::pancurses::start_color();
+        ::pancurses::use_default_colors();
 
-        ::pancurses::init_color(COLOR_BLACK, 0, 0, 0);
+        // Make black actually black
+        ::pancurses::init_color(::pancurses::COLOR_BLACK, 0, 0, 0);
 
-        for (i, color) in COLOR_TABLE.into_iter().enumerate() {
-            ::pancurses::init_pair(i as i16, *color, COLOR_BLACK);
-        }
-
-        ::pancurses::init_color(8, 333, 333, 333);
-        ::pancurses::init_pair(8, 8, COLOR_BLACK);
-
-        // Init colors for all the usernames
-        let mut i = 9;
-        for r in 3..=8 {
-            for g in 3..=8 {
-                for b in 3..=8 {
-                    if r < 4 || g < 4 || b < 4 {
-                        ::pancurses::init_color(i, r * 125, g * 125, b * 125);
-                        ::pancurses::init_pair(i as i16, i, COLOR_BLACK);
-                        i += 1;
-                    }
-                }
-            }
+        for i in 0..::pancurses::COLORS() {
+            ::pancurses::init_pair(i as i16, i as i16, ::pancurses::COLOR_BLACK);
         }
 
         self.draw(&mut window);
