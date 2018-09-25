@@ -67,18 +67,7 @@ impl Channel {
 
 impl Tui {
     pub fn new() -> Self {
-        use std::thread;
         let (sender, reciever) = sync_channel(100);
-
-        // Must be called before any threads are launched
-        let winch_send = sender.clone();
-        let signals = ::signal_hook::iterator::Signals::new(&[::libc::SIGWINCH])
-            .expect("Couldn't register resize signal handler");
-        thread::spawn(move || {
-            for _ in &signals {
-                let _ = winch_send.send(Event::Resize);
-            }
-        });
 
         Self {
             servers: CursorVec::new(Server {
@@ -332,7 +321,7 @@ impl Tui {
         }
     }
 
-    fn pancurses_draw(&mut self, window: &mut ::pancurses::Window) {
+    fn draw(&mut self, window: &mut ::pancurses::Window) {
         window.erase();
         let (terminal_height, terminal_width) = window.get_max_yx();
 
@@ -344,7 +333,6 @@ impl Tui {
 
         // Draw the message input area
         // We need this message area height to render the channel messages
-        // More NLL hacking
         let total_chars = self.current_channel().message_buffer.chars().count();
         let rows = (total_chars / remaining_width) + 1;
         for row in (0..rows).rev() {
@@ -367,7 +355,7 @@ impl Tui {
 
         let offset = self.current_channel().message_scroll_offset;
 
-        let mut row = message_area_height - 1;
+        let mut row = message_area_height - 2;
         let mut skipped = 0;
         'outer: for (m, message) in self
             .current_channel_mut()
@@ -385,21 +373,36 @@ impl Tui {
 
                 row -= 1;
                 draw_unread_marker = false;
-                if row == 1 {
+                if row == 0 {
                     break 'outer;
                 }
             }
 
             for line in message.formatted_to(remaining_width).lines().rev() {
+                // Skip if we haven't gotten to the scroll offset yet
                 if skipped < offset {
                     skipped += 1;
                     continue;
                 }
+
                 window.mvaddstr(row, CHAN_WIDTH + 1, line);
+
                 row -= 1;
-                if row == 1 {
+                if row == 0 {
                     break 'outer;
                 }
+            }
+
+            if row != message_area_height - 2 {
+                // If we're not on the bottom row
+                // If this is the first line, draw the colored
+                window.attrset(::pancurses::COLOR_PAIR(8));
+                window.mvaddstr(row + 1, CHAN_WIDTH + 1, &message.timestamp_str());
+                window.attrset(::pancurses::COLOR_PAIR(
+                    ::chan_message::djb2(&message.sender) as u32 % 91 + 9,
+                ));
+                window.mvaddstr(row + 1, CHAN_WIDTH + 1 + 8, &message.sender);
+                window.attrset(::pancurses::COLOR_PAIR(7));
             }
         }
 
@@ -421,9 +424,9 @@ impl Tui {
             .skip(self.server_scroll_offset)
         {
             if s == self.servers.tell() {
-                window.attron(::pancurses::Attribute::Bold);
+                window.attrset(::pancurses::Attribute::Bold);
                 window.addstr(&server.name);
-                window.attroff(::pancurses::Attribute::Bold);
+                window.attrset(::pancurses::Attribute::Normal);
             } else if server.has_unreads() {
                 window.attrset(::pancurses::COLOR_PAIR(4));
                 window.addstr(&server.name);
@@ -463,10 +466,10 @@ impl Tui {
                 .take(terminal_height as usize)
             {
                 if c == server.current_channel {
-                    window.attron(::pancurses::Attribute::Bold);
+                    window.attron(::pancurses::A_BOLD);
                     window.mv((c - server.channel_scroll_offset) as i32, 0);
                     add_shortened_name(&window, &channel.name);
-                    window.attroff(::pancurses::Attribute::Bold);
+                    window.attroff(::pancurses::A_BOLD);
                 } else if channel.num_unreads() > 0 {
                     window.attrset(::pancurses::COLOR_PAIR(4));
                     window.mv((c - server.channel_scroll_offset) as i32, 0);
@@ -501,7 +504,9 @@ impl Tui {
                     self.cursor_pos -= 1;
                 }
             }
-            Character('\u{3}') => self.shutdown = true,
+            Character('\u{3}') => {
+                self.shutdown = true;
+            }
             Character('\u{1}') => {
                 self.previous_server();
             }
@@ -514,9 +519,17 @@ impl Tui {
             Character('\u{13}') => {
                 self.next_channel();
             }
+            Character('\u{11}') => {
+                self.current_channel_mut().message_scroll_offset += 1;
+            }
+            Character('\u{5}') => {
+                let chan = self.current_channel_mut();
+                let previous_offset = chan.message_scroll_offset;
+                chan.message_scroll_offset = previous_offset.saturating_sub(1);
+            }
             /*
             Key(Ctrl('q')) | Mouse(MouseEvent::Press(MouseButton::WheelUp, ..)) => {
-                self.current_channel_mut().message_scroll_offset += 1;
+                self.current_channel_mut().message_scroll_offset += 2;
             }
             Key(Ctrl('e')) | Mouse(MouseEvent::Press(MouseButton::WheelDown, ..)) => {
                 let chan = self.current_channel_mut();
@@ -565,46 +578,21 @@ impl Tui {
                 }
             }
             Character(c) => {
+                error!("{:x}", c as u64);
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
                 let current_pos = self.cursor_pos as usize;
                 self.current_channel_mut()
                     .message_buffer
                     .insert(current_pos, c);
-                /*
-                self.current_channel_mut()
-                    .message_buffer
-                    .push_str(&format!("{:x}", c));
-                */
                 self.cursor_pos += 1;
             }
-            /*
-            Unsupported(ref bytes) => match bytes.as_slice() {
-                [27, 79, 65] => {
-                    let _ = self.sender.send(Event::Input(Mouse(MouseEvent::Press(
-                        MouseButton::WheelUp,
-                        1,
-                        1,
-                    ))));
-                }
-                [27, 79, 66] => {
-                    let _ = self.sender.send(Event::Input(Mouse(MouseEvent::Press(
-                        MouseButton::WheelDown,
-                        1,
-                        1,
-                    ))));
-                }
-
-                _ => {}
-            },
-            */
             _ => {}
         }
     }
 
     fn handle_event(&mut self, event: Event) {
         match event {
-            Event::Resize => {} // Will be redrawn because we got an event
             Event::Message(message) => {
                 self.add_message(message);
             }
@@ -750,16 +738,39 @@ impl Tui {
             ::pancurses::init_pair(i as i16, *color, COLOR_BLACK);
         }
 
+        ::pancurses::init_color(8, 333, 333, 333);
+        ::pancurses::init_pair(8, 8, COLOR_BLACK);
+
+        // Init colors for all the usernames
+        let mut i = 9;
+        for r in 3..=8 {
+            for g in 3..=8 {
+                for b in 3..=8 {
+                    if r < 4 || g < 4 || b < 4 {
+                        ::pancurses::init_color(i, r * 125, g * 125, b * 125);
+                        ::pancurses::init_pair(i as i16, i, COLOR_BLACK);
+                        i += 1;
+                    }
+                }
+            }
+        }
+
+        self.draw(&mut window);
         loop {
             let start = Instant::now();
+            let mut changed = false;
             //TODO: There is an error condition here, the channel can hang up
             while let Ok(event) = self.events.try_recv() {
                 self.handle_event(event);
+                changed = true;
             }
             while let Some(event) = window.getch() {
                 self.handle_input(event);
+                changed = true;
             }
-            self.pancurses_draw(&mut window);
+            if changed {
+                self.draw(&mut window);
+            }
             let duration = Instant::now() - start;
             if duration < Duration::from_millis(16) {
                 ::std::thread::sleep(Duration::from_millis(16) - duration);

@@ -46,7 +46,6 @@ pub enum Event {
         timestamp: DateTime,
         reaction: IString,
     },
-    Resize,
 }
 
 #[derive(Debug, Fail)]

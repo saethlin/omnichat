@@ -11,8 +11,6 @@ extern crate regex;
 #[macro_use]
 extern crate serde_derive;
 extern crate chrono;
-extern crate libc;
-extern crate signal_hook;
 #[macro_use]
 extern crate log;
 extern crate dirs;
@@ -22,7 +20,6 @@ extern crate reqwest;
 extern crate serde_json;
 extern crate slack_api;
 extern crate spmc;
-extern crate termion;
 extern crate textwrap;
 extern crate toml;
 extern crate websocket;

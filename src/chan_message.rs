@@ -1,23 +1,9 @@
 use chrono::Timelike;
 use conn::{DateTime, IString};
 
-lazy_static! {
-    static ref COLORS: Vec<::termion::color::AnsiValue> = {
-        let mut c = Vec::with_capacity(45);
-        for r in 1..6 {
-            for g in 1..6 {
-                for b in 1..6 {
-                    if r < 2 || g < 2 || b < 2 {
-                        c.push(::termion::color::AnsiValue::rgb(r, g, b));
-                    }
-                }
-            }
-        }
-        c
-    };
-}
+lazy_static!{}
 
-fn djb2(input: &str) -> u64 {
+pub fn djb2(input: &str) -> u64 {
     let mut hash: u64 = 5381;
 
     for c in input.bytes() {
@@ -30,9 +16,10 @@ pub struct ChanMessage {
     formatted_width: Option<usize>,
     raw: String,
     formatted: String,
-    sender: IString,
+    pub sender: IString,
     timestamp: DateTime,
     reactions: Vec<(IString, usize)>,
+    timestamp_formatted: String,
 }
 
 impl From<::conn::Message> for ChanMessage {
@@ -44,6 +31,7 @@ impl From<::conn::Message> for ChanMessage {
             sender: message.sender,
             timestamp: message.timestamp,
             reactions: message.reactions,
+            timestamp_formatted: String::new(),
         }
     }
 }
@@ -52,6 +40,10 @@ impl ChanMessage {
     // Prevent mutating the timestamp but make it visible
     pub fn timestamp(&self) -> &DateTime {
         &self.timestamp
+    }
+
+    pub fn timestamp_str(&self) -> &str {
+        &self.timestamp_formatted
     }
 
     pub fn add_reaction(&mut self, reaction: &str) {
@@ -81,7 +73,6 @@ impl ChanMessage {
 
     pub fn formatted_to(&mut self, width: usize) -> &str {
         use std::fmt::Write;
-        use termion::color::{AnsiValue, Fg, Reset};
         use textwrap::{NoHyphenation, Wrapper};
 
         if Some(width) == self.formatted_width {
@@ -91,6 +82,12 @@ impl ChanMessage {
         use chrono::TimeZone;
         let timezone = ::chrono::offset::Local::now().timezone();
         let localtime = timezone.from_utc_datetime(&self.timestamp.naive_utc());
+
+        self.timestamp_formatted = format!(
+            "({:02}:{:02})",
+            localtime.time().hour(),
+            localtime.time().minute()
+        );
 
         self.formatted_width = Some(width);
         self.formatted.clear();
@@ -118,19 +115,12 @@ impl ChanMessage {
                     if l == 0 {
                         let _ = write!(
                             self.formatted,
-                            "{}({:02}:{:02}) ",
-                            Fg(AnsiValue::grayscale(8)),
+                            "({:02}:{:02}) ",
                             localtime.time().hour(),
                             localtime.time().minute(),
                         );
 
-                        let _ = write!(
-                            self.formatted,
-                            "{}{}{}: ",
-                            Fg(COLORS[djb2(&self.sender) as usize % COLORS.len()]),
-                            self.sender,
-                            Fg(Reset),
-                        );
+                        let _ = write!(self.formatted, "{}: ", self.sender,);
 
                         self.formatted
                             .extend(wrapped_line.chars().skip_while(|c| c.is_whitespace()));
@@ -148,18 +138,11 @@ impl ChanMessage {
         }
 
         if !self.reactions.is_empty() {
-            let _ = write!(
-                self.formatted,
-                "{}{}",
-                indent_str,
-                Fg(AnsiValue::grayscale(12))
-            );
+            self.formatted.push_str(indent_str);
 
             for (r, count) in &self.reactions {
                 let _ = write!(self.formatted, "{}({}) ", r, count);
             }
-
-            let _ = write!(self.formatted, "{}", Fg(Reset));
         }
 
         // Clean trailing whitespace from messages
