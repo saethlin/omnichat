@@ -1,11 +1,25 @@
 use chan_message::ChanMessage;
 use conn::{Conn, DateTime, Event, IString, Message};
 use cursor_vec::CursorVec;
-use pancurses::{endwin, initscr};
+use pancurses::{
+    COLOR_BLACK, COLOR_BLUE, COLOR_CYAN, COLOR_GREEN, COLOR_MAGENTA, COLOR_RED, COLOR_WHITE,
+    COLOR_YELLOW,
+};
 use std::cmp::{max, min};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
-const CHAN_WIDTH: u16 = 20;
+const CHAN_WIDTH: i32 = 20;
+
+const COLOR_TABLE: [i16; 8] = [
+    COLOR_BLACK,
+    COLOR_BLUE,
+    COLOR_GREEN,
+    COLOR_CYAN,
+    COLOR_RED,
+    COLOR_MAGENTA,
+    COLOR_YELLOW,
+    COLOR_WHITE,
+];
 
 pub struct Tui {
     servers: CursorVec<Server>,
@@ -17,9 +31,6 @@ pub struct Tui {
     autocompletions: Vec<String>,
     autocomplete_index: usize,
     cursor_pos: usize,
-    window: ::pancurses::Window,
-    previous_terminal_height: u16,
-    truncate_buffer_to: usize,
 }
 
 struct Server {
@@ -93,9 +104,6 @@ impl Tui {
             autocompletions: Vec::new(),
             autocomplete_index: 0,
             cursor_pos: 0,
-            window: initscr(),
-            truncate_buffer_to: 0,
-            previous_terminal_height: 0,
         }
     }
 
@@ -324,34 +332,15 @@ impl Tui {
         }
     }
 
-    fn draw(&mut self, render_buffer: &mut String) {
-        use std::fmt::Write;
-        use termion::color::Fg;
-        use termion::cursor::Goto;
-        use termion::{color, style};
+    fn pancurses_draw(&mut self, window: &mut ::pancurses::Window) {
+        window.erase();
+        let (terminal_height, terminal_width) = window.get_max_yx();
 
-        let (terminal_width, terminal_height) =
-            ::termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+        let remaining_width = (terminal_width - CHAN_WIDTH - 1) as usize;
 
-        if terminal_height != self.previous_terminal_height {
-            render_buffer.clear();
-            let _ = write!(render_buffer, "{}", ::termion::clear::All);
-
-            for i in 1..terminal_height + 1 {
-                let _ = write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i));
-            }
-            self.truncate_buffer_to = render_buffer.len();
-            self.previous_terminal_height = terminal_height;
-        } else {
-            render_buffer.truncate(self.truncate_buffer_to);
-        }
-
-        let remaining_width = (terminal_width - CHAN_WIDTH) as usize;
-        /*
-        for message in &mut self.current_channel_mut().messages {
-            message.format(remaining_width);
-        }
-        */
+        // Draw the vertical line
+        window.mv(0, CHAN_WIDTH);
+        window.vline('|', terminal_height);
 
         // Draw the message input area
         // We need this message area height to render the channel messages
@@ -359,20 +348,18 @@ impl Tui {
         let total_chars = self.current_channel().message_buffer.chars().count();
         let rows = (total_chars / remaining_width) + 1;
         for row in (0..rows).rev() {
-            let _ = write!(
-                render_buffer,
-                "{}",
-                Goto(CHAN_WIDTH + 1, terminal_height - (rows - row - 1) as u16)
-            );
-            render_buffer.extend(
+            window.mv(terminal_height - (rows - row) as i32, CHAN_WIDTH + 1);
+            window.addstr(
                 self.current_channel()
                     .message_buffer
                     .chars()
                     .skip(remaining_width * row)
-                    .take(remaining_width),
+                    .take(remaining_width)
+                    .collect::<String>(), // TODO: senesless allocation
             );
         }
-        let message_area_height = terminal_height - rows as u16 + 1;
+
+        let message_area_height = terminal_height - rows as i32 + 1;
 
         // Draw all the messages by looping over them in reverse
         let num_unreads = self.current_channel().num_unreads();
@@ -391,14 +378,11 @@ impl Tui {
         {
             // Unread marker
             if (draw_unread_marker) && (m == num_unreads) {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}",
-                    Goto(CHAN_WIDTH + 1, row),
-                    Fg(color::Red)
-                );
-                render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
-                let _ = write!(render_buffer, "{}", Fg(color::Reset));
+                window.mv(row, CHAN_WIDTH + 1);
+                window.attrset(::pancurses::COLOR_PAIR(4));
+                window.hline('-', remaining_width as i32);
+                window.attrset(::pancurses::COLOR_PAIR(7));
+
                 row -= 1;
                 draw_unread_marker = false;
                 if row == 1 {
@@ -411,8 +395,7 @@ impl Tui {
                     skipped += 1;
                     continue;
                 }
-                let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, row));
-                render_buffer.push_str(line);
+                window.mvaddstr(row, CHAN_WIDTH + 1, line);
                 row -= 1;
                 if row == 1 {
                     break 'outer;
@@ -422,14 +405,14 @@ impl Tui {
 
         // If we didn't draw the unread marker, put it at the top of the screen
         if draw_unread_marker {
-            let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, max(2, row)));
-            let _ = write!(render_buffer, "{}", Fg(color::Red));
-            render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
-            let _ = write!(render_buffer, "{}", Fg(color::Reset));
+            window.mv(max(2, row), CHAN_WIDTH + 1); // TODO: unclear on this 2
+            window.attrset(::pancurses::COLOR_PAIR(4));
+            window.hline('-', remaining_width as i32);
+            window.attrset(::pancurses::COLOR_PAIR(7));
         }
 
         // Draw all the server names across the top
-        let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, 1)); // Move to the top-right corner
+        window.mv(0, CHAN_WIDTH + 1); // Move to top-left corner
         let num_servers = self.servers.len();
         for (s, server) in self
             .servers
@@ -438,35 +421,17 @@ impl Tui {
             .skip(self.server_scroll_offset)
         {
             if s == self.servers.tell() {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}{}",
-                    style::Bold,
-                    server.name,
-                    style::Reset
-                );
+                window.attron(::pancurses::Attribute::Bold);
+                window.addstr(&server.name);
+                window.attroff(::pancurses::Attribute::Bold);
             } else if server.has_unreads() {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}{}",
-                    Fg(color::Red),
-                    server.name,
-                    Fg(color::Reset),
-                );
+                window.attrset(::pancurses::COLOR_PAIR(4));
+                window.addstr(&server.name);
+                window.attrset(::pancurses::COLOR_PAIR(7));
             } else {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}{}",
-                    Fg(color::AnsiValue::rgb(3, 3, 3)),
-                    server.name,
-                    Fg(color::Reset),
-                );
+                window.addstr(&server.name);
             }
-            let _ = write!(
-                render_buffer,
-                "{}",
-                if s == num_servers - 1 { "" } else { " • " }
-            );
+            window.addstr(if s == num_servers - 1 { "" } else { " • " });
         }
 
         {
@@ -481,11 +446,12 @@ impl Tui {
                 }
             }
 
-            fn write_shortened_name(f: &mut String, name: &str, max_len: usize) {
-                if name.chars().count() < max_len {
-                    let _ = write!(f, "{}", name);
+            fn add_shortened_name(win: &::pancurses::Window, name: &str) {
+                if name.chars().count() < CHAN_WIDTH as usize {
+                    win.addstr(name);
                 } else {
-                    f.extend(name.chars().take(max_len - 4).chain("...".chars()));
+                    win.addstr(&name[..CHAN_WIDTH as usize - 4]);
+                    win.addstr("...");
                 }
             }
 
@@ -497,54 +463,24 @@ impl Tui {
                 .take(terminal_height as usize)
             {
                 if c == server.current_channel {
-                    let _ = write!(
-                        render_buffer,
-                        "{}{}",
-                        Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
-                        style::Bold
-                    );
-                    write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    let _ = write!(render_buffer, "{}", style::Reset);
+                    window.attron(::pancurses::Attribute::Bold);
+                    window.mv((c - server.channel_scroll_offset) as i32, 0);
+                    add_shortened_name(&window, &channel.name);
+                    window.attroff(::pancurses::Attribute::Bold);
                 } else if channel.num_unreads() > 0 {
-                    let _ = write!(
-                        render_buffer,
-                        "{}{}",
-                        Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
-                        Fg(color::Red)
-                    );
-                    write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    let _ = write!(render_buffer, "{}", style::Reset);
+                    window.attrset(::pancurses::COLOR_PAIR(4));
+                    window.mv((c - server.channel_scroll_offset) as i32, 0);
+                    add_shortened_name(&window, &channel.name);
+                    window.attrset(::pancurses::COLOR_PAIR(7));
                 } else {
-                    let gray = color::AnsiValue::rgb(3, 3, 3);
-                    let _ = write!(
-                        render_buffer,
-                        "{}{}",
-                        Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
-                        Fg(gray)
-                    );
-                    write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    let _ = write!(render_buffer, "{}", style::Reset);
+                    window.mv((c - server.channel_scroll_offset) as i32, 0);
+                    add_shortened_name(&window, &channel.name);
                 }
             }
         }
 
-        let _ = write!(
-            render_buffer,
-            "{}",
-            Goto(
-                CHAN_WIDTH + 1 + (self.cursor_pos % remaining_width) as u16,
-                terminal_height - (total_chars / remaining_width) as u16
-                    + (self.cursor_pos / remaining_width) as u16
-            )
-        );
-        {
-            use std::io::Write;
-            let out = ::std::io::stdout();
-            let mut lock = out.lock();
-            lock.write_all(render_buffer.as_bytes())
-                .expect("Unable to write to stdout");
-            let _ = lock.flush();
-        }
+        window.mv(terminal_height - 1, CHAN_WIDTH + self.cursor_pos as i32 + 1);
+        window.refresh();
     }
 
     fn handle_input(&mut self, event: ::pancurses::Input) {
@@ -557,40 +493,28 @@ impl Tui {
                     self.cursor_pos = 0;
                 }
             }
-            KeyBackspace => {
+            Character('\u{7f}') => {
+                // Backspace
                 if self.cursor_pos > 0 {
                     let remove_pos = self.cursor_pos as usize - 1;
                     self.current_channel_mut().message_buffer.remove(remove_pos);
                     self.cursor_pos -= 1;
                 }
             }
-            KeyBackspace => {
-                let buffer_chars = self.current_channel().message_buffer.chars().count();
-                if buffer_chars > 0 && self.cursor_pos < buffer_chars {
-                    let remove_pos = self.cursor_pos;
-                    self.current_channel_mut().message_buffer.remove(remove_pos);
-                }
-            }
-            //Key(Ctrl('c')) => self.shutdown = true,
-            KeyUp => {
-                self.previous_channel();
-            }
-            KeyDown => {
-                self.next_channel();
-            }
-            KeyRight => {
-                self.next_server();
-            }
-            KeyLeft => {
+            Character('\u{3}') => self.shutdown = true,
+            Character('\u{1}') => {
                 self.previous_server();
             }
+            Character('\u{4}') => {
+                self.next_server();
+            }
+            Character('\u{17}') => {
+                self.previous_channel();
+            }
+            Character('\u{13}') => {
+                self.next_channel();
+            }
             /*
-            Key(Ctrl('s')) => {
-                self.next_channel_unread();
-            }
-            Key(Ctrl('w')) => {
-                self.previous_channel_unread();
-            }
             Key(Ctrl('q')) | Mouse(MouseEvent::Press(MouseButton::WheelUp, ..)) => {
                 self.current_channel_mut().message_scroll_offset += 1;
             }
@@ -647,6 +571,11 @@ impl Tui {
                 self.current_channel_mut()
                     .message_buffer
                     .insert(current_pos, c);
+                /*
+                self.current_channel_mut()
+                    .message_buffer
+                    .push_str(&format!("{:x}", c));
+                */
                 self.cursor_pos += 1;
             }
             /*
@@ -804,24 +733,33 @@ impl Tui {
         }
     }
 
-    fn pancurses_draw(&mut self) {}
-
-    // This is basically a game loop, we could use a temporary storage allocator
-    // If that were possible
     pub fn run(mut self) {
         use std::time::{Duration, Instant};
+        let mut window = ::pancurses::initscr();
+        ::pancurses::raw();
+        ::pancurses::noecho();
+        window.nodelay(true);
 
-        self.pancurses_draw();
+        if ::pancurses::has_colors() {
+            ::pancurses::start_color();
+        }
+
+        ::pancurses::init_color(COLOR_BLACK, 0, 0, 0);
+
+        for (i, color) in COLOR_TABLE.into_iter().enumerate() {
+            ::pancurses::init_pair(i as i16, *color, COLOR_BLACK);
+        }
+
         loop {
             let start = Instant::now();
             //TODO: There is an error condition here, the channel can hang up
             while let Ok(event) = self.events.try_recv() {
                 self.handle_event(event);
             }
-            while let Some(event) = self.window.getch() {
+            while let Some(event) = window.getch() {
                 self.handle_input(event);
             }
-            self.pancurses_draw();
+            self.pancurses_draw(&mut window);
             let duration = Instant::now() - start;
             if duration < Duration::from_millis(16) {
                 ::std::thread::sleep(Duration::from_millis(16) - duration);
@@ -831,6 +769,12 @@ impl Tui {
                 return;
             }
         }
+    }
+}
+
+impl Drop for Tui {
+    fn drop(&mut self) {
+        ::pancurses::endwin();
     }
 }
 
