@@ -386,7 +386,7 @@ impl Tui {
                 window.attrset(::pancurses::COLOR_PAIR(8));
                 window.mvaddstr(row + 1, CHAN_WIDTH + 1, &message.timestamp_str());
                 window.attrset(::pancurses::COLOR_PAIR(
-                    (::chan_message::djb2(&message.sender) % 216 + 17) as u32,
+                    (::chan_message::djb2(&message.sender) % 211 + 20) as u32,
                 ));
                 window.mvaddstr(row + 1, CHAN_WIDTH + 1 + 8, &message.sender);
                 window.attrset(WHITE);

@@ -1,8 +1,6 @@
 use chrono::Timelike;
 use conn::{DateTime, IString};
 
-lazy_static!{}
-
 pub fn djb2(input: &str) -> u64 {
     let mut hash: u64 = 5381;
 
