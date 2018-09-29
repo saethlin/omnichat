@@ -2,7 +2,6 @@ extern crate backoff;
 extern crate discord;
 #[macro_use]
 extern crate failure;
-extern crate irc;
 #[macro_use]
 extern crate lazy_static;
 extern crate openssl_probe;
@@ -35,7 +34,6 @@ mod chan_message;
 mod cursor_vec;
 mod discord_conn;
 mod logger;
-mod pushbullet_conn;
 mod slack_conn;
 mod tui;
 
@@ -49,23 +47,16 @@ struct DiscordConfig {
     name: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct PushbulletConfig {
-    token: String,
-}
-
 #[derive(Debug, Deserialize)]
 struct Config {
     discord_token: Option<String>,
     slack: Option<Vec<SlackConfig>>,
     discord: Option<Vec<DiscordConfig>>,
-    pushbullet: Option<PushbulletConfig>,
 }
 
 fn main() {
     use conn::Event;
     use discord_conn::DiscordConn;
-    use pushbullet_conn::PushbulletConn;
     use slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -182,18 +173,5 @@ fn main() {
         });
     }
 
-    // Pushbullet initialization
-    if let Some(pushbullet_config) = config.pushbullet {
-        let pb_sender = tui.sender();
-        let sender = tui.sender();
-        thread::spawn(
-            move || match PushbulletConn::new(pushbullet_config.token, pb_sender) {
-                Ok(connection) => {
-                    let _ = sender.send(Event::Connected(connection));
-                }
-                Err(err) => error!("Unable to connect to Pushbullet: {}", err),
-            },
-        );
-    }
     tui.run();
 }

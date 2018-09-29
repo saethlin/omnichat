@@ -9,6 +9,10 @@ jobs:
       # Set your codecov token if your repository is private.
       TZ: "/usr/share/zoneinfo/America/New_York"
 
+    branches:
+      only:
+        - master
+
     steps:
       - checkout
       - restore_cache:
@@ -16,9 +20,6 @@ jobs:
       - run:
           name: Stable Build
           command: cargo build
-      - run:
-          name: Test
-          command: cargo test
       - save_cache:
           key: project-cache-{{ checksum "Cargo.lock" }}
           paths:

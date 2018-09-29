@@ -5,7 +5,6 @@ authors = ["Ben Kimock <kimockb@gmail.com>"]
 
 [dependencies]
 inlinable_string = "0.1"
-derive_more = "0.11"
 failure = "0.1"
 websocket = "0.20"
 serde = "1.0"
@@ -16,7 +15,6 @@ lazy_static = "1.0"
 spmc = "0.2"
 regex = "1.0"
 backoff = "0.1"
-irc = "0.13"
 futures = "0.1"
 openssl-probe = "0.1"
 chrono = "0.4"
