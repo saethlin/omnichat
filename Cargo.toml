@@ -30,4 +30,5 @@ dirs = "1.0"
 slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types", features=["reqwest", "chrono"]}
 discord = {git = "https://github.com/tinaun/discord-rs", branch="async_internals"}
 openssl = { version = "0.10", features = ["vendored"] }
+tokio-core = "0.1"
 

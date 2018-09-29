@@ -1,9 +1,11 @@
 use bimap::BiMap;
 use conn::{Conn, Event, IString, Message};
 use failure::Error;
+use futures::sync::mpsc;
+use futures::{Future, Sink, Stream};
 use regex::Regex;
 use std::sync::mpsc::SyncSender;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread;
 
 lazy_static! {
@@ -12,13 +14,28 @@ lazy_static! {
     pub static ref CLIENT: ::reqwest::Client = ::reqwest::Client::new();
 }
 
-#[derive(Clone)]
 struct Handler {
     channels: BiMap<::slack_api::ConversationId, IString>,
     users: BiMap<::slack_api::UserId, IString>,
     server_name: IString,
-    my_mention: String,
     my_name: IString,
+    input_sender: ::futures::sync::mpsc::Sender<::websocket::OwnedMessage>,
+    tui_sender: SyncSender<Event>,
+    pending_messages: Vec<PendingMessage>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MessageAck {
+    ok: bool,
+    reply_to: u32,
+    text: String,
+    ts: ::slack_api::Timestamp,
+}
+
+struct PendingMessage {
+    id: u32,
+    channel: IString,
 }
 
 impl Handler {
@@ -139,6 +156,152 @@ impl Handler {
 
         text
     }
+
+    pub fn process_slack_message(&mut self, message: &str) {
+        // TODO: keep track of message indices
+        if let Ok(ack) = ::serde_json::from_str::<MessageAck>(&message) {
+            // Remove the message from pending messages
+            if let Some(index) = self
+                .pending_messages
+                .iter()
+                .position(|m| m.id == ack.reply_to)
+            {
+                let _ = self.tui_sender.send(Event::Message(Message {
+                    channel: self.pending_messages[index].channel.clone(),
+                    contents: ack.text,
+                    is_mention: false,
+                    reactions: Vec::new(),
+                    sender: self.my_name.clone(),
+                    server: self.server_name.clone(),
+                    timestamp: ack.ts.into(),
+                }));
+                self.pending_messages.swap_remove(index);
+                return;
+            }
+        }
+
+        match ::serde_json::from_str::<::slack_api::Event>(&message) {
+            Ok(::slack_api::Event::Message(::slack_api::Message::MessageChanged(
+                ::slack_api::MessageMessageChanged {
+                    channel,
+                    message: Some(message),
+                    previous_message: Some(previous_message),
+                    ..
+                },
+            ))) => {
+                let _ = self.tui_sender.send(Event::MessageEdited {
+                    server: self.server_name.clone(),
+                    channel: self
+                        .channels
+                        .get_right(&channel.into())
+                        .unwrap_or(&IString::from(channel.as_str()))
+                        .clone(),
+                    timestamp: previous_message.ts.into(),
+                    contents: message.text,
+                });
+            }
+            Ok(::slack_api::Event::ReactionAdded(::slack_api::EventReactionAdded {
+                item,
+                reaction,
+                ..
+            })) => {
+                if let ::slack_api::Event::Message(message) = *item {
+                    if let Some(omnimessage) = self.to_omni(message, None) {
+                        let _ = self.tui_sender.send(Event::ReactionAdded {
+                            server: omnimessage.server,
+                            channel: omnimessage.channel,
+                            timestamp: omnimessage.timestamp,
+                            reaction: reaction.into(),
+                        });
+                    }
+                }
+            }
+            Ok(::slack_api::Event::ReactionRemoved(::slack_api::EventReactionRemoved {
+                item,
+                reaction,
+                ..
+            })) => {
+                if let ::slack_api::Event::Message(message) = *item {
+                    if let Some(omnimessage) = self.to_omni(message, None) {
+                        let _ = self.tui_sender.send(Event::ReactionRemoved {
+                            server: omnimessage.server,
+                            channel: omnimessage.channel,
+                            timestamp: omnimessage.timestamp,
+                            reaction: reaction.into(),
+                        });
+                    }
+                }
+            }
+            // Miscellaneous slack messages that should appear as normal messages
+            Ok(::slack_api::Event::Message(slack_message)) => {
+                if let Some(omnimessage) = self.to_omni(slack_message.clone(), None) {
+                    let _ = self.tui_sender.send(Event::Message(omnimessage));
+                } else {
+                    error!("Failed to convert message:\n{:#?}", slack_message);
+                }
+            }
+
+            // Got some other kind of event we haven't handled yet
+            Ok(::slack_api::Event::ChannelMarked(markevent)) => {
+                let _ = self.tui_sender.send(Event::MarkChannelRead {
+                    server: self.server_name.clone(),
+                    channel: self
+                        .channels
+                        .get_right(&markevent.channel.into())
+                        .unwrap_or(&markevent.channel.as_str().into())
+                        .clone(),
+                    read_at: markevent.ts.into(),
+                });
+            }
+
+            Ok(::slack_api::Event::GroupMarked(markevent)) => {
+                let _ = self.tui_sender.send(Event::MarkChannelRead {
+                    server: self.server_name.clone(),
+                    channel: self
+                        .channels
+                        .get_right(&markevent.channel.into())
+                        .unwrap_or(&IString::from(markevent.channel.as_str()))
+                        .clone(),
+                    read_at: markevent.ts.into(),
+                });
+            }
+
+            Ok(::slack_api::Event::FileShared(fileshare)) => {
+                let _ = self.tui_sender.send(Event::Message(Message {
+                    server: self.server_name.clone(),
+                    channel: self
+                        .channels
+                        .get_right(&fileshare.channel_id.into())
+                        .unwrap_or(&fileshare.channel_id.as_str().into())
+                        .clone(),
+                    sender: self
+                        .users
+                        .get_right(&fileshare.user_id)
+                        .unwrap_or(&fileshare.channel_id.as_str().into())
+                        .clone(),
+                    contents: fileshare.file_id.to_string(),
+                    is_mention: false,
+                    timestamp: fileshare
+                        .ts
+                        .map(|t| t.into())
+                        .unwrap_or(::chrono::Utc::now()),
+                    reactions: Vec::new(),
+                }));
+            }
+
+            Ok(_) => {}
+
+            // Don't yet support this thing
+            Err(e) => {
+                let v: ::serde_json::Value = ::serde_json::from_str(&message).unwrap();
+                error!(
+                    "Failed to parse:\n{}\n{}",
+                    ::serde_json::to_string_pretty(&v).unwrap(),
+                    e
+                );
+            }
+        }
+    }
 }
 
 pub struct SlackConn {
@@ -147,7 +310,7 @@ pub struct SlackConn {
     users: BiMap<::slack_api::UserId, IString>,
     channels: BiMap<::slack_api::ConversationId, IString>,
     channel_names: Vec<IString>,
-    handler: Arc<Handler>,
+    handler: Arc<RwLock<Handler>>,
     _sender: SyncSender<Event>,
     emoji: Vec<IString>,
 }
@@ -282,18 +445,22 @@ impl SlackConn {
             .join()
             .map_err(|e| format_err!("{:?}", e))??;
 
-        let mut websocket = ::websocket::ClientBuilder::new(&response.url)?.connect_secure(None)?;
+        let websocket_url = response.url.clone();
+        //let mut websocket = ::websocket::ClientBuilder::new(&response.url)?.connect_secure(None)?;
 
         let slf = response.slf;
         let team_name = response.team.name;
+        let (input_sender, input_channel) = mpsc::channel(0);
 
-        let handler = Arc::new(Handler {
+        let handler = Arc::new(RwLock::new(Handler {
             channels: channels.clone(),
             users: users.clone(),
             server_name: team_name.as_str().into(),
             my_name: slf.name.into(),
-            my_mention: format!("<@{}>", slf.id.clone()),
-        });
+            input_sender,
+            tui_sender: sender.clone(),
+            pending_messages: Vec::new(),
+        }));
 
         // Give the emoji handle as long as possible to complete
         let mut emoji = emoji_handle
@@ -317,146 +484,35 @@ impl SlackConn {
             emoji,
         })));
 
-        let thread_sender = sender.clone();
         let thread_handler = Arc::clone(&handler);
 
         // Spin off a thread that will feed message events back to the TUI
         thread::spawn(move || {
+            use websocket::result::WebSocketError;
             use websocket::OwnedMessage::{Close, Ping, Pong, Text};
-            loop {
-                match websocket.recv_message() {
-                    Ok(Text(message)) => {
-                        // parse the message and add it to events
-                        match ::serde_json::from_str::<::slack_api::Event>(&message) {
-                            Ok(::slack_api::Event::Message(
-                                ::slack_api::Message::MessageChanged(
-                                    ::slack_api::MessageMessageChanged {
-                                        channel,
-                                        message: Some(message),
-                                        previous_message: Some(previous_message),
-                                        ..
-                                    },
-                                ),
-                            )) => {
-                                let _ = thread_sender.send(Event::MessageEdited {
-                                    server: thread_handler.server_name.clone(),
-                                    channel: thread_handler
-                                        .channels
-                                        .get_right(&channel.into())
-                                        .unwrap_or(&IString::from(channel.as_str()))
-                                        .clone(),
-                                    timestamp: previous_message.ts.into(),
-                                    contents: message.text,
-                                });
+            let mut core = ::tokio_core::reactor::Core::new().unwrap();
+            let runner = ::websocket::ClientBuilder::new(&websocket_url)
+                .unwrap()
+                .async_connect_secure(None, &core.handle())
+                .and_then(|(duplex, _)| {
+                    let (sink, stream) = duplex.split();
+                    stream
+                        .filter_map(|message| match message {
+                            Close(_) => {
+                                error!("websocket closed");
+                                None
                             }
-                            Ok(::slack_api::Event::ReactionAdded(
-                                ::slack_api::EventReactionAdded { item, reaction, .. },
-                            )) => {
-                                if let ::slack_api::Event::Message(message) = *item {
-                                    if let Some(omnimessage) = thread_handler.to_omni(message, None)
-                                    {
-                                        let _ = thread_sender.send(Event::ReactionAdded {
-                                            server: omnimessage.server,
-                                            channel: omnimessage.channel,
-                                            timestamp: omnimessage.timestamp,
-                                            reaction: reaction.into(),
-                                        });
-                                    }
-                                }
+                            Ping(m) => Some(Pong(m)),
+                            Text(text) => {
+                                thread_handler.write().unwrap().process_slack_message(&text);
+                                None
                             }
-                            Ok(::slack_api::Event::ReactionRemoved(
-                                ::slack_api::EventReactionRemoved { item, reaction, .. },
-                            )) => {
-                                if let ::slack_api::Event::Message(message) = *item {
-                                    if let Some(omnimessage) = thread_handler.to_omni(message, None)
-                                    {
-                                        let _ = thread_sender.send(Event::ReactionRemoved {
-                                            server: omnimessage.server,
-                                            channel: omnimessage.channel,
-                                            timestamp: omnimessage.timestamp,
-                                            reaction: reaction.into(),
-                                        });
-                                    }
-                                }
-                            }
-                            // Miscellaneous slack messages that should appear as normal messages
-                            Ok(::slack_api::Event::Message(slack_message)) => {
-                                if let Some(omnimessage) =
-                                    thread_handler.to_omni(slack_message, None)
-                                {
-                                    let _ = thread_sender.send(Event::Message(omnimessage));
-                                } else {
-                                    error!("Failed to convert message:\n{}", message);
-                                }
-                            }
+                            _ => None,
+                        }).select(input_channel.map_err(|_| WebSocketError::NoDataAvailable))
+                        .forward(sink)
+                });
 
-                            // Got some other kind of event we haven't handled yet
-                            Ok(::slack_api::Event::ChannelMarked(markevent)) => {
-                                let _ = thread_sender.send(Event::MarkChannelRead {
-                                    server: thread_handler.server_name.clone(),
-                                    channel: thread_handler
-                                        .channels
-                                        .get_right(&markevent.channel.into())
-                                        .unwrap_or(&markevent.channel.as_str().into())
-                                        .clone(),
-                                    read_at: markevent.ts.into(),
-                                });
-                            }
-
-                            Ok(::slack_api::Event::GroupMarked(markevent)) => {
-                                let _ = thread_sender.send(Event::MarkChannelRead {
-                                    server: thread_handler.server_name.clone(),
-                                    channel: thread_handler
-                                        .channels
-                                        .get_right(&markevent.channel.into())
-                                        .unwrap_or(&IString::from(markevent.channel.as_str()))
-                                        .clone(),
-                                    read_at: markevent.ts.into(),
-                                });
-                            }
-
-                            Ok(::slack_api::Event::FileShared(fileshare)) => {
-                                let _ = thread_sender.send(Event::Message(Message {
-                                    server: thread_handler.server_name.clone(),
-                                    channel: thread_handler
-                                        .channels
-                                        .get_right(&fileshare.channel_id.into())
-                                        .unwrap_or(&fileshare.channel_id.as_str().into())
-                                        .clone(),
-                                    sender: thread_handler
-                                        .users
-                                        .get_right(&fileshare.user_id)
-                                        .unwrap_or(&fileshare.channel_id.as_str().into())
-                                        .clone(),
-                                    contents: fileshare.file_id.to_string(),
-                                    is_mention: false,
-                                    timestamp: fileshare
-                                        .ts
-                                        .map(|t| t.into())
-                                        .unwrap_or(::chrono::Utc::now()),
-                                    reactions: Vec::new(),
-                                }));
-                            }
-
-                            Ok(_) => {}
-
-                            // Don't yet support this thing
-                            Err(e) => {
-                                error!("Failed to parse:\n{}\n{}", message, e);
-                            }
-                        }
-                    }
-                    Ok(Ping(data)) => {
-                        websocket.send_message(&Pong(data)).unwrap_or_else(|_| {
-                            error!("Failed to Pong");
-                        });
-                    }
-                    Ok(Close(_)) => {
-                        error!("Slack websocket closed");
-                    }
-                    _ => {}
-                }
-            }
+            core.run(runner).unwrap();
         });
 
         // Launch threads to populate the message history
@@ -536,8 +592,9 @@ impl SlackConn {
                     }
                 };
 
+                let handler_handle = handler.read().unwrap();
                 for message in messages.into_iter().rev() {
-                    if let Some(message) = handler.to_omni(message, Some(conversation_id)) {
+                    if let Some(message) = handler_handle.to_omni(message, Some(conversation_id)) {
                         let _ = sender.send(Event::Message(message));
                     }
                 }
@@ -563,9 +620,9 @@ impl Conn for SlackConn {
     }
 
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
-        let token = self.token.clone();
-        let contents = self.handler.to_slack(contents.to_string());
-        let channel = match self.handler.channels.get_left(channel.into()) {
+        let mut handler_handle = self.handler.write().unwrap();
+        let contents = handler_handle.to_slack(contents.to_string());
+        let channel_id = match handler_handle.channels.get_left(channel.into()) {
             Some(id) => id.clone(),
             None => {
                 error!("Unknown channel: {}", channel);
@@ -573,18 +630,30 @@ impl Conn for SlackConn {
             }
         };
 
-        ::std::thread::spawn(move || {
-            use slack_api::chat::post_message;
-            let mut request = ::slack_api::chat::PostMessageRequest::new(channel, &contents);
-            request.as_user = Some(true);
-            // This is a hack because the reqwest client randomly disconnects; re-sending the
-            // request makes it reconnect
-            if post_message(&*CLIENT, &token, &request).is_err() {
-                if let Err(e) = post_message(&*CLIENT, &token, &request) {
-                    error!("{}", e);
-                }
-            }
+        let mut id = 0;
+        while handler_handle.pending_messages.iter().any(|m| m.id == id) {
+            id += 1;
+        }
+        handler_handle.pending_messages.push(PendingMessage {
+            channel: IString::from(channel),
+            id,
         });
+
+        // TODO: need some help from slack-rs-api here with a serialization struct
+        let message = json!({
+            "id": id,
+            "type": "message",
+            "channel": channel_id,
+            "text": contents,
+        });
+
+        let the_json = ::serde_json::to_string(&message).unwrap();
+        handler_handle
+            .input_sender
+            .clone()
+            .send(::websocket::OwnedMessage::Text(the_json))
+            .wait()
+            .unwrap();
     }
 
     fn mark_read(&self, channel: &str) {
@@ -650,15 +719,17 @@ impl Conn for SlackConn {
                 .filter(|name| name.starts_with(&word[1..]))
                 .map(|s| format!(":{}:", s))
                 .collect(),
-            Some('+') => if word.chars().count() > 2 {
-                self.emoji
-                    .iter()
-                    .filter(|name| name.starts_with(&word[2..]))
-                    .map(|s| format!("+:{}:", s))
-                    .collect()
-            } else {
-                Vec::new()
-            },
+            Some('+') => {
+                if word.chars().count() > 2 {
+                    self.emoji
+                        .iter()
+                        .filter(|name| name.starts_with(&word[2..]))
+                        .map(|s| format!("+:{}:", s))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            }
             _ => Vec::new(),
         }
     }
@@ -670,7 +741,10 @@ impl Conn for SlackConn {
         let channel = match self.channels.get_left(channel) {
             Some(c) => *c,
             None => {
-                error!("internal error, invalid channel name {}", channel);
+                error!(
+                    "Internal error, no known Slack ConversationId for channel name {}",
+                    channel
+                );
                 return;
             }
         };
