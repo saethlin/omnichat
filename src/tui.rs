@@ -246,7 +246,8 @@ impl Tui {
                     read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                }).collect(),
+                })
+                .collect(),
             name: connection.name().into(),
             connection,
             current_channel: 0,
