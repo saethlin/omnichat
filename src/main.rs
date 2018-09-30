@@ -1,5 +1,4 @@
 extern crate backoff;
-extern crate discord;
 #[macro_use]
 extern crate failure;
 #[macro_use]
@@ -32,7 +31,6 @@ mod conn;
 mod bimap;
 mod chan_message;
 mod cursor_vec;
-mod discord_conn;
 mod logger;
 mod slack_conn;
 mod tui;
@@ -56,7 +54,6 @@ struct Config {
 
 fn main() {
     use conn::Event;
-    use discord_conn::DiscordConn;
     use slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -107,70 +104,6 @@ fn main() {
                 }
             });
         }
-    }
-
-    // Discord only permits one connection per user, so we need to redistribute the incoming events
-    if let (&Some(ref discord_token), &Some(ref discord)) = (&config.discord_token, &config.discord)
-    {
-        // This operation is blocking, but is the only I/O required to hook up to Discord, and we
-        // only need to do this operation once per token, and we only permit one token so far so it
-        // doesn't matter
-
-        let sender = tui.sender();
-        let discord_token = discord_token.clone();
-        let discord = discord.clone();
-        thread::spawn(move || {
-            use backoff::{Error, ExponentialBackoff, Operation};
-            let mut op =
-                || discord::Discord::from_user_token(&discord_token).map_err(Error::Transient);
-            let mut backoff = ExponentialBackoff::default();
-            let dis = op.retry(&mut backoff).unwrap_or_else(|e| {
-                println!("Unable to connect to Discord:\n{:#?}", e);
-                std::process::exit(1);
-            });
-
-            let (mut connection, info) = {
-                let mut op = || dis.connect().map_err(Error::Transient);
-                let mut backoff = ExponentialBackoff::default();
-                op.retry(&mut backoff).unwrap_or_else(|e| {
-                    println!("Unable to connect to Discord:\n{:#?}", e);
-                    std::process::exit(1);
-                })
-            };
-
-            //let state = discord::State::new(info);
-            //connection.download_all_members(&mut state);
-
-            let dis = Arc::new(RwLock::new(dis));
-
-            let (discord_sender, discord_receiver) = spmc::channel();
-
-            // Spawn a thread that copies the incoming Discord events out to every omnichat server
-            thread::spawn(move || loop {
-                match connection.recv_event() {
-                    Ok(ev) => {
-                        let _ = discord_sender.send(ev);
-                    }
-                    Err(discord::Error::Closed(..)) => break,
-                    Err(err) => error!("Discord read error: {}", err),
-                }
-            });
-
-            for c in discord.iter().cloned() {
-                let sender = sender.clone();
-                let info = info.clone();
-                let dis = dis.clone();
-                let discord_receiver = discord_receiver.clone();
-                thread::spawn(move || {
-                    match DiscordConn::new(dis, &info, discord_receiver, &c.name, sender.clone()) {
-                        Ok(connection) => {
-                            let _ = sender.send(Event::Connected(connection));
-                        }
-                        Err(err) => error!("Unable to connect to Discord server: {}", err),
-                    }
-                });
-            }
-        });
     }
 
     tui.run();
