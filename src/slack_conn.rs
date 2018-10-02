@@ -27,6 +27,7 @@ struct Handler {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MessageAck {
+    #[allow(unused)]
     ok: bool,
     reply_to: u32,
     text: String,
@@ -41,11 +42,11 @@ struct PendingMessage {
 impl Handler {
     pub fn to_omni(
         &self,
-        message: ::slack_api::Message,
+        message: ::slack_api::rtm::Message,
         outer_channel: Option<::slack_api::ConversationId>,
     ) -> Option<Message> {
-        use slack_api::Message::*;
-        use slack_api::{MessageBotMessage, MessageSlackbotResponse, MessageStandard};
+        use slack_api::rtm::Message::*;
+        use slack_api::rtm::{MessageBotMessage, MessageSlackbotResponse, MessageStandard};
         // TODO: Add more success cases to this
         let (channel, user, mut text, ts, reactions) = match message {
             Standard(MessageStandard {
@@ -58,7 +59,7 @@ impl Handler {
             }) => {
                 let user = user.unwrap_or("UNKNOWNUS".into());
                 (
-                    outer_channel.or_else(|| channel.map(|c| c.into())),
+                    outer_channel.or(channel),
                     self.users
                         .get_right(&user)
                         .unwrap_or(&user.as_str().into())
@@ -79,7 +80,7 @@ impl Handler {
                 reactions,
                 ..
             }) => (
-                outer_channel.or_else(|| channel.map(|c| c.into())),
+                outer_channel.or(channel),
                 name.into(),
                 text,
                 ts,
@@ -96,7 +97,7 @@ impl Handler {
                 reactions,
                 ..
             }) => (
-                outer_channel.or_else(|| channel.map(|c| c.into())),
+                outer_channel.or(channel),
                 self.users
                     .get_right(&user)
                     .unwrap_or(&user.as_str().into())
@@ -130,7 +131,7 @@ impl Handler {
             return Some(::conn::Message {
                 server: self.server_name.as_ref().into(),
                 channel: channel.clone(),
-                sender: user.into(),
+                sender: user,
                 is_mention: text.contains(self.my_name.as_ref()),
                 contents: text,
                 timestamp: ts.into(),
@@ -180,9 +181,9 @@ impl Handler {
             }
         }
 
-        match ::serde_json::from_str::<::slack_api::Event>(&message) {
-            Ok(::slack_api::Event::Message(::slack_api::Message::MessageChanged(
-                ::slack_api::MessageMessageChanged {
+        match ::serde_json::from_str::<::slack_api::rtm::Event>(&message) {
+            Ok(::slack_api::rtm::Event::Message(::slack_api::rtm::Message::MessageChanged(
+                ::slack_api::rtm::MessageMessageChanged {
                     channel,
                     message: Some(message),
                     previous_message: Some(previous_message),
@@ -193,19 +194,19 @@ impl Handler {
                     server: self.server_name.clone(),
                     channel: self
                         .channels
-                        .get_right(&channel.into())
+                        .get_right(&channel)
                         .unwrap_or(&IString::from(channel.as_str()))
                         .clone(),
                     timestamp: previous_message.ts.into(),
                     contents: message.text,
                 });
             }
-            Ok(::slack_api::Event::ReactionAdded(::slack_api::EventReactionAdded {
+            Ok(::slack_api::rtm::Event::ReactionAdded(::slack_api::rtm::EventReactionAdded {
                 item,
                 reaction,
                 ..
             })) => {
-                if let ::slack_api::Event::Message(message) = *item {
+                if let ::slack_api::rtm::Event::Message(message) = *item {
                     if let Some(omnimessage) = self.to_omni(message, None) {
                         let _ = self.tui_sender.send(Event::ReactionAdded {
                             server: omnimessage.server,
@@ -216,12 +217,10 @@ impl Handler {
                     }
                 }
             }
-            Ok(::slack_api::Event::ReactionRemoved(::slack_api::EventReactionRemoved {
-                item,
-                reaction,
-                ..
-            })) => {
-                if let ::slack_api::Event::Message(message) = *item {
+            Ok(::slack_api::rtm::Event::ReactionRemoved(
+                ::slack_api::rtm::EventReactionRemoved { item, reaction, .. },
+            )) => {
+                if let ::slack_api::rtm::Event::Message(message) = *item {
                     if let Some(omnimessage) = self.to_omni(message, None) {
                         let _ = self.tui_sender.send(Event::ReactionRemoved {
                             server: omnimessage.server,
@@ -233,7 +232,7 @@ impl Handler {
                 }
             }
             // Miscellaneous slack messages that should appear as normal messages
-            Ok(::slack_api::Event::Message(slack_message)) => {
+            Ok(::slack_api::rtm::Event::Message(slack_message)) => {
                 if let Some(omnimessage) = self.to_omni(slack_message.clone(), None) {
                     let _ = self.tui_sender.send(Event::Message(omnimessage));
                 } else {
@@ -242,7 +241,7 @@ impl Handler {
             }
 
             // Got some other kind of event we haven't handled yet
-            Ok(::slack_api::Event::ChannelMarked(markevent)) => {
+            Ok(::slack_api::rtm::Event::ChannelMarked(markevent)) => {
                 let _ = self.tui_sender.send(Event::MarkChannelRead {
                     server: self.server_name.clone(),
                     channel: self
@@ -254,7 +253,7 @@ impl Handler {
                 });
             }
 
-            Ok(::slack_api::Event::GroupMarked(markevent)) => {
+            Ok(::slack_api::rtm::Event::GroupMarked(markevent)) => {
                 let _ = self.tui_sender.send(Event::MarkChannelRead {
                     server: self.server_name.clone(),
                     channel: self
@@ -266,12 +265,12 @@ impl Handler {
                 });
             }
 
-            Ok(::slack_api::Event::FileShared(fileshare)) => {
+            Ok(::slack_api::rtm::Event::FileShared(fileshare)) => {
                 let _ = self.tui_sender.send(Event::Message(Message {
                     server: self.server_name.clone(),
                     channel: self
                         .channels
-                        .get_right(&fileshare.channel_id.into())
+                        .get_right(&fileshare.channel_id)
                         .unwrap_or(&fileshare.channel_id.as_str().into())
                         .clone(),
                     sender: self
@@ -284,7 +283,7 @@ impl Handler {
                     timestamp: fileshare
                         .ts
                         .map(|t| t.into())
-                        .unwrap_or(::chrono::Utc::now()),
+                        .unwrap_or_else(::chrono::Utc::now),
                     reactions: Vec::new(),
                 }));
             }
@@ -319,30 +318,22 @@ impl SlackConn {
     pub fn create_on(token: String, sender: SyncSender<Event>) -> Result<(), Error> {
         let emoji_handle = {
             let token = token.clone();
-            thread::spawn(move || ::slack_api::emoji::list(&*CLIENT, &token))
+            thread::spawn(move || ::slack_api::http::emoji::list(&*CLIENT, &token))
         };
 
         let connect_handle = {
+            use slack_api::http::rtm;
             let token = token.clone();
-            thread::spawn(
-                move || -> Result<::slack_api::rtm::ConnectResponse, Error> {
-                    Ok(::slack_api::rtm::connect(
-                        &*CLIENT,
-                        &token,
-                        &::slack_api::rtm::ConnectRequest::new(),
-                    )?)
-                },
-            )
+            thread::spawn(move || -> Result<rtm::ConnectResponse, Error> {
+                Ok(rtm::connect(&*CLIENT, &token, &rtm::ConnectRequest::new())?)
+            })
         };
 
         let users_handle = {
+            use slack_api::http::users;
             let token = token.clone();
             thread::spawn(move || -> Result<_, Error> {
-                let users_response = ::slack_api::users::list(
-                    &*CLIENT,
-                    &token,
-                    &::slack_api::users::ListRequest::new(),
-                )?;
+                let users_response = users::list(&*CLIENT, &token, &users::ListRequest::new())?;
 
                 let mut users = BiMap::new();
                 for user in users_response.members {
@@ -354,13 +345,10 @@ impl SlackConn {
         };
 
         let channels_handle = {
+            use slack_api::http::channels;
             let token = token.clone();
             thread::spawn(move || -> Result<_, Error> {
-                let channels = ::slack_api::channels::list(
-                    &*CLIENT,
-                    &token,
-                    &::slack_api::channels::ListRequest::new(),
-                )?;
+                let channels = channels::list(&*CLIENT, &token, &channels::ListRequest::new())?;
 
                 let mut channels_map = BiMap::new();
                 let mut channel_names = Vec::new();
@@ -369,7 +357,7 @@ impl SlackConn {
                     .into_iter()
                     .filter(|c| c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true))
                 {
-                    let ::slack_api::Channel { id, name, .. } = channel;
+                    let ::slack_api::rtm::Channel { id, name, .. } = channel;
                     channel_names.push(name.as_str().into());
                     channels_map.insert(
                         ::slack_api::ConversationId::Channel(id),
@@ -382,24 +370,18 @@ impl SlackConn {
         };
 
         let groups_handle = {
+            use slack_api::http::groups;
             let token = token.clone();
             thread::spawn(move || -> Result<_, Error> {
-                Ok(::slack_api::groups::list(
-                    &*CLIENT,
-                    &token,
-                    &::slack_api::groups::ListRequest::new(),
-                )?)
+                Ok(groups::list(&*CLIENT, &token, &groups::ListRequest::new())?)
             })
         };
 
         let dms_handle = {
+            use slack_api::http::im;
             let token = token.clone();
             thread::spawn(move || -> Result<_, Error> {
-                Ok(::slack_api::im::list(
-                    &*CLIENT,
-                    &token,
-                    &::slack_api::im::ListRequest::new(),
-                )?)
+                Ok(im::list(&*CLIENT, &token, &im::ListRequest::new())?)
             })
         };
 
@@ -414,7 +396,7 @@ impl SlackConn {
             .into_iter()
             .filter(|g| !g.is_archived.unwrap_or(true))
         {
-            let ::slack_api::Group { id, name, .. } = group;
+            let ::slack_api::rtm::Group { id, name, .. } = group;
             channel_names.push(name.as_str().into());
             channels.insert(::slack_api::ConversationId::Group(id), IString::from(name));
         }
@@ -430,7 +412,7 @@ impl SlackConn {
             .into_iter()
             .filter(|d| !d.is_user_deleted.unwrap_or(false))
         {
-            let ::slack_api::Im { id, user, .. } = dm;
+            let ::slack_api::rtm::Im { id, user, .. } = dm;
             let username = users
                 .get_right(&user)
                 .unwrap_or(&IString::from(user.as_str()))
@@ -523,7 +505,7 @@ impl SlackConn {
             let server_name = team_name.as_str().into();
 
             thread::spawn(move || {
-                use slack_api::{channels, groups, im};
+                use slack_api::http::{channels, groups, im};
                 use std::error::Error;
                 let (messages, read_at) = match conversation_id {
                     ::slack_api::ConversationId::Channel(channel_id) => {
@@ -546,8 +528,8 @@ impl SlackConn {
                                 Vec::new()
                             }
                         };
-                        for m in messages.iter() {
-                            if let ::slack_api::Message::Tombstone(ref msg) = m {
+                        for m in &messages {
+                            if let ::slack_api::rtm::Message::Tombstone(ref msg) = m {
                                 error!("{:#?}", msg);
                             }
                         }
@@ -622,8 +604,8 @@ impl Conn for SlackConn {
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let mut handler_handle = self.handler.write().unwrap();
         let contents = handler_handle.to_slack(contents.to_string());
-        let channel_id = match handler_handle.channels.get_left(channel.into()) {
-            Some(id) => id.clone(),
+        let channel_id = match handler_handle.channels.get_left(channel) {
+            Some(id) => *id,
             None => {
                 error!("Unknown channel: {}", channel);
                 return;
@@ -657,7 +639,7 @@ impl Conn for SlackConn {
     }
 
     fn mark_read(&self, channel: &str) {
-        use slack_api::{channels, groups, im};
+        use slack_api::http::{channels, groups, im};
 
         let channel_or_group_id = match self.channels.get_left(channel) {
             Some(s) => *s,
@@ -750,8 +732,8 @@ impl Conn for SlackConn {
         };
 
         thread::spawn(move || {
-            use slack_api::reactions::Reactable;
-            let request = ::slack_api::reactions::AddRequest::new(
+            use slack_api::http::reactions::Reactable;
+            let request = ::slack_api::http::reactions::AddRequest::new(
                 &name,
                 Reactable::Message {
                     channel,
@@ -759,7 +741,7 @@ impl Conn for SlackConn {
                 },
             );
 
-            if let Err(e) = ::slack_api::reactions::add(&*CLIENT, &token, &request) {
+            if let Err(e) = ::slack_api::http::reactions::add(&*CLIENT, &token, &request) {
                 error!("{:?}", e);
             }
         });

@@ -53,12 +53,10 @@ struct Config {
 }
 
 fn main() {
-    use conn::Event;
     use slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
     use std::path::PathBuf;
-    use std::sync::{Arc, RwLock};
     use std::thread;
 
     openssl_probe::init_ssl_cert_env_vars();

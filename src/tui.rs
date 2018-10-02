@@ -242,7 +242,7 @@ impl Tui {
                 .into_iter()
                 .map(|name| Channel {
                     messages: Vec::new(),
-                    name: name,
+                    name,
                     read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
@@ -303,7 +303,7 @@ impl Tui {
             .messages
             .last()
             .map(|m| *m.timestamp())
-            .unwrap_or(message.timestamp.clone())
+            .unwrap_or(message.timestamp)
             > message.timestamp;
 
         channel.messages.push(message.into());
@@ -323,7 +323,7 @@ impl Tui {
                 .current_channel()
                 .messages
                 .last()
-                .map(|m| m.timestamp().clone())
+                .map(|m| *m.timestamp())
             {
                 let reaction = &contents[2..contents.len() - 1];
                 self.servers

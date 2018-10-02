@@ -28,22 +28,6 @@ where
         self.right_to_left.insert(the_right, the_left);
     }
 
-    pub fn from(left: &[L], right: &[R]) -> Self {
-        let mut left_to_right = HashMap::new();
-        let mut right_to_left = HashMap::new();
-        left.iter()
-            .cloned()
-            .zip(right.iter().cloned())
-            .for_each(|(l, r)| {
-                left_to_right.insert(l.clone(), r.clone());
-                right_to_left.insert(r, l);
-            });
-        BiMap {
-            left_to_right,
-            right_to_left,
-        }
-    }
-
     pub fn get_left<Q: ?Sized>(&self, right: &Q) -> Option<&L>
     where
         R: ::std::borrow::Borrow<Q>,

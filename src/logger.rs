@@ -43,7 +43,7 @@ impl Log for Logger {
         );
 
         if let Ok(mut file_handle) = self.file_output.lock() {
-            let _ = write!(file_handle, "{}\n", message);
+            let _ = writeln!(file_handle, "{}", message);
             let _ = file_handle.flush();
         }
         let _ = self.sender.send(Event::Error(message));

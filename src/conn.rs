@@ -51,12 +51,6 @@ pub enum Event {
     Resize,
 }
 
-#[derive(Debug, Fail)]
-pub enum ConnError {
-    #[fail(display = "Could not connect to the server")]
-    ConnectError,
-}
-
 pub trait Conn: Send {
     fn name(&self) -> &str;
 
