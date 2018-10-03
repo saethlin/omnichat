@@ -28,6 +28,3 @@ dirs = "1.0"
 slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types", features=["reqwest_support", "chrono"]}
 openssl = { version = "0.10", features = ["vendored"] }
 tokio-core = "0.1"
-
-[profile.release]
-lto = true
