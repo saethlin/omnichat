@@ -201,11 +201,7 @@ impl Handler {
                     contents: message.text,
                 });
             }
-            Ok(::slack_api::rtm::Event::ReactionAdded(::slack_api::rtm::EventReactionAdded {
-                item,
-                reaction,
-                ..
-            })) => {
+            Ok(::slack_api::rtm::Event::ReactionAdded { item, reaction, .. }) => {
                 if let ::slack_api::rtm::Event::Message(message) = *item {
                     if let Some(omnimessage) = self.to_omni(message, None) {
                         let _ = self.tui_sender.send(Event::ReactionAdded {
@@ -217,9 +213,7 @@ impl Handler {
                     }
                 }
             }
-            Ok(::slack_api::rtm::Event::ReactionRemoved(
-                ::slack_api::rtm::EventReactionRemoved { item, reaction, .. },
-            )) => {
+            Ok(::slack_api::rtm::Event::ReactionRemoved { item, reaction, .. }) => {
                 if let ::slack_api::rtm::Event::Message(message) = *item {
                     if let Some(omnimessage) = self.to_omni(message, None) {
                         let _ = self.tui_sender.send(Event::ReactionRemoved {
@@ -241,49 +235,52 @@ impl Handler {
             }
 
             // Got some other kind of event we haven't handled yet
-            Ok(::slack_api::rtm::Event::ChannelMarked(markevent)) => {
+            Ok(::slack_api::rtm::Event::ChannelMarked { channel, ts, .. }) => {
                 let _ = self.tui_sender.send(Event::MarkChannelRead {
                     server: self.server_name.clone(),
                     channel: self
                         .channels
-                        .get_right(&markevent.channel.into())
-                        .unwrap_or(&markevent.channel.as_str().into())
+                        .get_right(&channel.into())
+                        .unwrap_or(&channel.as_str().into())
                         .clone(),
-                    read_at: markevent.ts.into(),
+                    read_at: ts.into(),
                 });
             }
 
-            Ok(::slack_api::rtm::Event::GroupMarked(markevent)) => {
+            Ok(::slack_api::rtm::Event::GroupMarked { channel, ts, .. }) => {
                 let _ = self.tui_sender.send(Event::MarkChannelRead {
                     server: self.server_name.clone(),
                     channel: self
                         .channels
-                        .get_right(&markevent.channel.into())
-                        .unwrap_or(&IString::from(markevent.channel.as_str()))
+                        .get_right(&channel.into())
+                        .unwrap_or(&IString::from(channel.as_str()))
                         .clone(),
-                    read_at: markevent.ts.into(),
+                    read_at: ts.into(),
                 });
             }
 
-            Ok(::slack_api::rtm::Event::FileShared(fileshare)) => {
+            Ok(::slack_api::rtm::Event::FileShared {
+                channel_id,
+                user_id,
+                file_id,
+                ts,
+                ..
+            }) => {
                 let _ = self.tui_sender.send(Event::Message(Message {
                     server: self.server_name.clone(),
                     channel: self
                         .channels
-                        .get_right(&fileshare.channel_id)
-                        .unwrap_or(&fileshare.channel_id.as_str().into())
+                        .get_right(&channel_id)
+                        .unwrap_or(&channel_id.as_str().into())
                         .clone(),
                     sender: self
                         .users
-                        .get_right(&fileshare.user_id)
-                        .unwrap_or(&fileshare.channel_id.as_str().into())
+                        .get_right(&user_id)
+                        .unwrap_or(&channel_id.as_str().into())
                         .clone(),
-                    contents: fileshare.file_id.to_string(),
+                    contents: file_id.to_string(),
                     is_mention: false,
-                    timestamp: fileshare
-                        .ts
-                        .map(|t| t.into())
-                        .unwrap_or_else(::chrono::Utc::now),
+                    timestamp: ts.map(|t| t.into()).unwrap_or_else(::chrono::Utc::now),
                     reactions: Vec::new(),
                 }));
             }
@@ -512,9 +509,11 @@ impl SlackConn {
                         let req = channels::InfoRequest::new(channel_id);
                         let read_at = channels::info(&*CLIENT, &token, &req)
                             .and_then(|info| {
-                                info.channel.last_read.ok_or(::slack_api::Error::Slack(
-                                    "timestamp missing".to_owned(),
-                                ))
+                                info.channel
+                                    .last_read
+                                    .ok_or(::slack_api::http::Error::Slack(
+                                        "timestamp missing".to_owned(),
+                                    ))
                             }).unwrap_or_else(|e| {
                                 error!("{:?}", e);
                                 ::chrono::Utc::now().into()
@@ -539,7 +538,7 @@ impl SlackConn {
                         let mut req = groups::InfoRequest::new(group_id);
                         let read_at = groups::info(&*CLIENT, &token, &req)
                             .and_then(|info| {
-                                info.group.last_read.ok_or(::slack_api::Error::Slack(
+                                info.group.last_read.ok_or(::slack_api::http::Error::Slack(
                                     "timestamp missing".to_owned(),
                                 ))
                             }).unwrap_or_else(|e| {
