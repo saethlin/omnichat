@@ -197,16 +197,22 @@ impl Handler {
                     }),
                 ..
             }) => {
-                let _ = self.tui_sender.send(Event::MessageEdited {
-                    server: self.server_name.clone(),
-                    channel: self
-                        .channels
-                        .get_right(&channel)
-                        .unwrap_or(&IString::from(channel.as_str()))
-                        .clone(),
-                    timestamp: previous_message.ts.into(),
-                    contents: message.text,
-                });
+                if let (
+                    rtm::Message::Standard(rtm::MessageStandard { text, .. }),
+                    rtm::Message::Standard(rtm::MessageStandard { ts: Some(ts), .. }),
+                ) = (*message, *previous_message)
+                {
+                    let _ = self.tui_sender.send(Event::MessageEdited {
+                        server: self.server_name.clone(),
+                        channel: self
+                            .channels
+                            .get_right(&channel)
+                            .unwrap_or(&IString::from(channel.as_str()))
+                            .clone(),
+                        timestamp: ts.into(),
+                        contents: text,
+                    });
+                }
             }
             Ok(rtm::Event::ReactionAdded { item, reaction, .. }) => {
                 use slack_api::rtm::Reactable;
