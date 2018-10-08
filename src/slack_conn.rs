@@ -52,12 +52,16 @@ impl Handler {
             Standard(MessageStandard {
                 channel,
                 user,
-                text,
+                mut text,
                 ts: Some(ts),
                 reactions,
+                files,
                 ..
             }) => {
                 let user = user.unwrap_or("UNKNOWNUS".into());
+                for file in files.unwrap_or_default() {
+                    text = format!("{}\n{}", text, file.url_private.unwrap());
+                }
                 (
                     outer_channel.or(channel),
                     self.users
@@ -181,15 +185,18 @@ impl Handler {
             }
         }
 
+        use slack_api::rtm;
         match ::serde_json::from_str::<::slack_api::rtm::Event>(&message) {
-            Ok(::slack_api::rtm::Event::Message(::slack_api::rtm::Message::MessageChanged(
-                ::slack_api::rtm::MessageMessageChanged {
-                    channel,
-                    message: Some(message),
-                    previous_message: Some(previous_message),
-                    ..
-                },
-            ))) => {
+            Ok(rtm::Event::Message {
+                message:
+                    rtm::Message::MessageChanged(rtm::MessageMessageChanged {
+                        channel,
+                        message: Some(message),
+                        previous_message: Some(previous_message),
+                        ..
+                    }),
+                ..
+            }) => {
                 let _ = self.tui_sender.send(Event::MessageEdited {
                     server: self.server_name.clone(),
                     channel: self
@@ -201,32 +208,39 @@ impl Handler {
                     contents: message.text,
                 });
             }
-            Ok(::slack_api::rtm::Event::ReactionAdded { item, reaction, .. }) => {
-                if let ::slack_api::rtm::Event::Message(message) = *item {
-                    if let Some(omnimessage) = self.to_omni(message, None) {
-                        let _ = self.tui_sender.send(Event::ReactionAdded {
-                            server: omnimessage.server,
-                            channel: omnimessage.channel,
-                            timestamp: omnimessage.timestamp,
-                            reaction: reaction.into(),
-                        });
-                    }
+            Ok(rtm::Event::ReactionAdded { item, reaction, .. }) => {
+                use slack_api::rtm::Reactable;
+                let (channel_id, timestamp) = match item {
+                    Reactable::Message { channel, ts } => (channel, ts),
+                };
+                if let Some(channel) = self.channels.get_right(&channel_id) {
+                    let _ = self.tui_sender.send(Event::ReactionAdded {
+                        server: self.server_name.clone(),
+                        channel: channel.clone(),
+                        timestamp: timestamp.into(),
+                        reaction: reaction.into(),
+                    });
                 }
             }
-            Ok(::slack_api::rtm::Event::ReactionRemoved { item, reaction, .. }) => {
-                if let ::slack_api::rtm::Event::Message(message) = *item {
-                    if let Some(omnimessage) = self.to_omni(message, None) {
-                        let _ = self.tui_sender.send(Event::ReactionRemoved {
-                            server: omnimessage.server,
-                            channel: omnimessage.channel,
-                            timestamp: omnimessage.timestamp,
-                            reaction: reaction.into(),
-                        });
-                    }
+            Ok(rtm::Event::ReactionRemoved { item, reaction, .. }) => {
+                use slack_api::rtm::Reactable;
+                let (channel_id, timestamp) = match item {
+                    Reactable::Message { channel, ts } => (channel, ts),
+                };
+                if let Some(channel) = self.channels.get_right(&channel_id) {
+                    let _ = self.tui_sender.send(Event::ReactionRemoved {
+                        server: self.server_name.clone(),
+                        channel: channel.clone(),
+                        timestamp: timestamp.into(),
+                        reaction: reaction.into(),
+                    });
                 }
             }
             // Miscellaneous slack messages that should appear as normal messages
-            Ok(::slack_api::rtm::Event::Message(slack_message)) => {
+            Ok(rtm::Event::Message {
+                message: slack_message,
+                ..
+            }) => {
                 if let Some(omnimessage) = self.to_omni(slack_message.clone(), None) {
                     let _ = self.tui_sender.send(Event::Message(omnimessage));
                 } else {
@@ -235,7 +249,7 @@ impl Handler {
             }
 
             // Got some other kind of event we haven't handled yet
-            Ok(::slack_api::rtm::Event::ChannelMarked { channel, ts, .. }) => {
+            Ok(rtm::Event::ChannelMarked { channel, ts, .. }) => {
                 let _ = self.tui_sender.send(Event::MarkChannelRead {
                     server: self.server_name.clone(),
                     channel: self
@@ -257,32 +271,6 @@ impl Handler {
                         .clone(),
                     read_at: ts.into(),
                 });
-            }
-
-            Ok(::slack_api::rtm::Event::FileShared {
-                channel_id,
-                user_id,
-                file_id,
-                ts,
-                ..
-            }) => {
-                let _ = self.tui_sender.send(Event::Message(Message {
-                    server: self.server_name.clone(),
-                    channel: self
-                        .channels
-                        .get_right(&channel_id)
-                        .unwrap_or(&channel_id.as_str().into())
-                        .clone(),
-                    sender: self
-                        .users
-                        .get_right(&user_id)
-                        .unwrap_or(&channel_id.as_str().into())
-                        .clone(),
-                    contents: file_id.to_string(),
-                    is_mention: false,
-                    timestamp: ts.map(|t| t.into()).unwrap_or_else(::chrono::Utc::now),
-                    reactions: Vec::new(),
-                }));
             }
 
             Ok(_) => {}
@@ -341,91 +329,56 @@ impl SlackConn {
             })
         };
 
-        let channels_handle = {
-            use slack_api::http::channels;
+        let conversations_handle = {
+            use slack_api::http::conversations;
             let token = token.clone();
             thread::spawn(move || -> Result<_, Error> {
-                let channels = channels::list(&*CLIENT, &token, &channels::ListRequest::new())?;
+                use slack_api::http::conversations::ChannelType::*;
+                let mut req = conversations::ListRequest::new();
+                req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
+                let channels = conversations::list(&*CLIENT, &token, &req);
+                let channels = match channels {
+                    Ok(c) => c,
+                    Err(e) => {
+                        use std::error::Error;
+                        error!("{:?}, {:?}", e.cause(), e);
+                        return Err(e)?;
+                    }
+                };
 
                 let mut channels_map = BiMap::new();
                 let mut channel_names = Vec::new();
-                for channel in channels
-                    .channels
-                    .into_iter()
-                    .filter(|c| c.is_member.unwrap_or(false) && !c.is_archived.unwrap_or(true))
-                {
-                    let ::slack_api::rtm::Channel { id, name, .. } = channel;
+                for channel in channels.channels.into_iter() {
+                    // TODO: Filter for is_member and is_archived
+                    use slack_api::http::conversations::Conversation::*;
+                    let (id, name) = match channel {
+                        Channel { id, name, .. } => (id, name),
+                        Group { id, name, .. } => (id, name),
+                        DirectMessage { id, .. } => (id, id.to_string()),
+                    };
                     channel_names.push(name.as_str().into());
-                    channels_map.insert(
-                        ::slack_api::ConversationId::Channel(id),
-                        IString::from(name),
-                    );
+                    channels_map.insert(id, IString::from(name));
                 }
+
+                channel_names.sort();
 
                 Ok((channel_names, channels_map))
             })
         };
 
-        let groups_handle = {
-            use slack_api::http::groups;
-            let token = token.clone();
-            thread::spawn(move || -> Result<_, Error> {
-                Ok(groups::list(&*CLIENT, &token, &groups::ListRequest::new())?)
-            })
-        };
-
-        let dms_handle = {
-            use slack_api::http::im;
-            let token = token.clone();
-            thread::spawn(move || -> Result<_, Error> {
-                Ok(im::list(&*CLIENT, &token, &im::ListRequest::new())?)
-            })
-        };
-
-        let (mut channel_names, mut channels) = channels_handle
+        let (channel_names, channels) = conversations_handle
             .join()
             .map_err(|e| format_err!("{:?}", e))??;
-
-        for group in groups_handle
-            .join()
-            .map_err(|e| format_err!("{:?}", e))??
-            .groups
-            .into_iter()
-            .filter(|g| !g.is_archived.unwrap_or(true))
-        {
-            let ::slack_api::rtm::Group { id, name, .. } = group;
-            channel_names.push(name.as_str().into());
-            channels.insert(::slack_api::ConversationId::Group(id), IString::from(name));
-        }
 
         // Must have users before we can figure out who each DM is for
         let users: BiMap<::slack_api::UserId, IString> =
             users_handle.join().map_err(|e| format_err!("{:?}", e))??;
-
-        for dm in dms_handle
-            .join()
-            .map_err(|e| format_err!("{:?}", e))??
-            .ims
-            .into_iter()
-            .filter(|d| !d.is_user_deleted.unwrap_or(false))
-        {
-            let ::slack_api::rtm::Im { id, user, .. } = dm;
-            let username = users
-                .get_right(&user)
-                .unwrap_or(&IString::from(user.as_str()))
-                .clone();
-            channel_names.push(username.clone());
-            channels.insert(::slack_api::ConversationId::DirectMessage(id), username);
-        }
-
-        channel_names.sort();
 
         let response = connect_handle
             .join()
             .map_err(|e| format_err!("{:?}", e))??;
 
         let websocket_url = response.url.clone();
-        //let mut websocket = ::websocket::ClientBuilder::new(&response.url)?.connect_secure(None)?;
 
         let slf = response.slf;
         let team_name = response.team.name;
@@ -502,76 +455,35 @@ impl SlackConn {
             let server_name = team_name.as_str().into();
 
             thread::spawn(move || {
-                use slack_api::http::{channels, groups, im};
-                use std::error::Error;
-                let (messages, read_at) = match conversation_id {
-                    ::slack_api::ConversationId::Channel(channel_id) => {
-                        let req = channels::InfoRequest::new(channel_id);
-                        let read_at = channels::info(&*CLIENT, &token, &req)
-                            .and_then(|info| {
-                                info.channel
-                                    .last_read
-                                    .ok_or(::slack_api::http::Error::Slack(
-                                        "timestamp missing".to_owned(),
-                                    ))
-                            }).unwrap_or_else(|e| {
-                                error!("{:?}", e);
-                                ::chrono::Utc::now().into()
-                            });
-                        let mut req = channels::HistoryRequest::new(channel_id);
-                        req.count = Some(1000);
-                        let messages = match channels::history(&*CLIENT, &token, &req) {
-                            Ok(response) => response.messages,
-                            Err(e) => {
-                                error!("{:?}", e.cause());
-                                Vec::new()
-                            }
-                        };
-                        for m in &messages {
-                            if let ::slack_api::rtm::Message::Tombstone(ref msg) = m {
-                                error!("{:#?}", msg);
-                            }
+                use slack_api::http::conversations;
+                use slack_api::http::conversations::ConversationInfo;
+                let req = conversations::InfoRequest::new(conversation_id);
+                let read_at = conversations::info(&*CLIENT, &token, &req)
+                    .map(|info| match info.channel {
+                        ConversationInfo::Channel { last_read, .. } => {
+                            last_read.map(|t| t.into()).unwrap_or(::chrono::Utc::now())
                         }
-                        (messages, read_at)
-                    }
-                    ::slack_api::ConversationId::Group(group_id) => {
-                        let mut req = groups::InfoRequest::new(group_id);
-                        let read_at = groups::info(&*CLIENT, &token, &req)
-                            .and_then(|info| {
-                                info.group.last_read.ok_or(::slack_api::http::Error::Slack(
-                                    "timestamp missing".to_owned(),
-                                ))
-                            }).unwrap_or_else(|e| {
-                                error!("{:?}", e);
-                                ::chrono::Utc::now().into()
-                            });
-
-                        let mut req = groups::HistoryRequest::new(group_id);
-                        req.count = Some(1000);
-                        let messages = match groups::history(&*CLIENT, &token, &req) {
-                            Ok(response) => response.messages,
-                            Err(e) => {
-                                error!("{:?}", e.cause());
-                                Vec::new()
-                            }
-                        };
-                        (messages, read_at)
-                    }
-                    ::slack_api::ConversationId::DirectMessage(dm_id) => {
-                        let messages =
-                            match im::history(&*CLIENT, &token, &im::HistoryRequest::new(dm_id)) {
-                                Ok(response) => response.messages,
-                                Err(e) => {
-                                    error!("{:?}", e.cause());
-                                    Vec::new()
-                                }
-                            };
-                        (
-                            messages,
-                            ::slack_api::Timestamp::from(::chrono::offset::Utc::now()),
-                        )
+                        ConversationInfo::Group { last_read, .. } => last_read.into(),
+                        ConversationInfo::ClosedDirectMessage { .. } => ::chrono::Utc::now(),
+                        ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
+                    }).unwrap_or_else(|e| {
+                        error!("{:?}", e);
+                        ::chrono::Utc::now().into()
+                    });
+                let mut req = conversations::HistoryRequest::new(conversation_id);
+                req.limit = Some(1000);
+                let messages = match conversations::history(&*CLIENT, &token, &req) {
+                    Ok(response) => response.messages,
+                    Err(e) => {
+                        error!("{:?}", e);
+                        Vec::new()
                     }
                 };
+                for m in &messages {
+                    if let ::slack_api::rtm::Message::Tombstone(ref msg) = m {
+                        error!("{:#?}", msg);
+                    }
+                }
 
                 let handler_handle = handler.read().unwrap();
                 for message in messages.into_iter().rev() {
