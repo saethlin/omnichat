@@ -1,5 +1,4 @@
 extern crate backoff;
-#[macro_use]
 extern crate failure;
 #[macro_use]
 extern crate lazy_static;
@@ -15,13 +14,16 @@ extern crate log;
 extern crate dirs;
 extern crate futures;
 extern crate inlinable_string;
-extern crate reqwest;
 #[macro_use]
 extern crate serde_json;
+extern crate hyper;
+extern crate hyper_rustls;
+extern crate serde_urlencoded;
 extern crate slack_api;
 extern crate spmc;
 extern crate termion;
 extern crate textwrap;
+extern crate tokio;
 extern crate tokio_core;
 extern crate toml;
 extern crate websocket;

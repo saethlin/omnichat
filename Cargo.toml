@@ -18,13 +18,16 @@ backoff = "0.1"
 futures = "0.1"
 openssl-probe = "0.1"
 chrono = "0.4"
-reqwest = "0.9"
 log = {version="0.4", features=["std"]}
 termion = "1.5"
 libc = "0.2"
 signal-hook = "0.1"
 textwrap = "0.10"
 dirs = "1.0"
-slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types", features=["reqwest_support", "chrono"]}
+slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types", features=["chrono"]}
 openssl = { version = "0.10", features = ["vendored"] }
 tokio-core = "0.1"
+tokio = "0.1"
+hyper = "0.12"
+hyper-rustls = "0.14"
+serde_urlencoded = "0.5"
