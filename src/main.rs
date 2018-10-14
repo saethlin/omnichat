@@ -1,4 +1,3 @@
-extern crate backoff;
 extern crate failure;
 #[macro_use]
 extern crate lazy_static;
@@ -18,9 +17,10 @@ extern crate inlinable_string;
 extern crate serde_json;
 extern crate hyper;
 extern crate hyper_rustls;
+extern crate hyper_tls;
+extern crate serde;
 extern crate serde_urlencoded;
-extern crate slack_api;
-extern crate spmc;
+extern crate slack;
 extern crate termion;
 extern crate textwrap;
 extern crate tokio;

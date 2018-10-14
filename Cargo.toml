@@ -12,9 +12,7 @@ serde_json = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
 lazy_static = "1.0"
-spmc = "0.2"
 regex = "1.0"
-backoff = "0.1"
 futures = "0.1"
 openssl-probe = "0.1"
 chrono = "0.4"
@@ -24,10 +22,12 @@ libc = "0.2"
 signal-hook = "0.1"
 textwrap = "0.10"
 dirs = "1.0"
-slack_api = {git = "https://github.com/saethlin/slack-rs-api", branch="types", features=["chrono"]}
+slack = {path = "slack"}
 openssl = { version = "0.10", features = ["vendored"] }
 tokio-core = "0.1"
 tokio = "0.1"
 hyper = "0.12"
 hyper-rustls = "0.14"
 serde_urlencoded = "0.5"
+hyper-tls = "0.3"
+

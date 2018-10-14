@@ -19,17 +19,39 @@ lazy_static! {
         ::std::sync::Mutex::new(::tokio::runtime::Runtime::new().unwrap());
 }
 
-/*
-fn to_url<T: ::serde::Serialize>(base: &str, params: &T) -> ::hyper::Uri {
-    format!("{}&{}", base, ::serde_urlencoded::to_string(params))
-        .parse()
-        .unwrap();
+fn get_slack<T, R>(
+    endpoint: &'static str,
+    token: &str,
+    request: &T,
+) -> ::futures::sync::mpsc::Receiver<R>
+where
+    T: ::serde::Serialize,
+    R: ::serde::de::DeserializeOwned + Send + 'static,
+{
+    let (send, recv) = ::futures::sync::mpsc::channel(1);
+    let url = format!(
+        "https://slack.com/api/{}?token={}&{}",
+        endpoint,
+        token,
+        ::serde_urlencoded::to_string(request).unwrap_or_default()
+    ).parse()
+    .unwrap();
+
+    RUNTIME.lock().unwrap().spawn(
+        HYPERCLIENT
+            .get(url)
+            .map_err(|e| error!("{:?}", e))
+            .and_then(|res| res.into_body().concat2().map_err(|e| error!("{:?}", e)))
+            .and_then(|body| ::serde_json::from_slice::<R>(&body).map_err(|e| error!("{:?}", e)))
+            .and_then(move |response| send.send(response).map_err(|e| error!("{:?}", e)))
+            .map(|_| ()),
+    );
+    recv
 }
-*/
 
 struct Handler {
-    channels: BiMap<::slack_api::ConversationId, IString>,
-    users: BiMap<::slack_api::UserId, IString>,
+    channels: BiMap<::slack::ConversationId, IString>,
+    users: BiMap<::slack::UserId, IString>,
     server_name: IString,
     my_name: IString,
     input_sender: ::futures::sync::mpsc::Sender<::websocket::OwnedMessage>,
@@ -44,7 +66,7 @@ struct MessageAck {
     ok: bool,
     reply_to: u32,
     text: String,
-    ts: ::slack_api::Timestamp,
+    ts: ::slack::Timestamp,
 }
 
 struct PendingMessage {
@@ -55,12 +77,15 @@ struct PendingMessage {
 impl Handler {
     pub fn to_omni(
         &self,
-        message: ::slack_api::rtm::Message,
-        outer_channel: Option<::slack_api::ConversationId>,
+        message: ::slack::rtm::Message,
+        outer_channel: Option<::slack::ConversationId>,
     ) -> Option<Message> {
-        use slack_api::rtm::Message::*;
-        use slack_api::rtm::{MessageBotMessage, MessageSlackbotResponse, MessageStandard};
+        use slack::rtm::Message::*;
+        use slack::rtm::{MessageBotMessage, MessageSlackbotResponse, MessageStandard};
         // TODO: Add more success cases to this
+        if let ::slack::rtm::Message::ShRoomCreated(ref m) = message {
+            error!("{:#?}", m);
+        }
         let (channel, user, mut text, ts, reactions) = match message {
             Standard(MessageStandard {
                 channel,
@@ -74,9 +99,9 @@ impl Handler {
                 let user = user.unwrap_or("UNKNOWNUS".into());
                 for file in files.unwrap_or_default() {
                     if text.is_empty() {
-                        text = file.url_private.unwrap();
+                        text = file.url_private.unwrap_or_default();
                     } else {
-                        text = format!("{}\n{}", text, file.url_private.unwrap());
+                        text = format!("{}\n{}", text, file.url_private.unwrap_or_default());
                     }
                 }
                 (
@@ -202,8 +227,8 @@ impl Handler {
             }
         }
 
-        use slack_api::rtm;
-        match ::serde_json::from_str::<::slack_api::rtm::Event>(&message) {
+        use slack::rtm;
+        match ::serde_json::from_str::<::slack::rtm::Event>(&message) {
             Ok(rtm::Event::Message {
                 message:
                     rtm::Message::MessageChanged(rtm::MessageMessageChanged {
@@ -232,7 +257,7 @@ impl Handler {
                 }
             }
             Ok(rtm::Event::ReactionAdded { item, reaction, .. }) => {
-                use slack_api::rtm::Reactable;
+                use slack::rtm::Reactable;
                 let (channel_id, timestamp) = match item {
                     Reactable::Message { channel, ts } => (channel, ts),
                 };
@@ -246,7 +271,7 @@ impl Handler {
                 }
             }
             Ok(rtm::Event::ReactionRemoved { item, reaction, .. }) => {
-                use slack_api::rtm::Reactable;
+                use slack::rtm::Reactable;
                 let (channel_id, timestamp) = match item {
                     Reactable::Message { channel, ts } => (channel, ts),
                 };
@@ -284,7 +309,7 @@ impl Handler {
                 });
             }
 
-            Ok(::slack_api::rtm::Event::GroupMarked { channel, ts, .. }) => {
+            Ok(::slack::rtm::Event::GroupMarked { channel, ts, .. }) => {
                 let _ = self.tui_sender.send(Event::MarkChannelRead {
                     server: self.server_name.clone(),
                     channel: self
@@ -314,8 +339,8 @@ impl Handler {
 pub struct SlackConn {
     token: String,
     team_name: IString,
-    users: BiMap<::slack_api::UserId, IString>,
-    channels: BiMap<::slack_api::ConversationId, IString>,
+    users: BiMap<::slack::UserId, IString>,
+    channels: BiMap<::slack::ConversationId, IString>,
     channel_names: Vec<IString>,
     handler: Arc<RwLock<Handler>>,
     _sender: SyncSender<Event>,
@@ -324,117 +349,33 @@ pub struct SlackConn {
 
 impl SlackConn {
     pub fn create_on(token: String, sender: SyncSender<Event>) -> Result<(), Error> {
-        // Request information on the group's emoji
+        // Launch all of the request
+        use slack::http::{conversations, emoji, rtm, users};
+        let emoji_recv = get_slack("emoji.list", &token, &());
+        let connect_recv = get_slack("rtm.connect", &token, &());
+        let users_recv = get_slack("users.list", &token, &users::ListRequest::new());
 
-        let emoji_recv = {
-            use slack_api::http::emoji;
-            let (send, recv) = ::std::sync::mpsc::sync_channel(1);
-            let url = format!("https://slack.com/api/{}?token={}&", "emoji.list", token)
-                .parse()
-                .unwrap();
+        use slack::http::conversations::ChannelType::*;
+        let mut req = conversations::ListRequest::new();
+        req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
+        let conversations_recv = get_slack("conversations.list", &token, &req);
 
-            RUNTIME.lock().unwrap().spawn(
-                HYPERCLIENT
-                    .get(url)
-                    .and_then(|res| res.into_body().concat2())
-                    .map(|body| ::serde_json::from_slice::<emoji::ListResponse>(&body).unwrap())
-                    .and_then(move |response| {
-                        send.send(response).unwrap();
-                        Ok(())
-                    }).map_err(|e| error!("{:?}", e)),
-            );
-            recv
-        };
+        // We need to know about the users first so that we can digest the list of conversations
+        let users_response: users::ListResponse = users_recv.wait().next().unwrap().unwrap();
 
-        let connect_recv = {
-            use slack_api::http::rtm;
-            // Get the websocket URL we can talk to
-            let url = format!("https://slack.com/api/{}?token={}&", "rtm.connect", token)
-                .parse()
-                .unwrap();
+        let mut users: BiMap<::slack::UserId, IString> = BiMap::new();
+        for user in users_response.members {
+            users.insert(user.id, IString::from(user.name));
+        }
 
-            let (send, recv) = ::std::sync::mpsc::sync_channel(1);
-            RUNTIME.lock().unwrap().spawn(
-                HYPERCLIENT
-                    .get(url)
-                    .and_then(|res| res.into_body().concat2())
-                    .map(|body| ::serde_json::from_slice::<rtm::ConnectResponse>(&body).unwrap())
-                    .and_then(move |response| {
-                        send.send(response).unwrap();
-                        Ok(())
-                    }).map_err(|e| error!("{:?}", e)),
-            );
-            recv
-        };
+        let response_channels: conversations::ListResponse =
+            conversations_recv.wait().next().unwrap().unwrap();
 
-        let users_recv = {
-            use slack_api::http::users;
-            let url = format!(
-                "https://slack.com/api/{}?token={}&{}",
-                "users.list",
-                token,
-                ::serde_urlencoded::to_string(&users::ListRequest::new()).unwrap()
-            ).parse()
-            .unwrap();
-
-            let (send, recv) = ::std::sync::mpsc::sync_channel(1);
-            RUNTIME.lock().unwrap().spawn(
-                HYPERCLIENT
-                    .get(url)
-                    .and_then(|res| res.into_body().concat2())
-                    .map(|body| ::serde_json::from_slice::<users::ListResponse>(&body).unwrap())
-                    .map(|resp| {
-                        let mut users: BiMap<::slack_api::UserId, IString> = BiMap::new();
-                        for user in resp.members {
-                            users.insert(user.id, IString::from(user.name));
-                        }
-                        users
-                    }).and_then(move |response| {
-                        send.send(response).unwrap();
-                        Ok(())
-                    }).map_err(|e| error!("{:?}", e)),
-            );
-            recv
-        };
-
-        let conversations_recv = {
-            use slack_api::http::conversations;
-            use slack_api::http::conversations::ChannelType::*;
-            let mut req = conversations::ListRequest::new();
-            req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
-            let url = format!(
-                "https://slack.com/api/{}?token={}&{}",
-                "conversations.list",
-                token,
-                ::serde_urlencoded::to_string(&req).unwrap()
-            ).parse()
-            .unwrap();
-
-            let (send, recv) = ::std::sync::mpsc::sync_channel(1);
-            RUNTIME.lock().unwrap().spawn(
-                HYPERCLIENT
-                    .get(url)
-                    .and_then(|res| res.into_body().concat2())
-                    .map(|body| {
-                        ::serde_json::from_slice::<conversations::ListResponse>(&body).unwrap()
-                    }).map(|resp| resp.channels)
-                    .and_then(move |response| {
-                        send.send(response).unwrap();
-                        Ok(())
-                    }).map_err(|e| error!("{:?}", e)),
-            );
-            recv
-        };
-
-        // Must have users before we can figure out who each DM is for
-        let users = users_recv.recv()?;
-
-        let response_channels = conversations_recv.recv()?;
-
-        use slack_api::http::conversations::Conversation::*;
+        use slack::http::conversations::Conversation::*;
         let mut channels = BiMap::new();
         let mut channel_names = Vec::new();
         for (id, name) in response_channels
+            .channels
             .into_iter()
             .filter_map(|channel| match channel {
                 Channel {
@@ -460,26 +401,28 @@ impl SlackConn {
 
         channel_names.sort();
 
-        let response = connect_recv.recv()?;
-        let websocket_url = response.url.clone();
+        let connect_response: rtm::ConnectResponse = connect_recv.wait().next().unwrap().unwrap();
 
-        let slf = response.slf;
-        let team_name = response.team.name;
+        let websocket_url = connect_response.url.clone();
+
+        let my_name = IString::from(connect_response.slf.name);
+        let team_name = IString::from(connect_response.team.name);
         let (input_sender, input_channel) = mpsc::channel(0);
 
         let handler = Arc::new(RwLock::new(Handler {
             channels: channels.clone(),
             users: users.clone(),
-            server_name: team_name.as_str().into(),
-            my_name: slf.name.into(),
+            server_name: team_name.clone(),
+            my_name: my_name.clone(),
             input_sender,
             tui_sender: sender.clone(),
             pending_messages: Vec::new(),
         }));
 
         // Give the emoji handle as long as possible to complete
-        let mut emoji = emoji_recv
-            .recv()?
+        let emoji: emoji::ListResponse = emoji_recv.wait().next().unwrap().unwrap();
+
+        let mut emoji = emoji
             .emoji
             .unwrap_or_default()
             .keys()
@@ -492,7 +435,7 @@ impl SlackConn {
             users,
             channels: channels.clone(),
             channel_names,
-            team_name: team_name.as_str().into(),
+            team_name: team_name.clone(),
             _sender: sender.clone(),
             handler: handler.clone(),
             emoji,
@@ -501,7 +444,7 @@ impl SlackConn {
         let thread_handler = Arc::clone(&handler);
 
         // Spin off a thread that will feed message events back to the TUI
-        // No idea how to do this with new tokio
+        // websocket does not support the new tokio :(
         thread::spawn(move || {
             use websocket::result::WebSocketError;
             use websocket::OwnedMessage::{Close, Ping, Pong, Text};
@@ -533,95 +476,51 @@ impl SlackConn {
         for (conversation_id, conversation_name) in channels.clone() {
             let handler = handler.clone();
             let token = token.clone();
-            let server_name = team_name.as_str().into();
+            let server_name = team_name.clone();
 
-            use slack_api::http::conversations;
-            use slack_api::http::conversations::ConversationInfo;
+            use slack::http::conversations;
+            use slack::http::conversations::ConversationInfo;
 
-            let info_recv = {
-                let (send, recv) = ::std::sync::mpsc::sync_channel(1);
-                let info_url = format!(
-                    "https://slack.com/api/{}?token={}&{}",
-                    "conversations.info",
-                    token,
-                    ::serde_urlencoded::to_string(&conversations::InfoRequest::new(
-                        conversation_id
-                    )).unwrap()
-                ).parse()
-                .unwrap();
+            let info_recv = get_slack(
+                "conversations.info",
+                &token,
+                &conversations::InfoRequest::new(conversation_id),
+            );
+            let mut req = conversations::HistoryRequest::new(conversation_id);
+            req.limit = Some(1000);
+            let history_recv = get_slack("conversations.history", &token, &req);
 
-                RUNTIME.lock().unwrap().spawn(
-                    HYPERCLIENT
-                        .get(info_url)
-                        .and_then(|res| res.into_body().concat2())
-                        .map(|body| {
-                            ::serde_json::from_slice::<conversations::InfoResponse>(&body).unwrap()
-                        }).map(|info| match info.channel {
-                            ConversationInfo::Channel { last_read, .. } => {
-                                last_read.map(|t| t.into()).unwrap_or(::chrono::Utc::now())
-                            }
-                            ConversationInfo::Group { last_read, .. } => last_read.into(),
-                            ConversationInfo::ClosedDirectMessage { .. } => ::chrono::Utc::now(),
-                            ConversationInfo::OpenDirectMessage { last_read, .. } => {
-                                last_read.into()
-                            }
-                        }).and_then(move |response| {
-                            send.send(response).unwrap();
-                            Ok(())
-                        }).map_err(|e| error!("{:?}", e)),
-                );
-                recv
+            let info_response: conversations::InfoResponse =
+                info_recv.wait().next().unwrap().unwrap();
+
+            let read_at = match info_response.channel {
+                ConversationInfo::Channel { last_read, .. } => {
+                    last_read.map(|t| t.into()).unwrap_or(::chrono::Utc::now())
+                }
+                ConversationInfo::Group { last_read, .. } => last_read.into(),
+                ConversationInfo::ClosedDirectMessage { .. } => ::chrono::Utc::now(),
+                ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
             };
 
-            // Load the message history
-            let history_recv = {
-                let sender = sender.clone();
-                let (send, recv) = ::std::sync::mpsc::sync_channel(1);
-                let mut req = conversations::HistoryRequest::new(conversation_id);
-                req.limit = Some(1000);
-                let info_url = format!(
-                    "https://slack.com/api/{}?token={}&{}",
-                    "conversations.history",
-                    token,
-                    ::serde_urlencoded::to_string(&req).unwrap()
-                ).parse()
-                .unwrap();
-
-                RUNTIME.lock().unwrap().spawn(
-                    HYPERCLIENT
-                        .get(info_url)
-                        .and_then(|res| res.into_body().concat2())
-                        .map(|body| {
-                            ::serde_json::from_slice::<conversations::HistoryResponse>(&body)
-                                .unwrap()
-                        }).map(|history| history.messages)
-                        .map(move |messages| {
-                            let handler_handle = handler.read().unwrap();
-                            for message in messages.into_iter().rev() {
-                                if let Some(message) =
-                                    handler_handle.to_omni(message, Some(conversation_id))
-                                {
-                                    let _ = sender.send(Event::Message(message));
-                                }
-                            }
-                        }).and_then(move |response| {
-                            send.send(response).unwrap();
-                            Ok(())
-                        }).map_err(|e| error!("{:?}", e)),
-                );
-                recv
-            };
-
-            if let Err(e) = history_recv.recv() {
-                error!("{:?}", e);
-            } else {
-                let read_at = info_recv.recv()?;
-                let _ = sender.send(Event::HistoryLoaded {
-                    server: server_name,
-                    channel: conversation_name,
-                    read_at: read_at.into(),
-                });
+            // TODO: Nothing gets sent on this channel if the parse fails. Hm.
+            if let Some(Ok(history_response)) = history_recv.wait().next() {
+                let history_response: conversations::HistoryResponse = history_response;
+                let handler_handle = handler.read().unwrap();
+                history_response
+                    .messages
+                    .into_iter()
+                    .rev()
+                    .filter_map(|m| handler_handle.to_omni(m, Some(conversation_id)))
+                    .for_each(|m| {
+                        let _ = sender.send(Event::Message(m));
+                    });
             }
+
+            let _ = sender.send(Event::HistoryLoaded {
+                server: server_name,
+                channel: conversation_name,
+                read_at: read_at.into(),
+            });
         }
 
         Ok(())
@@ -675,7 +574,7 @@ impl Conn for SlackConn {
     }
 
     fn mark_read(&self, channel: &str) {
-        use slack_api::http::{channels, groups, im};
+        use slack::http::{channels, groups, im};
 
         let channel_or_group_id = match self.channels.get_left(channel) {
             Some(s) => *s,
@@ -694,7 +593,7 @@ impl Conn for SlackConn {
         let timestamp = ::chrono::offset::Utc::now().into();
 
         let url = match channel_or_group_id {
-            ::slack_api::ConversationId::Channel(channel_id) => {
+            ::slack::ConversationId::Channel(channel_id) => {
                 let req = channels::MarkRequest::new(channel_id, timestamp);
                 format!(
                     "https://slack.com/api/{}?token={}&{}",
@@ -704,7 +603,7 @@ impl Conn for SlackConn {
                 ).parse()
                 .unwrap()
             }
-            ::slack_api::ConversationId::Group(group_id) => {
+            ::slack::ConversationId::Group(group_id) => {
                 let req = groups::MarkRequest::new(group_id, timestamp);
                 format!(
                     "https://slack.com/api/{}?token={}&{}",
@@ -714,7 +613,7 @@ impl Conn for SlackConn {
                 ).parse()
                 .unwrap()
             }
-            ::slack_api::ConversationId::DirectMessage(dm_id) => {
+            ::slack::ConversationId::DirectMessage(dm_id) => {
                 let req = im::MarkRequest::new(dm_id, timestamp);
                 format!(
                     "https://slack.com/api/{}?token={}&{}",
@@ -805,8 +704,8 @@ impl Conn for SlackConn {
             error: Option<String>,
         }
 
-        use slack_api::http::reactions::Reactable;
-        let request = ::slack_api::http::reactions::AddRequest::new(
+        use slack::http::reactions::Reactable;
+        let request = ::slack::http::reactions::AddRequest::new(
             &name,
             Reactable::Message {
                 channel,
