@@ -100,7 +100,7 @@ fn main() {
         for c in slack {
             let sender = tui.sender();
             thread::spawn(move || {
-                if let Err(err) = SlackConn::create_on(c.token.clone(), sender.clone()) {
+                if let Err(err) = SlackConn::create_on(&c.token, sender.clone()) {
                     error!("Failed to create slack connection: {}\n{:#?}", err, c);
                 }
             });

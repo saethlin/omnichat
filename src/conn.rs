@@ -18,8 +18,8 @@ impl From<DateTime> for ::slack::Timestamp {
     fn from(datetime: DateTime) -> ::slack::Timestamp {
         let as_chrono = datetime.0;
         ::slack::Timestamp {
-            microseconds: as_chrono.timestamp() as i64 * 1_000_000
-                + as_chrono.timestamp_subsec_micros() as i64,
+            microseconds: as_chrono.timestamp() * 1_000_000
+                + i64::from(as_chrono.timestamp_subsec_micros()),
         }
     }
 }

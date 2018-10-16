@@ -51,7 +51,7 @@ impl Channel {
         self.messages
             .iter()
             .rev()
-            .take_while(|m| m.timestamp() > &self.read_at)
+            .take_while(|m| *m.timestamp() > self.read_at)
             .count()
     }
 }
@@ -99,7 +99,7 @@ impl Tui {
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
                     }).collect(),
-                connection: ClientConn::new(sender.clone()),
+                connection: ClientConn::create_on(sender.clone()),
                 channel_scroll_offset: 0,
                 current_channel: 0,
                 name: IString::from("Client"),
@@ -867,7 +867,7 @@ pub struct ClientConn {
 }
 
 impl ClientConn {
-    pub fn new(sender: SyncSender<Event>) -> Box<Conn> {
+    pub fn create_on(sender: SyncSender<Event>) -> Box<Conn> {
         Box::new(ClientConn {
             sender,
             channel_names: ["Errors".into(), "Messages".into()],

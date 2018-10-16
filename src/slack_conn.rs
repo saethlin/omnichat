@@ -129,7 +129,7 @@ impl Handler {
                 files,
                 ..
             }) => {
-                let user = user.unwrap_or("UNKNOWNUS".into());
+                let user = user.unwrap_or_else(|| "UNKNOWNUS".into());
                 for file in files.unwrap_or_default() {
                     if text.is_empty() {
                         text = file.url_private.unwrap_or_default();
@@ -381,7 +381,7 @@ pub struct SlackConn {
 }
 
 impl SlackConn {
-    pub fn create_on(token: String, sender: SyncSender<Event>) -> Result<(), Error> {
+    pub fn create_on(token: &str, sender: SyncSender<Event>) -> Result<(), Error> {
         // Launch all of the request
         use slack::http::{conversations, emoji, rtm, users};
         let (_emoji_send, emoji_recv) = get_slack("emoji.list", &token, &());
@@ -465,7 +465,7 @@ impl SlackConn {
         emoji.sort();
 
         let _ = sender.send(Event::Connected(Box::new(SlackConn {
-            token: token.clone(),
+            token: String::from(token),
             users,
             channels: channels.clone(),
             channel_names,
@@ -534,7 +534,7 @@ impl SlackConn {
             let read_at = match info_response.channel {
                 ConversationInfo::Channel { last_read, .. } => last_read
                     .map(|t| t.into())
-                    .unwrap_or(::conn::DateTime::now()),
+                    .unwrap_or_else(::conn::DateTime::now),
                 ConversationInfo::Group { last_read, .. } => last_read.into(),
                 ConversationInfo::ClosedDirectMessage { .. } => ::conn::DateTime::now(),
                 ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
@@ -556,7 +556,7 @@ impl SlackConn {
             let _ = sender.send(Event::HistoryLoaded {
                 server: server_name,
                 channel: conversation_name,
-                read_at: read_at.into(),
+                read_at,
             });
         }
 
