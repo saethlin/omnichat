@@ -30,4 +30,5 @@ hyper = "0.12"
 hyper-rustls = "0.14"
 serde_urlencoded = "0.5"
 hyper-tls = "0.3"
+reqwest = "0.9"
 

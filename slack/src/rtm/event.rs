@@ -267,11 +267,11 @@ pub enum Event {
         subscription: Subscription,
     },
     UpdateThreadState {
-        event_ts: Timestamp,
         has_unreads: bool,
         mention_count: u32,
         mention_count_by_channel: Vec<u32>,
         timestamp: Timestamp,
+        event_ts: Timestamp,
     },
     UserChange {
         user: User,

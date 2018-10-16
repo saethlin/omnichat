@@ -17,12 +17,7 @@
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate chrono;
-#[cfg(any(feature = "reqwest", test))]
-extern crate reqwest;
 extern crate serde_json;
-#[cfg(any(feature = "reqwest", test))]
-extern crate serde_urlencoded;
 extern crate uuid;
 #[macro_use]
 extern crate derive_new;

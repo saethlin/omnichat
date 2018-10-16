@@ -6,8 +6,6 @@ use rtm::Usergroup;
 ///
 /// Wraps https://api.slack.com/methods/usergroups.create
 
-api_call!(create, "usergroups.create", CreateRequest => CreateResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CreateRequest<'a> {
     /// A name for the User Group. Must be unique among User Groups.
@@ -37,8 +35,6 @@ pub struct CreateResponse {
 ///
 /// Wraps https://api.slack.com/methods/usergroups.disable
 
-api_call!(disable, "usergroups.disable", DisableRequest => DisableResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct DisableRequest {
     /// The encoded ID of the User Group to disable.
@@ -59,8 +55,6 @@ pub struct DisableResponse {
 ///
 /// Wraps https://api.slack.com/methods/usergroups.enable
 
-api_call!(enable, "usergroups.enable", EnableRequest => EnableResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct EnableRequest {
     /// The encoded ID of the User Group to enable.
@@ -80,8 +74,6 @@ pub struct EnableResponse {
 /// List all User Groups for a team
 ///
 /// Wraps https://api.slack.com/methods/usergroups.list
-
-api_call!(list, "usergroups.list", ListRequest => ListResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
@@ -106,8 +98,6 @@ pub struct ListResponse {
 /// Update an existing User Group
 ///
 /// Wraps https://api.slack.com/methods/usergroups.update
-
-api_call!(update, "usergroups.update", UpdateRequest => UpdateResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct UpdateRequest<'a> {

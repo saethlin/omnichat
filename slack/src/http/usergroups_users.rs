@@ -4,8 +4,6 @@ use rtm::Usergroup;
 ///
 /// Wraps https://api.slack.com/methods/usergroups.users.list
 
-api_call!(list, "usergroups.users.list", ListRequest => ListResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
     /// The encoded ID of the User Group to update.
@@ -25,8 +23,6 @@ pub struct ListResponse {
 /// Update the list of users for a User Group
 ///
 /// Wraps https://api.slack.com/methods/usergroups.users.update
-
-api_call!(update, "usergroups.users.update", UpdateRequest => UpdateResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct UpdateRequest<'a> {

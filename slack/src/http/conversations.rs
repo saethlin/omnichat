@@ -6,8 +6,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/conversations.archive
 
-api_call!(archive, "conversations.archive", ArchiveRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ArchiveRequest {
     /// ID of conversation to archive
@@ -17,8 +15,6 @@ pub struct ArchiveRequest {
 /// Closes a direct message or multi-person direct message.
 ///
 /// Wraps https://api.slack.com/methods/conversations.close
-
-api_call!(close, "conversations.close", CloseRequest => CloseResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CloseRequest {
@@ -37,8 +33,6 @@ pub struct CloseResponse {
 /// Initiates a public or private channel-based conversation
 ///
 /// Wraps https://api.slack.com/methods/conversations.create
-
-api_call!(create, "conversations.create", CreateRequest => CreateResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CreateRequest<'a> {
@@ -65,8 +59,6 @@ pub struct CreateResponse {
 /// Fetches a conversation's history of messages and events.
 ///
 /// Wraps https://api.slack.com/methods/conversations.history
-
-api_call!(history, "conversations.history", HistoryRequest => HistoryResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct HistoryRequest {
@@ -115,8 +107,6 @@ pub struct ResponseMetadata {
 ///
 /// Wraps https://api.slack.com/methods/conversations.info
 
-api_call!(info, "conversations.info", InfoRequest => InfoResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct InfoRequest {
     /// Conversation ID to learn more about
@@ -136,8 +126,6 @@ pub struct InfoResponse {
 /// Invites users to a channel.
 ///
 /// Wraps https://api.slack.com/methods/conversations.invite
-
-api_call!(invite, "conversations.invite", InviteRequest => InviteResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct InviteRequest {
@@ -159,8 +147,6 @@ pub struct InviteResponse {
 /// Joins an existing conversation.
 ///
 /// https://api.slack.com/methods/conversations.join
-
-api_call!(join, "conversations.join", JoinRequest => JoinResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct JoinRequest {
@@ -185,8 +171,6 @@ pub struct JoinResponseMetadata {
 ///
 /// Wraps https://api.slack.com/methods/conversations.kick
 
-api_call!(kick, "conversations.kick", KickRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct KickRequest {
     /// ID of conversation to remove user from.
@@ -199,8 +183,6 @@ pub struct KickRequest {
 ///
 /// Wraps https://api.slack.com/methods/conversations.leave
 
-api_call!(leave, "conversations.leave", LeaveRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct LeaveRequest {
     /// Conversation to leave
@@ -210,8 +192,6 @@ pub struct LeaveRequest {
 /// Lists all channels in a Slack team.
 ///
 /// Wraps https://api.slack.com/methods/conversations.list
-
-api_call!(list, "conversations.list", ListRequest => ListResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
@@ -267,8 +247,6 @@ pub struct ListResponse {
 ///
 /// Wraps https://api.slack.com/methods/conversations.members
 
-api_call!(members, "conversations.members", MembersRequest => MembersResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct MembersRequest {
     /// ID of the conversation to retrieve members for
@@ -296,8 +274,6 @@ pub struct MembersResponse {
 ///
 /// Wraps https://api.slack.com/methods/conversations.mark
 
-api_call!(mark, "conversations.mark", MarkRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct MarkRequest {
     /// Private channel to set reading cursor in.
@@ -309,8 +285,6 @@ pub struct MarkRequest {
 /// Renames a conversation.
 ///
 /// Wraps https://api.slack.com/methods/conversations.rename
-
-api_call!(rename, "conversations.rename", RenameRequest => RenameResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RenameRequest<'a> {
@@ -330,8 +304,6 @@ pub struct RenameResponse {
 /// Retrieve a thread of messages posted to a conversation
 ///
 /// Wraps https://api.slack.com/methods/conversations.replies
-
-api_call!(replies, "conversations.replies", RepliesRequest => RepliesResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RepliesRequest {
@@ -375,8 +347,6 @@ pub struct RepliesResponse {
 ///
 /// Wraps https://api.slack.com/methods/conversations.setPurpose
 
-api_call!(set_purpose, "conversations.setPurpose", SetPurposeRequest => SetPurposeResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct SetPurposeRequest<'a> {
     /// Conversation to set the purpose of
@@ -395,8 +365,6 @@ pub struct SetPurposeResponse {
 /// Sets the topic for a conversation
 ///
 /// Wraps https://api.slack.com/methods/conversations.setTopic
-
-api_call!(set_topic, "conversations.setTopic", SetTopicRequest => SetTopicResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct SetTopicRequest<'a> {
@@ -417,8 +385,6 @@ pub struct SetTopicResponse {
 ///
 /// Wraps https://api.slack.com/methods/conversations.unarchive
 
-api_call!(unarchive, "conversations.unarchive", UnarchiveRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct UnarchiveRequest {
     /// ID of conversation to unarchive
@@ -428,8 +394,6 @@ pub struct UnarchiveRequest {
 /// List conversations the calling user may access.
 ///
 /// Wraps https://api.slack.com/methods/users.conversations
-
-api_call!(conversations, "users.conversations", ConversationsRequest => ConversationsResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ConversationsRequest {

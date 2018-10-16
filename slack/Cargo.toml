@@ -1,7 +1,6 @@
 [package]
 authors = ["Benjamin Elder <ben.the.elder@gmail.com>", "Matt Jones <mthjones@gmail.com>", "Benjamin Kimock <kimockb@gmail.com>"]
 description = "Interface for the Slack Web API"
-documentation = "https://docs.rs/slack_api"
 license = "Apache-2.0"
 name = "slack"
 version = "0.0.0"
@@ -11,22 +10,8 @@ serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
 derive-new = "0.5"
-uuid = { version = "0.7", features = ["serde", "v4"] }
-serde_urlencoded = { version = "0.5", optional = true }
-chrono = "0.4"
-reqwest = { version = "0.9", optional = true }
 
-[dev-dependencies]
-lazy_static = "1.0"
-openssl = { version = "0.10", features = ["vendored"] }
-
-[[example]]
-name = "start_rtm"
-required-features = ["reqwest"]
-
-[[example]]
-name = "channel_history"
-required-features = ["reqwest"]
-
-[features]
-reqwest_support = ["reqwest", "serde_urlencoded"]
+[dependencies.uuid]
+version = "0.7"
+default-features = false
+features = ["serde"]

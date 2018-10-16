@@ -6,8 +6,6 @@ use timestamp::Timestamp;
 /// Wraps https://api.slack.com/methods/team.accessLogs
 use std::collections::HashMap;
 
-api_call!(access_logs, "team.accessLogs", AccessLogsRequest => AccessLogsResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct AccessLogsRequest {
     /// Number of items to return per page.
@@ -48,13 +46,6 @@ pub struct AccessLogsResponseLogin {
 ///
 /// Wraps https://api.slack.com/methods/team.billableInfo
 
-api_call!(
-    billable_info,
-    "team.billableInfo",
-    BillableInfoRequest =>
-    BillableInfoResponse
-);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct BillableInfoRequest {
     /// A user to retrieve the billable information for. Defaults to all users.
@@ -73,8 +64,6 @@ pub struct BillableInfoResponse {
 ///
 /// Wraps https://api.slack.com/methods/team.info
 
-api_call!(info, "team.info", => InfoResponse);
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InfoResponse {
@@ -85,13 +74,6 @@ pub struct InfoResponse {
 /// Gets the integration logs for the current team.
 ///
 /// Wraps https://api.slack.com/methods/team.integrationLogs
-
-api_call!(
-    integration_logs,
-    "team.integrationLogs",
-    IntegrationLogsRequest =>
-    IntegrationLogsResponse
-);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct IntegrationLogsRequest<'a> {

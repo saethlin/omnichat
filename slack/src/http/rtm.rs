@@ -5,8 +5,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/rtm.connect
 
-api_call!(connect, "rtm.connect", ConnectRequest => ConnectResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ConnectRequest {
     #[new(default)]
@@ -45,8 +43,6 @@ pub struct ConnectResponseTeam {
 /// Starts a Real Time Messaging session.
 ///
 /// Wraps https://api.slack.com/methods/rtm.start
-
-api_call!(start, "rtm.start", StartRequest => StartResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct StartRequest {

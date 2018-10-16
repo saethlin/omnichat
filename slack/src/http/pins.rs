@@ -14,8 +14,6 @@ pub enum Pinnable {
     Timestamp(::Timestamp),
 }
 
-api_call!(add, "pins.add", AddRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct AddRequest {
     /// Channel to pin the item in.
@@ -27,8 +25,6 @@ pub struct AddRequest {
 /// Lists items pinned to a channel.
 ///
 /// Wraps https://api.slack.com/methods/pins.list
-
-api_call!(list, "pins.list", ListRequest => ListResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
@@ -70,8 +66,6 @@ pub struct ListResponseItemMessage {
 /// Un-pins an item from a channel.
 ///
 /// Wraps https://api.slack.com/methods/pins.remove
-
-api_call!(remove, "pins.remove", RemoveRequest =>);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RemoveRequest {

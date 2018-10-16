@@ -5,8 +5,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/reactions.add
 
-api_call!(add, "reactions.add", AddRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct AddRequest<'a> {
     /// Reaction (emoji) name.
@@ -18,8 +16,6 @@ pub struct AddRequest<'a> {
 /// Gets reactions for an item.
 ///
 /// Wraps https://api.slack.com/methods/reactions.get
-
-api_call!(get, "reactions.get", GetRequest => GetResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct GetRequest {
@@ -54,8 +50,6 @@ pub struct GetResponseMessage {
 /// Lists reactions made by a user.
 ///
 /// Wraps https://api.slack.com/methods/reactions.list
-
-api_call!(list, "reactions.list", ListRequest => ListResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
@@ -105,8 +99,6 @@ pub struct ListResponseItemMessage {
 /// Removes a reaction from an item.
 ///
 /// Wraps https://api.slack.com/methods/reactions.remove
-
-api_call!(remove, "reactions.remove", RemoveRequest =>);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RemoveRequest<'a> {

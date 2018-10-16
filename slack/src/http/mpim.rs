@@ -7,8 +7,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/mpim.close
 
-api_call!(close, "mpim.close", CloseRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CloseRequest {
     /// MPIM to close.
@@ -18,8 +16,6 @@ pub struct CloseRequest {
 /// Fetches history of messages and events from a multiparty direct message.
 ///
 /// Wraps https://api.slack.com/methods/mpim.history
-
-api_call!(history, "mpim.history", HistoryRequest => HistoryResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct HistoryRequest {
@@ -55,8 +51,6 @@ pub struct HistoryResponse {
 ///
 /// Wraps https://api.slack.com/methods/mpim.list
 
-api_call!(list, "mpim.list", => ListResponse);
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct ListResponse {
     ok: bool,
@@ -66,8 +60,6 @@ pub struct ListResponse {
 /// Sets the read cursor in a multiparty direct message channel.
 ///
 /// Wraps https://api.slack.com/methods/mpim.mark
-
-api_call!(mark, "mpim.mark", MarkRequest =>);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct MarkRequest {
@@ -80,8 +72,6 @@ pub struct MarkRequest {
 /// This method opens a multiparty direct message.
 ///
 /// Wraps https://api.slack.com/methods/mpim.open
-
-api_call!(open, "mpim.open", OpenRequest => OpenResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct OpenRequest<'a> {
@@ -100,8 +90,6 @@ pub struct OpenResponse {
 /// Retrieve a thread of messages posted to a direct message conversation from a multiparty direct message.
 ///
 /// Wraps https://api.slack.com/methods/mpim.replies
-
-api_call!(replies, "mpim.replies", RepliesRequest => RepliesResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RepliesRequest {

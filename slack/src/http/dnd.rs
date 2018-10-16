@@ -6,13 +6,9 @@ use rtm::Team;
 ///
 /// Wraps https://api.slack.com/methods/dnd.endDnd
 
-api_call!(end_dnd, "dnd.endDnd");
-
 /// Ends the current user's snooze mode immediately.
 ///
 /// Wraps https://api.slack.com/methods/dnd.endSnooze
-
-api_call!(end_snooze, "dnd.endSnooze", => EndSnoozeResponse);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,8 +23,6 @@ pub struct EndSnoozeResponse {
 /// Retrieves a user's current Do Not Disturb status.
 ///
 /// Wraps https://api.slack.com/methods/dnd.info
-
-api_call!(info, "dnd.info", InfoRequest => InfoResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct InfoRequest {
@@ -53,8 +47,6 @@ pub struct InfoResponse {
 ///
 /// Wraps https://api.slack.com/methods/dnd.setSnooze
 
-api_call!(set_snooze, "dnd.setSnooze", SetSnoozeRequest => SetSnoozeResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct SetSnoozeRequest {
     /// Number of minutes, from now, to snooze until.
@@ -73,8 +65,6 @@ pub struct SetSnoozeResponse {
 /// Retrieves the Do Not Disturb status for users on a team.
 ///
 /// Wraps https://api.slack.com/methods/dnd.teamInfo
-
-api_call!(team_info, "dnd.teamInfo", TeamInfoRequest => TeamInfoResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct TeamInfoRequest<'a> {

@@ -4,8 +4,6 @@ use std::collections::HashMap;
 ///
 /// Wraps https://api.slack.com/methods/emoji.list
 
-api_call!(list, "emoji.list", => ListResponse);
-
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ListResponse {

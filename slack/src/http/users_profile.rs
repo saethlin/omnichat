@@ -4,8 +4,6 @@ use rtm::UserProfile;
 ///
 /// Wraps https://api.slack.com/methods/users.profile.get
 
-api_call!(get, "users.profile.get", GetRequest => GetResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct GetRequest {
     /// User to retrieve profile info for
@@ -26,8 +24,6 @@ pub struct GetResponse {
 /// Set the profile information for a user.
 ///
 /// Wraps https://api.slack.com/methods/users.profile.set
-
-api_call!(set, "users.profile.set", SetRequest => SetResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct SetRequest<'a> {

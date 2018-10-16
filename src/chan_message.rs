@@ -90,7 +90,7 @@ impl ChanMessage {
 
         use chrono::TimeZone;
         let timezone = ::chrono::offset::Local::now().timezone();
-        let localtime = timezone.from_utc_datetime(&self.timestamp.naive_utc());
+        let localtime = timezone.from_utc_datetime(&self.timestamp.as_chrono().naive_utc());
 
         self.formatted_width = Some(width);
         self.formatted.clear();

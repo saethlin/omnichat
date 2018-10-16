@@ -1,7 +1,51 @@
 pub use inlinable_string::InlinableString as IString;
 use termion;
 
-pub type DateTime = ::chrono::DateTime<::chrono::Utc>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DateTime(::chrono::DateTime<::chrono::Utc>);
+
+impl From<::slack::Timestamp> for DateTime {
+    fn from(ts: ::slack::Timestamp) -> DateTime {
+        let seconds = ts.microseconds / 1_000_000;
+        let nanoseconds = (ts.microseconds % 1_000_000) * 1_000;
+        let naive =
+            ::chrono::naive::NaiveDateTime::from_timestamp(seconds as i64, nanoseconds as u32);
+        DateTime(::chrono::DateTime::from_utc(naive, ::chrono::Utc))
+    }
+}
+
+impl From<DateTime> for ::slack::Timestamp {
+    fn from(datetime: DateTime) -> ::slack::Timestamp {
+        let as_chrono = datetime.0;
+        ::slack::Timestamp {
+            microseconds: as_chrono.timestamp() as i64 * 1_000_000
+                + as_chrono.timestamp_subsec_micros() as i64,
+        }
+    }
+}
+
+// Can make one from a chrono datetime, shouldn't be necessary hm
+impl From<::chrono::DateTime<::chrono::Utc>> for DateTime {
+    fn from(datetime: ::chrono::DateTime<::chrono::Utc>) -> DateTime {
+        DateTime(datetime)
+    }
+}
+
+impl ::std::fmt::Display for DateTime {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl DateTime {
+    pub fn now() -> Self {
+        DateTime(::chrono::offset::Utc::now())
+    }
+
+    pub fn as_chrono(&self) -> &::chrono::DateTime<::chrono::Utc> {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Message {

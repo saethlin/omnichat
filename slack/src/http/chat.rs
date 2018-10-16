@@ -7,8 +7,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/chat.delete
 
-api_call!(delete, "chat.delete", DeleteRequest => DeleteResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct DeleteRequest {
     /// Timestamp of the message to be deleted.
@@ -32,8 +30,6 @@ pub struct DeleteResponse {
 ///
 /// Wraps https://api.slack.com/methods/chat.meMessage
 
-api_call!(me_message, "chat.meMessage", MeMessageRequest => MeMessageResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct MeMessageRequest<'a> {
     /// Channel to send message to. Can be a public channel, private group or IM channel. Can be an encoded ID, or a name.
@@ -53,13 +49,6 @@ pub struct MeMessageResponse {
 /// Sends a message to a channel.
 ///
 /// Wraps https://api.slack.com/methods/chat.postMessage
-
-api_call!(
-    post_message,
-    "chat.postMessage",
-    PostMessageRequest =>
-    PostMessageResponse
-);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct PostMessageRequest<'a> {
@@ -132,8 +121,6 @@ pub struct PostMessageResponse {
 ///
 /// Wraps https://api.slack.com/methods/chat.unfurl
 
-api_call!(unfurl, "chat.unfurl", UnfurlRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct UnfurlRequest<'a> {
     /// Channel ID of the message
@@ -156,8 +143,6 @@ pub struct UnfurlRequest<'a> {
 /// Updates a message.
 ///
 /// Wraps https://api.slack.com/methods/chat.update
-
-api_call!(update, "chat.update", UpdateRequest => UpdateResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct UpdateRequest<'a> {

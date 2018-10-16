@@ -7,8 +7,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/groups.archive
 
-api_call!(archive, "groups.archive", ArchiveRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ArchiveRequest {
     /// Private channel to archive
@@ -19,8 +17,6 @@ pub struct ArchiveRequest {
 ///
 /// Wraps https://api.slack.com/methods/groups.close
 
-api_call!(close, "groups.close", CloseRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CloseRequest {
     /// Private channel to close.
@@ -30,8 +26,6 @@ pub struct CloseRequest {
 /// Creates a private channel.
 ///
 /// Wraps https://api.slack.com/methods/groups.create
-
-api_call!(create, "groups.create", CreateRequest => CreateResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CreateRequest<'a> {
@@ -53,13 +47,6 @@ pub struct CreateResponse {
 ///
 /// Wraps https://api.slack.com/methods/groups.createChild
 
-api_call!(
-    create_child,
-    "groups.createChild",
-    CreateChildRequest =>
-    CreateChildResponse
-);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CreateChildRequest {
     /// Private channel to clone and archive.
@@ -76,8 +63,6 @@ pub struct CreateChildResponse {
 /// Fetches history of messages and events from a private channel.
 ///
 /// Wraps https://api.slack.com/methods/groups.history
-
-api_call!(history, "groups.history", HistoryRequest => HistoryResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct HistoryRequest {
@@ -114,8 +99,6 @@ pub struct HistoryResponse {
 ///
 /// Wraps https://api.slack.com/methods/groups.info
 
-api_call!(info, "groups.info", InfoRequest => InfoResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct InfoRequest {
     /// Private channel to get info on
@@ -132,8 +115,6 @@ pub struct InfoResponse {
 /// Invites a user to a private channel.
 ///
 /// Wraps https://api.slack.com/methods/groups.invite
-
-api_call!(invite, "groups.invite", InviteRequest => InviteResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct InviteRequest {
@@ -154,8 +135,6 @@ pub struct InviteResponse {
 ///
 /// Wraps https://api.slack.com/methods/groups.kick
 
-api_call!(kick, "groups.kick", KickRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct KickRequest {
     /// Private channel to remove user from.
@@ -168,8 +147,6 @@ pub struct KickRequest {
 ///
 /// Wraps https://api.slack.com/methods/groups.leave
 
-api_call!(leave, "groups.leave", LeaveRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct LeaveRequest {
     /// Private channel to leave
@@ -179,8 +156,6 @@ pub struct LeaveRequest {
 /// Lists private channels that the calling user has access to.
 ///
 /// Wraps https://api.slack.com/methods/groups.list
-
-api_call!(list, "groups.list", ListRequest => ListResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
@@ -200,8 +175,6 @@ pub struct ListResponse {
 ///
 /// Wraps https://api.slack.com/methods/groups.mark
 
-api_call!(mark, "groups.mark", MarkRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct MarkRequest {
     /// Private channel to set reading cursor in.
@@ -214,8 +187,6 @@ pub struct MarkRequest {
 ///
 /// Wraps https://api.slack.com/methods/groups.open
 
-api_call!(open, "groups.open", OpenRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct OpenRequest {
     /// Private channel to open.
@@ -225,8 +196,6 @@ pub struct OpenRequest {
 /// Renames a private channel.
 ///
 /// Wraps https://api.slack.com/methods/groups.rename
-
-api_call!(rename, "groups.rename", RenameRequest => RenameResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RenameRequest<'a> {
@@ -259,8 +228,6 @@ pub struct RenameResponseGroup {
 ///
 /// Wraps https://api.slack.com/methods/groups.replies
 
-api_call!(replies, "groups.replies", RepliesRequest => RepliesResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RepliesRequest {
     /// Private channel to fetch thread from
@@ -281,8 +248,6 @@ pub struct RepliesResponse {
 ///
 /// Wraps https://api.slack.com/methods/groups.setPurpose
 
-api_call!(set_purpose, "groups.setPurpose", SetPurposeRequest => SetPurposeResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct SetPurposeRequest<'a> {
     /// Private channel to set the purpose of
@@ -302,8 +267,6 @@ pub struct SetPurposeResponse {
 ///
 /// Wraps https://api.slack.com/methods/groups.setTopic
 
-api_call!(set_topic, "groups.setTopic", SetTopicRequest => SetTopicResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct SetTopicRequest<'a> {
     /// Private channel to set the topic of
@@ -322,8 +285,6 @@ pub struct SetTopicResponse {
 /// Unarchives a private channel.
 ///
 /// Wraps https://api.slack.com/methods/groups.unarchive
-
-api_call!(unarchive, "groups.unarchive", UnarchiveRequest =>);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct UnarchiveRequest {

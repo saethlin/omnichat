@@ -11,6 +11,7 @@ use std::thread;
 lazy_static! {
     pub static ref MENTION_REGEX: Regex = Regex::new(r"<@[A-Z0-9]{9}>").unwrap();
     pub static ref CHANNEL_REGEX: Regex = Regex::new(r"<#[A-Z0-9]{9}\|(?P<n>.*?)>").unwrap();
+    pub static ref CLIENT: ::reqwest::Client = ::reqwest::Client::new();
     pub static ref HYPERCLIENT: ::hyper::Client<::hyper_rustls::HttpsConnector<::hyper::client::HttpConnector>, ::hyper::Body> = {
         let https = ::hyper_rustls::HttpsConnector::new(4);
         ::hyper::client::Client::builder().build::<_, ::hyper::Body>(https)
@@ -22,8 +23,11 @@ lazy_static! {
 fn get_slack<T, R>(
     endpoint: &'static str,
     token: &str,
-    request: &T,
-) -> ::futures::sync::mpsc::Receiver<R>
+    request: T,
+) -> (
+    ::futures::sync::mpsc::Sender<R>,
+    ::futures::sync::mpsc::Receiver<R>,
+)
 where
     T: ::serde::Serialize,
     R: ::serde::de::DeserializeOwned + Send + 'static,
@@ -37,17 +41,46 @@ where
     ).parse()
     .unwrap();
 
+    let isend = send.clone();
     RUNTIME.lock().unwrap().spawn(
         HYPERCLIENT
             .get(url)
             .map_err(|e| error!("{:?}", e))
             .and_then(|res| res.into_body().concat2().map_err(|e| error!("{:?}", e)))
             .and_then(|body| ::serde_json::from_slice::<R>(&body).map_err(|e| error!("{:?}", e)))
-            .and_then(move |response| send.send(response).map_err(|e| error!("{:?}", e)))
+            .and_then(move |response| isend.send(response).map_err(|e| error!("{:?}", e)))
             .map(|_| ()),
     );
-    recv
+    (send, recv)
 }
+/*
+use std::thread::JoinHandle;
+fn get_slack<T, R>(endpoint: &'static str, token: &str, request: T) -> JoinHandle<Result<R, String>>
+where
+    T: ::serde::Serialize + Send + 'static,
+    R: ::serde::de::DeserializeOwned + Send + 'static,
+{
+    use slack::http::SlackError;
+    let token = token.to_string();
+    thread::spawn(move || {
+        let url = format!(
+            "https://slack.com/api/{}?token={}&{}",
+            endpoint,
+            token,
+            ::serde_urlencoded::to_string(request).unwrap_or_default()
+        ).parse::<::reqwest::Url>()
+        .unwrap();
+
+        let body = CLIENT.get(url).send().unwrap().text().unwrap();
+        match ::serde_json::from_str::<SlackError>(&body).unwrap() {
+            SlackError { ok: true, .. } => Ok(::serde_json::from_str::<R>(&body).unwrap()),
+            SlackError { ok: false, error } => {
+                Err(error.unwrap_or_else(|| String::from("no error given")))
+            }
+        }
+    })
+}
+*/
 
 struct Handler {
     channels: BiMap<::slack::ConversationId, IString>,
@@ -351,14 +384,15 @@ impl SlackConn {
     pub fn create_on(token: String, sender: SyncSender<Event>) -> Result<(), Error> {
         // Launch all of the request
         use slack::http::{conversations, emoji, rtm, users};
-        let emoji_recv = get_slack("emoji.list", &token, &());
-        let connect_recv = get_slack("rtm.connect", &token, &());
-        let users_recv = get_slack("users.list", &token, &users::ListRequest::new());
+        let (_emoji_send, emoji_recv) = get_slack("emoji.list", &token, &());
+        let (_connect_send, connect_recv) = get_slack("rtm.connect", &token, &());
+        let (_users_send, users_recv) = get_slack("users.list", &token, users::ListRequest::new());
 
         use slack::http::conversations::ChannelType::*;
         let mut req = conversations::ListRequest::new();
         req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
-        let conversations_recv = get_slack("conversations.list", &token, &req);
+        let (_conversations_send, conversations_recv) =
+            get_slack("conversations.list", &token, req);
 
         // We need to know about the users first so that we can digest the list of conversations
         let users_response: users::ListResponse = users_recv.wait().next().unwrap().unwrap();
@@ -472,38 +506,41 @@ impl SlackConn {
             core.run(runner).unwrap();
         });
 
-        // Launch threads to populate the message history
-        for (conversation_id, conversation_name) in channels.clone() {
-            let handler = handler.clone();
-            let token = token.clone();
-            let server_name = team_name.clone();
-
+        let mut requests = Vec::new();
+        for (conversation_id, _) in channels.clone() {
             use slack::http::conversations;
-            use slack::http::conversations::ConversationInfo;
 
             let info_recv = get_slack(
                 "conversations.info",
                 &token,
-                &conversations::InfoRequest::new(conversation_id),
+                conversations::InfoRequest::new(conversation_id),
             );
             let mut req = conversations::HistoryRequest::new(conversation_id);
             req.limit = Some(1000);
-            let history_recv = get_slack("conversations.history", &token, &req);
+            let history_recv = get_slack("conversations.history", &token, req);
+
+            requests.push((info_recv, history_recv));
+        }
+
+        // Launch threads to populate the message history
+        for ((conversation_id, conversation_name), (info_recv, history_recv)) in
+            channels.clone().into_iter().zip(requests.into_iter())
+        {
+            use slack::http::conversations::ConversationInfo;
+            let server_name = team_name.clone();
 
             let info_response: conversations::InfoResponse =
-                info_recv.wait().next().unwrap().unwrap();
-
+                info_recv.1.wait().next().unwrap().unwrap();
             let read_at = match info_response.channel {
-                ConversationInfo::Channel { last_read, .. } => {
-                    last_read.map(|t| t.into()).unwrap_or(::chrono::Utc::now())
-                }
+                ConversationInfo::Channel { last_read, .. } => last_read
+                    .map(|t| t.into())
+                    .unwrap_or(::conn::DateTime::now()),
                 ConversationInfo::Group { last_read, .. } => last_read.into(),
-                ConversationInfo::ClosedDirectMessage { .. } => ::chrono::Utc::now(),
+                ConversationInfo::ClosedDirectMessage { .. } => ::conn::DateTime::now(),
                 ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
             };
 
-            // TODO: Nothing gets sent on this channel if the parse fails. Hm.
-            if let Some(Ok(history_response)) = history_recv.wait().next() {
+            if let Ok(history_response) = history_recv.1.wait().next().unwrap() {
                 let history_response: conversations::HistoryResponse = history_response;
                 let handler_handle = handler.read().unwrap();
                 history_response
@@ -590,59 +627,24 @@ impl Conn for SlackConn {
 
         let token = self.token.clone();
 
-        let timestamp = ::chrono::offset::Utc::now().into();
+        let timestamp = ::conn::DateTime::now().into();
 
-        let url = match channel_or_group_id {
+        use slack::http::SlackError;
+        match channel_or_group_id {
             ::slack::ConversationId::Channel(channel_id) => {
                 let req = channels::MarkRequest::new(channel_id, timestamp);
-                format!(
-                    "https://slack.com/api/{}?token={}&{}",
-                    "channels.mark",
-                    token,
-                    ::serde_urlencoded::to_string(&req).unwrap()
-                ).parse()
-                .unwrap()
+                let _ =
+                    get_slack::<channels::MarkRequest, SlackError>("channels.mark", &token, req);
             }
             ::slack::ConversationId::Group(group_id) => {
                 let req = groups::MarkRequest::new(group_id, timestamp);
-                format!(
-                    "https://slack.com/api/{}?token={}&{}",
-                    "groups.mark",
-                    token,
-                    ::serde_urlencoded::to_string(&req).unwrap()
-                ).parse()
-                .unwrap()
+                let _ = get_slack::<groups::MarkRequest, SlackError>("groups.mark", &token, req);
             }
             ::slack::ConversationId::DirectMessage(dm_id) => {
                 let req = im::MarkRequest::new(dm_id, timestamp);
-                format!(
-                    "https://slack.com/api/{}?token={}&{}",
-                    "im.mark",
-                    token,
-                    ::serde_urlencoded::to_string(&req).unwrap()
-                ).parse()
-                .unwrap()
+                let _ = get_slack::<im::MarkRequest, SlackError>("im.mark", &token, req);
             }
-        };
-
-        #[derive(Deserialize)]
-        struct SlackResponse {
-            #[allow(dead_code)]
-            ok: bool,
-            error: Option<String>,
         }
-
-        RUNTIME.lock().unwrap().spawn(
-            HYPERCLIENT
-                .get(url)
-                .and_then(|resp| resp.into_body().concat2())
-                .map(|body| ::serde_json::from_slice::<SlackResponse>(&body).unwrap())
-                .map(|resp| {
-                    if let Some(err) = resp.error {
-                        error!("{}", err);
-                    }
-                }).map_err(|e| error!("{:?}", e)),
-        );
     }
 
     fn autocomplete(&self, word: &str) -> Vec<String> {
@@ -697,15 +699,8 @@ impl Conn for SlackConn {
             }
         };
 
-        #[derive(Deserialize)]
-        struct SlackResponse {
-            #[allow(dead_code)]
-            ok: bool,
-            error: Option<String>,
-        }
-
         use slack::http::reactions::Reactable;
-        let request = ::slack::http::reactions::AddRequest::new(
+        let req = ::slack::http::reactions::AddRequest::new(
             &name,
             Reactable::Message {
                 channel,
@@ -717,20 +712,10 @@ impl Conn for SlackConn {
             "https://slack.com/api/{}?token={}&{}",
             "reactions.add",
             token,
-            ::serde_urlencoded::to_string(&request).unwrap()
-        ).parse()
+            ::serde_urlencoded::to_string(req).unwrap_or_default()
+        ).parse::<::reqwest::Url>()
         .unwrap();
 
-        RUNTIME.lock().unwrap().spawn(
-            HYPERCLIENT
-                .get(url)
-                .and_then(|resp| resp.into_body().concat2())
-                .map(|body| ::serde_json::from_slice::<SlackResponse>(&body).unwrap())
-                .map(|resp| {
-                    if let Some(err) = resp.error {
-                        error!("{}", err);
-                    }
-                }).map_err(|e| error!("{:?}", e)),
-        );
+        let _ = CLIENT.get(url).send();
     }
 }

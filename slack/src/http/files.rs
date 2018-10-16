@@ -6,8 +6,6 @@ use rtm::{File, FileComment, Paging};
 ///
 /// Wraps https://api.slack.com/methods/files.delete
 
-api_call!(delete, "files.delete", DeleteRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct DeleteRequest {
     /// ID of file to delete.
@@ -17,8 +15,6 @@ pub struct DeleteRequest {
 /// Gets information about a team file.
 ///
 /// Wraps https://api.slack.com/methods/files.info
-
-api_call!(info, "files.info", InfoRequest => InfoResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct InfoRequest {
@@ -44,8 +40,6 @@ pub struct InfoResponse {
 /// Lists & filters team files.
 ///
 /// Wraps https://api.slack.com/methods/files.list
-
-api_call!(list, "files.list", ListRequest => ListResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
@@ -114,13 +108,6 @@ pub struct ListResponse {
 ///
 /// Wraps https://api.slack.com/methods/files.revokePublicURL
 
-api_call!(
-    revoke_public_url,
-    "files.revokePublicURL",
-    RevokePublicURLRequest =>
-    RevokePublicURLResponse
-);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RevokePublicURLRequest {
     /// File to revoke
@@ -137,13 +124,6 @@ pub struct RevokePublicURLResponse {
 /// Enables a file for public/external sharing.
 ///
 /// Wraps https://api.slack.com/methods/files.sharedPublicURL
-
-api_call!(
-    shared_public_url,
-    "files.sharedPublicURL",
-    SharedPublicURLRequest =>
-    SharedPublicURLResponse
-);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct SharedPublicURLRequest {

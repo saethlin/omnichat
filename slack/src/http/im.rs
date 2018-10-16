@@ -7,8 +7,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/im.close
 
-api_call!(close, "im.close", CloseRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct CloseRequest {
     /// Direct message channel to close.
@@ -18,8 +16,6 @@ pub struct CloseRequest {
 /// Fetches history of messages and events from direct message channel.
 ///
 /// Wraps https://api.slack.com/methods/im.history
-
-api_call!(history, "im.history", HistoryRequest => HistoryResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct HistoryRequest {
@@ -57,8 +53,6 @@ pub struct HistoryResponse {
 ///
 /// Wraps https://api.slack.com/methods/im.list
 
-api_call!(list, "im.list", ListRequest => ListResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
     /// Paginate through collections of data by setting the `cursor` parameter to a `next_cursor` attribute returned by a previous request's `response_metadata`. Default value fetches the first "page" of the collection. See pagination for more detail.
@@ -81,8 +75,6 @@ pub struct ListResponse {
 ///
 /// Wraps https://api.slack.com/methods/im.mark
 
-api_call!(mark, "im.mark", MarkRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct MarkRequest {
     /// Direct message channel to set reading cursor in.
@@ -94,8 +86,6 @@ pub struct MarkRequest {
 /// Opens a direct message channel.
 ///
 /// Wraps https://api.slack.com/methods/im.open
-
-api_call!(open, "im.open", OpenRequest => OpenResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct OpenRequest {
@@ -115,8 +105,6 @@ pub struct OpenResponse {
 /// Retrieve a thread of messages posted to a direct message conversation
 ///
 /// Wraps https://api.slack.com/methods/im.replies
-
-api_call!(replies, "im.replies", RepliesRequest => RepliesResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RepliesRequest {

@@ -95,7 +95,7 @@ impl Tui {
                     .map(|name| Channel {
                         messages: Vec::new(),
                         name: (*name).into(),
-                        read_at: ::chrono::Utc::now(),
+                        read_at: ::chrono::Utc::now().into(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
                     }).collect(),
@@ -135,7 +135,7 @@ impl Tui {
     fn reset_current_unreads(&mut self) {
         let server = self.servers.get_mut();
         if server.channels[server.current_channel].num_unreads() > 0 {
-            server.channels[server.current_channel].read_at = ::chrono::Utc::now();
+            server.channels[server.current_channel].read_at = ::chrono::Utc::now().into();
             let current_channel = &server.channels[server.current_channel];
 
             server.connection.mark_read(&current_channel.name);
@@ -227,7 +227,7 @@ impl Tui {
                 channel: "Errors".into(),
                 contents: message,
                 is_mention: false,
-                timestamp: ::chrono::Utc::now(),
+                timestamp: ::chrono::Utc::now().into(),
                 sender: "Client".into(),
                 reactions: Vec::new(),
             }));
@@ -243,7 +243,7 @@ impl Tui {
                 .map(|name| Channel {
                     messages: Vec::new(),
                     name,
-                    read_at: ::chrono::Utc::now(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
+                    read_at: ::chrono::Utc::now().into(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
                 })
@@ -887,7 +887,7 @@ impl Conn for ClientConn {
             contents: contents.into(),
             sender: "You".into(),
             is_mention: false,
-            timestamp: ::chrono::Utc::now(),
+            timestamp: ::chrono::Utc::now().into(),
             reactions: Vec::new(),
         }));
     }

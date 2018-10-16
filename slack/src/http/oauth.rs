@@ -2,8 +2,6 @@
 ///
 /// Wraps https://api.slack.com/methods/oauth.access
 
-api_call!(access, "oauth.access", AccessRequest => AccessResponse);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct AccessRequest<'a> {
     /// Issued when you created your application.

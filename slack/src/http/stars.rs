@@ -5,8 +5,6 @@ use timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/stars.add
 
-api_call!(add, "stars.add", AddRequest =>);
-
 #[derive(Clone, Debug, Serialize, new)]
 pub struct AddRequest {
     #[serde(flatten)]
@@ -16,8 +14,6 @@ pub struct AddRequest {
 /// Lists stars for a user.
 ///
 /// Wraps https://api.slack.com/methods/stars.list
-
-api_call!(list, "stars.list", ListRequest => ListResponse);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct ListRequest {
@@ -50,8 +46,6 @@ pub enum ListResponseItem {
 /// Removes a star from an item.
 ///
 /// Wraps https://api.slack.com/methods/stars.remove
-
-api_call!(remove, "stars.remove", RemoveRequest =>);
 
 #[derive(Clone, Debug, Serialize, new)]
 pub struct RemoveRequest {
