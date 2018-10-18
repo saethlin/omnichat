@@ -7,9 +7,9 @@ I really dislike how much my chromebook lags while trying to use Slack, Discord,
 ![omnichat_slack](omni_small.png)
 
 ## Platforms
-* Slack (DM support questionable, no thread support)
-* Discord (mostly unusable right now, discord-rs needs maintenance)
+* Slack: DM support questionable, no thread support. Possibly usable.
+* Discord: in progress, can load history and that's it
 
-## Other Features
+## Planned Other Features
 * Command to copy latest URL to the clipboard
 * Command to upload a file (this is the only feature that keeps me using the desktop client)
