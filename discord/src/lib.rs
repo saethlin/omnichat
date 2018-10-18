@@ -3,6 +3,7 @@ extern crate bitflags;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
+use std::borrow::Cow;
 
 pub const BASE_URL: &'static str = "https://discordapp.com/api";
 
@@ -15,18 +16,18 @@ pub struct Error<'a> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub enum GatewayMessage {
+pub enum GatewayMessage<'a> {
     Hello {
         // Opcode 10
         heartbeat_interval: u64,
-        _trace: Vec<String>,
+        _trace: Vec<&'a str>,
     },
     Heartbeat,   // Opcode 1
     HearbeatAck, // Opcode 11
     Identify {
         // Opcode 2
-        token: String,
-        properties: Properties,
+        token: &'a str,
+        properties: Properties<'a>,
         compress: bool,
         large_threshold: u64,
         shard: (u8, u8),
@@ -36,30 +37,29 @@ pub enum GatewayMessage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Properties {
+pub struct Properties<'a> {
     #[serde(rename = "$os")]
-    os: String,
+    os: &'a str,
     #[serde(rename = "$browser")]
-    browser: String,
+    browser: &'a str,
     #[serde(rename = "$device")]
-    device: String,
+    device: &'a str,
 }
-
-//{"id":1,"type":"message","channel":"C3QV41U6M","text":"test"}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct User {
+pub struct User<'a> {
     pub id: Snowflake,
-    pub username: String,
-    pub discriminator: String,
+    #[serde(borrow)]
+    pub username: Cow<'a, str>,
+    pub discriminator: &'a str,
     pub avatar: Option<Snowflake>,
     pub bot: Option<bool>,
     pub mfa_enabled: Option<bool>,
-    pub locale: Option<String>,
+    pub locale: Option<&'a str>,
     pub verified: Option<bool>,
-    pub email: Option<String>,
-    pub phone: Option<String>,
+    pub email: Option<&'a str>,
+    pub phone: Option<&'a str>,
     pub flags: Option<u64>,
 }
 
@@ -72,34 +72,36 @@ impl ::std::fmt::Display for Snowflake {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Guild {
+#[derive(Clone, Debug, Deserialize)]
+pub struct Guild<'a> {
     pub id: Snowflake,
-    pub name: String,
+    #[serde(borrow)]
+    pub name: Cow<'a, str>,
     pub icon: Option<Snowflake>,
     pub owner: bool,
     pub permissions: Permissions, // Oh no they've encoded them strangely
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Channel {
+pub struct Channel<'a> {
     pub id: Snowflake,
     #[serde(rename = "type")]
     pub ty: u8,
     pub guild_id: Option<Snowflake>,
     pub position: Option<u64>,
     pub permission_overwrites: Vec<Overwrite>,
-    pub name: Option<String>,
-    pub topic: Option<String>,
+    #[serde(borrow)]
+    pub name: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    pub topic: Option<Cow<'a, str>>,
     pub nsfw: Option<bool>,
     pub last_message_id: Option<Snowflake>,
     pub bitrate: Option<u64>,
     pub user_limit: Option<u64>,
     pub rate_limit_per_user: Option<u64>,
-    pub recipients: Option<Vec<User>>,
-    pub icon: Option<String>,
+    pub recipients: Option<Vec<User<'a>>>,
+    pub icon: Option<Cow<'a, str>>,
     pub owner_id: Option<Snowflake>,
     pub application_id: Option<Snowflake>,
     pub parent_id: Option<Snowflake>,
@@ -109,46 +111,82 @@ pub struct Channel {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Timestamp(String);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum GuildType {
-    GUILD_TEXT,
-    DM,
-    GUILD_VOICE,
-    GROUP_DM,
-    GUILD_CATEGORY,
+#[derive(Clone, Debug)]
+pub enum ChannelType {
+    GuildText,
+    Dm,
+    GuildVoice,
+    GroupDm,
+    GuildCategory,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ChannelTypeVisitor;
+
+impl<'de> ::serde::de::Visitor<'de> for ChannelTypeVisitor {
+    type Value = ChannelType;
+    fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        formatter.write_str("an integer")
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: ::serde::de::Error,
+    {
+        match value {
+            0 => Ok(ChannelType::GuildText),
+            1 => Ok(ChannelType::Dm),
+            2 => Ok(ChannelType::GuildVoice),
+            3 => Ok(ChannelType::GroupDm),
+            4 => Ok(ChannelType::GuildCategory),
+            _ => Err(::serde::de::Error::custom(format!(
+                "invalid channel type {}",
+                value
+            ))),
+        }
+    }
+}
+
+impl<'de> ::serde::Deserialize<'de> for ChannelType {
+    fn deserialize<D>(deserializer: D) -> Result<ChannelType, D::Error>
+    where
+        D: ::serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(ChannelTypeVisitor)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Overwrite {
     pub id: Snowflake,
     #[serde(rename = "type")]
-    pub ty: String,
+    pub ty: OverwriteType,
     pub allow: Permissions,
     pub deny: Permissions,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OverwriteType {
     Role,
     Member,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Message {
+#[derive(Clone, Debug, Deserialize)]
+pub struct Message<'a> {
     pub id: Snowflake,
     pub channel_id: Snowflake,
     pub guild_id: Option<Snowflake>,
     // There's an author field but it's an untagged enum
-    pub author: User,
+    pub author: User<'a>,
     //pub member: Option<PartialGuild>,
-    pub content: String,
-    pub timestamp: String,
-    pub edited_timestamp: Option<String>,
+    #[serde(borrow)]
+    pub content: Cow<'a, str>,
+    pub timestamp: &'a str,
+    pub edited_timestamp: Option<&'a str>,
     pub tts: bool,
     pub mention_everyone: bool,
-    pub mentions: Vec<User>,
+    pub mentions: Vec<User<'a>>,
     pub mention_roles: Vec<Snowflake>,
     //pub attachments: Vec<Attachment>,
     //jpub embeds: Vec<Embed>,
