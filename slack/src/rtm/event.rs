@@ -19,7 +19,7 @@ pub enum Event {
         event_ts: Timestamp,
     },
     AccountsChanged {
-        events_ts: Timestamp,
+        event_ts: Timestamp,
     },
     BotAdded {
         bot: Bot,
@@ -37,7 +37,7 @@ pub enum Event {
     ChannelLeft {
         actor_id: UserId,
         channel: ChannelId,
-        events_ts: Timestamp,
+        event_ts: Timestamp,
     },
     ChannelMarked {
         channel: ChannelId,

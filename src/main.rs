@@ -1,30 +1,26 @@
-extern crate failure;
-#[macro_use]
-extern crate lazy_static;
-extern crate openssl_probe;
-extern crate regex;
-#[macro_use]
-extern crate serde_derive;
 extern crate chrono;
-extern crate libc;
-extern crate signal_hook;
-#[macro_use]
-extern crate log;
 extern crate dirs;
+extern crate discord;
 extern crate futures;
 extern crate inlinable_string;
 #[macro_use]
-extern crate serde_json;
-extern crate hyper;
-extern crate hyper_rustls;
-extern crate hyper_tls;
+extern crate lazy_static;
+extern crate libc;
+#[macro_use]
+extern crate log;
+extern crate openssl_probe;
+extern crate regex;
 extern crate reqwest;
 extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+#[macro_use]
+extern crate serde_json;
 extern crate serde_urlencoded;
+extern crate signal_hook;
 extern crate slack;
 extern crate termion;
 extern crate textwrap;
-extern crate tokio;
 extern crate tokio_core;
 extern crate toml;
 extern crate websocket;
@@ -34,6 +30,7 @@ mod conn;
 mod bimap;
 mod chan_message;
 mod cursor_vec;
+mod discord_conn;
 mod logger;
 mod slack_conn;
 mod tui;
@@ -56,6 +53,7 @@ struct Config {
 }
 
 fn main() {
+    use discord_conn::DiscordConn;
     use slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -77,7 +75,8 @@ fn main() {
                 config_path
             );
             std::process::exit(1)
-        }).read_to_string(&mut contents)
+        })
+        .read_to_string(&mut contents)
         .unwrap_or_else(|_| {
             println!("Unable to read config file at {:?}", &config_path);
             std::process::exit(1)
@@ -103,6 +102,16 @@ fn main() {
                 if let Err(err) = SlackConn::create_on(&c.token, sender.clone()) {
                     error!("Failed to create slack connection: {}\n{:#?}", err, c);
                 }
+            });
+        }
+    }
+
+    if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
+        for d in discord {
+            let sender = tui.sender();
+            let token = discord_token.clone();
+            thread::spawn(move || {
+                let _ = DiscordConn::create_on(&token, sender.clone(), &d.name);
             });
         }
     }

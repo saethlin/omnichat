@@ -98,7 +98,8 @@ impl Tui {
                         read_at: ::chrono::Utc::now().into(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
-                    }).collect(),
+                    })
+                    .collect(),
                 connection: ClientConn::create_on(sender.clone()),
                 channel_scroll_offset: 0,
                 current_channel: 0,
@@ -179,7 +180,8 @@ impl Tui {
             (0..server.channels.len())
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
-                }).find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+                })
+                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -283,7 +285,8 @@ impl Tui {
             .or_else(|| {
                 error!("Unable to add message, no server named {}", message.server);
                 None
-            }).and_then(|server| {
+            })
+            .and_then(|server| {
                 server
                     .channels
                     .iter_mut()

@@ -42,12 +42,12 @@ impl<'de> Visitor<'de> for TimestampVisitor {
         }
     }
 
-    fn visit_i64<E>(self, value: i64) -> Result<Timestamp, E>
+    fn visit_u64<E>(self, value: u64) -> Result<Timestamp, E>
     where
         E: de::Error,
     {
         Ok(Timestamp {
-            microseconds: value * 1_000_000,
+            microseconds: value as i64 * 1_000_000,
         })
     }
 }

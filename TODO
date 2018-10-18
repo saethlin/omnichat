@@ -3,12 +3,8 @@ include default emoji in autocomplete results
 command to upload a file
 command to copy last url
 
-Keep an on-disk cache of historical messages so we don't have to download so many every time
-
-Discord: Figure out how to ack messages
-Discord+Slack+TUI: Support for muted channels
-Discord+Slack: Make sure all users are loaded
-Discord+Slack: Handle attachment-only messages
+Support for muted channels
+Make sure all users are loaded
 
 Wrap or scroll server names
 Send "user is typing" messages
