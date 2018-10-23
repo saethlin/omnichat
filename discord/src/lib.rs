@@ -10,7 +10,12 @@ pub const BASE_URL: &'static str = "https://discordapp.com/api";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Error<'a> {
-    pub code: u64,
+    // for rate limits
+    pub global: Option<bool>,
+    // in ms
+    pub retry_after: Option<u64>,
+    // max error code is 90001
+    pub code: Option<u32>,
     pub message: &'a str,
 }
 
