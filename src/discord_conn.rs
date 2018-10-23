@@ -40,13 +40,14 @@ struct Response {
     status: ::reqwest::StatusCode,
 }
 
-pub fn permissions_in(chan: &::discord::Channel, guild: Option<&::discord::Guild>) -> ::discord::Permissions {
+pub fn permissions_in(
+    chan: &::discord::Channel,
+    guild: Option<&::discord::Guild>,
+) -> ::discord::Permissions {
     let mut perms = match guild {
         Some(guild) => {
             let perms = guild.permissions.clone();
-            if (perms.contains(::discord::Permissions::ADMINISTRATOR))
-                || guild.owner
-            {
+            if (perms.contains(::discord::Permissions::ADMINISTRATOR)) || guild.owner {
                 ::discord::Permissions::all()
             } else {
                 perms
@@ -93,13 +94,16 @@ impl DiscordConn {
             })?;
         let channels = deserialize_or_log!(channels_resp, Vec<::discord::Channel>)?;
 
-        let channels: Vec<_> = channels.into_iter().filter(|c| c.ty == 0).collect();
+        let channels: Vec<_> = channels
+            .into_iter()
+            .filter(|c| c.ty == 0)
+            .filter(|c| {
+                permissions_in(c, Some(&guild)).contains(::discord::Permissions::READ_MESSAGES)
+            })
+            .collect();
 
         let channel_names: Vec<IString> = channels
             .iter()
-            .filter(|&c| {
-                permissions_in(c, Some(&guild)).contains(::discord::Permissions::READ_MESSAGES)
-            })
             .filter_map(|c| c.name.as_ref())
             .map(|name| IString::from(name.borrow()))
             .collect();
