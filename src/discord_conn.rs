@@ -40,6 +40,28 @@ struct Response {
     status: ::reqwest::StatusCode,
 }
 
+pub fn permissions_in(chan: &::discord::Channel, guild: Option<&::discord::Guild>) -> ::discord::Permissions {
+    let mut perms = match guild {
+        Some(guild) => {
+            let perms = guild.permissions.clone();
+            if (perms.contains(::discord::Permissions::ADMINISTRATOR))
+                || guild.owner
+            {
+                ::discord::Permissions::all()
+            } else {
+                perms
+            }
+        }
+        None => ::discord::Permissions::all(),
+    };
+
+    for overwrite in chan.permission_overwrites.iter() {
+        perms.insert(overwrite.allow);
+        perms.remove(overwrite.deny);
+    }
+    perms
+}
+
 impl DiscordConn {
     pub fn create_on(token: &str, sender: SyncSender<Event>, server: &str) -> Result<(), ()> {
         let guild_resp = CLIENT
@@ -75,6 +97,9 @@ impl DiscordConn {
 
         let channel_names: Vec<IString> = channels
             .iter()
+            .filter(|&c| {
+                permissions_in(c, Some(&guild)).contains(::discord::Permissions::READ_MESSAGES)
+            })
             .filter_map(|c| c.name.as_ref())
             .map(|name| IString::from(name.borrow()))
             .collect();
