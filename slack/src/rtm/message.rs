@@ -397,6 +397,7 @@ pub struct MessageGroupTopic {
     pub topic: Option<String>,
     pub ts: Option<Timestamp>,
     pub user: Option<UserId>,
+    pub reactions: Option<Vec<Reaction>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -775,7 +776,7 @@ pub struct MessageThreadBroadcast {
     pub root: Option<MessageStandard>,
     #[serde(default)]
     pub text: String,
-    pub thread_ts: Option<String>,
+    pub thread_ts: Option<Timestamp>,
     pub user: Option<UserId>,
     pub ts: Option<Timestamp>,
     pub client_msg_id: Option<Uuid>,

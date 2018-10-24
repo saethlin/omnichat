@@ -32,7 +32,14 @@ impl ::std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         match self {
             Error::Slack(ref e) => write!(f, "{}", e),
-            Error::CannotParse(ref json, ref e) => write!(f, "{}\n{}", json, e),
+            Error::CannotParse(ref e, ref json) => write!(
+                f,
+                "{}\n{}",
+                ::serde_json::to_string_pretty(
+                    &::serde_json::from_str::<::serde_json::Value>(json).unwrap()
+                ).unwrap(),
+                e
+            ),
             Error::Reqwest(ref e) => write!(f, "{}", e),
             Error::Other(ref e) => write!(f, "{}", e),
         }
@@ -40,7 +47,7 @@ impl ::std::fmt::Display for Error {
 }
 
 use std::thread::JoinHandle;
-fn get_slack<T, R>(endpoint: &'static str, token: &str, request: T) -> JoinHandle<Result<R, Error>>
+fn get_slack<T, R>(endpoint: &'static str, token: &str, request: T) -> JoinHandle<Result<R, ()>>
 where
     T: ::serde::Serialize + Send + 'static,
     R: ::serde::de::DeserializeOwned + Send + 'static,
@@ -72,7 +79,7 @@ where
                     )),
                     Err(e) => Err(e),
                 }
-            })
+            }).map_err(|e| error!("{}", e))
     })
 }
 
@@ -113,6 +120,7 @@ impl Handler {
         if let ::slack::rtm::Message::ShRoomCreated(ref m) = message {
             error!("{:#?}", m);
         }
+
         let (channel, user, mut text, ts, reactions) = match message {
             Standard(MessageStandard {
                 channel,
@@ -375,7 +383,7 @@ pub struct SlackConn {
 }
 
 impl SlackConn {
-    pub fn create_on(token: &str, sender: SyncSender<Event>) -> Result<(), Error> {
+    pub fn create_on(token: &str, sender: SyncSender<Event>) -> Result<(), ()> {
         // Launch all of the request
         use slack::http::{conversations, emoji, rtm, users};
         let emoji_recv = get_slack("emoji.list", &token, &());
@@ -388,14 +396,14 @@ impl SlackConn {
         let conversations_recv = get_slack("conversations.list", &token, req);
 
         // We need to know about the users first so that we can digest the list of conversations
-        let users_response: users::ListResponse = users_recv.join()??;
+        let users_response: users::ListResponse = users_recv.join().unwrap()?;
 
         let mut users: BiMap<::slack::UserId, IString> = BiMap::new();
         for user in users_response.members {
             users.insert(user.id, IString::from(user.name));
         }
 
-        let response_channels: conversations::ListResponse = conversations_recv.join()??;
+        let response_channels: conversations::ListResponse = conversations_recv.join().unwrap()?;
 
         use slack::http::conversations::Conversation::*;
         let mut channels = BiMap::new();
@@ -436,7 +444,7 @@ impl SlackConn {
 
         channel_names.sort();
 
-        let connect_response: rtm::ConnectResponse = connect_recv.join()??;
+        let connect_response: rtm::ConnectResponse = connect_recv.join().unwrap()?;
 
         let websocket_url = connect_response.url.clone();
 
@@ -455,7 +463,7 @@ impl SlackConn {
         }));
 
         // Give the emoji handle as long as possible to complete
-        let emoji: emoji::ListResponse = emoji_recv.join()??;
+        let emoji: emoji::ListResponse = emoji_recv.join().unwrap()?;
 
         let mut emoji = emoji
             .emoji
@@ -530,7 +538,7 @@ impl SlackConn {
             use slack::http::conversations::ConversationInfo;
             let server_name = team_name.clone();
 
-            if let Ok(info_response) = info_recv.join()? {
+            if let Ok(info_response) = info_recv.join().unwrap() {
                 let info_response: conversations::InfoResponse = info_response;
                 let read_at = match info_response.channel {
                     ConversationInfo::Channel { last_read, .. } => last_read
@@ -541,7 +549,7 @@ impl SlackConn {
                     ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
                 };
 
-                if let Ok(history_response) = history_recv.join()? {
+                if let Ok(history_response) = history_recv.join().unwrap() {
                     let history_response: conversations::HistoryResponse = history_response;
                     let handler_handle = handler.read().unwrap();
                     history_response

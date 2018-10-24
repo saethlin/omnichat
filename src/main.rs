@@ -75,8 +75,7 @@ fn main() {
                 config_path
             );
             std::process::exit(1)
-        })
-        .read_to_string(&mut contents)
+        }).read_to_string(&mut contents)
         .unwrap_or_else(|_| {
             println!("Unable to read config file at {:?}", &config_path);
             std::process::exit(1)
@@ -99,9 +98,7 @@ fn main() {
         for c in slack {
             let sender = tui.sender();
             thread::spawn(move || {
-                if let Err(err) = SlackConn::create_on(&c.token, sender.clone()) {
-                    error!("Failed to create slack connection: {}\n{:#?}", err, c);
-                }
+                let _ = SlackConn::create_on(&c.token, sender.clone());
             });
         }
     }
