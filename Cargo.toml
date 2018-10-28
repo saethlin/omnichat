@@ -4,7 +4,7 @@ version = "0.0.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
 
 [dependencies]
-inlinable_string = "0.1"
+inlinable_string = { version = "0.1", features = ["serde"] }
 websocket = "0.20"
 serde = "1.0"
 serde_json = "1.0"
@@ -21,12 +21,13 @@ libc = "0.2"
 signal-hook = "0.1"
 textwrap = "0.10"
 dirs = "1.0"
-slack = {path = "slack"}
 openssl = { version = "0.10", features = ["vendored"] }
 tokio-core = "0.1"
 serde_urlencoded = "0.5"
 reqwest = "0.9"
+slack = {path = "tiny_slack"}
 discord = {path = "discord"}
 
 [profile.release]
 lto = true
+panic = 'abort'
