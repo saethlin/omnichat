@@ -383,11 +383,6 @@ impl Tui {
         }
 
         let remaining_width = (terminal_width - CHAN_WIDTH) as usize;
-        /*
-        for message in &mut self.current_channel_mut().messages {
-            message.format(remaining_width);
-        }
-        */
 
         // Draw the message input area
         // We need this message area height to render the channel messages

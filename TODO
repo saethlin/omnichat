@@ -1,7 +1,5 @@
 wrap emoji display as best we can
 include default emoji in autocomplete results
-command to upload a file
-command to copy last url
 
 Support for muted channels
 Make sure all users are loaded

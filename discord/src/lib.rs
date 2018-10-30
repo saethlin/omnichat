@@ -16,38 +16,6 @@ pub struct Error<'a> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub enum GatewayMessage<'a> {
-    Hello {
-        // Opcode 10
-        heartbeat_interval: u64,
-        _trace: Vec<&'a str>,
-    },
-    Heartbeat,   // Opcode 1
-    HearbeatAck, // Opcode 11
-    Identify {
-        // Opcode 2
-        token: &'a str,
-        properties: Properties<'a>,
-        compress: bool,
-        large_threshold: u64,
-        shard: (u8, u8),
-        //presence: Presence,
-    },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Properties<'a> {
-    #[serde(rename = "$os")]
-    os: &'a str,
-    #[serde(rename = "$browser")]
-    browser: &'a str,
-    #[serde(rename = "$device")]
-    device: &'a str,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct User<'a> {
     pub id: Snowflake,
     #[serde(borrow)]

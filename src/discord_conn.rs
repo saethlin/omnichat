@@ -61,8 +61,7 @@ impl DiscordConn {
                 "{}/guilds/{}/channels",
                 ::discord::BASE_URL,
                 guild.id
-            ))
-            .header("Authorization", token)
+            )).header("Authorization", token)
             .send()
             .map_err(|e| error!("{:#?}", e))
             .map(|mut r| Response {
@@ -113,7 +112,6 @@ impl DiscordConn {
                             timestamp: timestamp.into(),
                             contents: String::from(message.content),
                             channel: channel_name.clone(),
-                            is_mention: false,
                             reactions: Vec::new(),
                         }));
                     }
