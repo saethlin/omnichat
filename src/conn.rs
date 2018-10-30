@@ -1,7 +1,7 @@
 pub use inlinable_string::InlinableString as IString;
 use termion;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DateTime(::chrono::DateTime<::chrono::Utc>);
 
 impl From<::slack::Timestamp> for DateTime {
@@ -47,13 +47,11 @@ impl DateTime {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct Message {
     pub server: IString,
     pub channel: IString,
     pub sender: IString,
     pub contents: String,
-    pub is_mention: bool,
     pub timestamp: DateTime,
     pub reactions: Vec<(IString, usize)>,
 }
@@ -104,7 +102,7 @@ pub trait Conn: Send {
 
     fn mark_read(&self, _channel: &str) {}
 
-    fn handle_cmd(&mut self, _cmd: &str) {}
+    fn handle_cmd(&mut self, _channel: &str, _cmd: &str) {}
 
     fn autocomplete(&self, _word: &str) -> Vec<String> {
         Vec::new()

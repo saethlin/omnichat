@@ -1,7 +1,11 @@
 use http::Cursor;
 use id::*;
-use rtm::Message;
 use timestamp::Timestamp;
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ResponseMetadata {
+    pub next_cursor: String,
+}
 
 /// Fetches a conversation's history of messages and events.
 ///
@@ -31,21 +35,6 @@ pub struct HistoryRequest {
     /// Start of time range of messages to include in results.
     #[new(default)]
     pub oldest: Option<u32>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct HistoryResponse {
-    ok: bool,
-    pub messages: Vec<Message>,
-    pub has_more: bool,
-    pub pin_count: u32,
-    pub response_metadata: Option<ResponseMetadata>,
-    pub is_limited: Option<bool>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct ResponseMetadata {
-    next_cursor: Cursor,
 }
 
 /// Retrieve information about a conversation.

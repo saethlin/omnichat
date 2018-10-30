@@ -35,17 +35,17 @@ mod logger;
 mod slack_conn;
 mod tui;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize)]
 struct SlackConfig {
     token: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Deserialize)]
 struct DiscordConfig {
     name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct Config {
     discord_token: Option<String>,
     slack: Option<Vec<SlackConfig>>,

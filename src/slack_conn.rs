@@ -3,7 +3,6 @@ use conn::{Conn, Event, IString, Message};
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
 use regex::Regex;
-use std::borrow::{Borrow, Cow};
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -17,12 +16,8 @@ lazy_static! {
 macro_rules! deserialize_or_log {
     ($response:expr, $type:ty) => {{
         if $response.status.is_success() {
-            ::serde_json::from_str::<$type>(&$response.text).map_err(|e| {
-                let pretty = ::serde_json::from_str::<::serde_json::Value>(&$response.text)
-                    .and_then(|v| ::serde_json::to_string_pretty(&v))
-                    .unwrap_or_else(|_| String::from("Cannot pretty-print response"));
-                error!("{}\n{:#?}", pretty, e)
-            })
+            ::serde_json::from_str::<$type>(&$response.text)
+                .map_err(|e| error!("{}\n{:#?}", format_json(&$response.text), e))
         } else {
             match ::serde_json::from_str::<::discord::Error>(&$response.text) {
                 Ok(e) => {
@@ -43,38 +38,10 @@ struct Response {
     status: ::reqwest::StatusCode,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    Slack(String),
-    CannotParse(::serde_json::error::Error, String),
-    Reqwest(::reqwest::Error),
-    Other(String),
-}
-
-use std::any::Any;
-impl From<Box<dyn Any + Send>> for Error {
-    fn from(e: Box<dyn Any + Send>) -> Error {
-        Error::Other(format!("{:?}", e))
-    }
-}
-
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        match self {
-            Error::Slack(ref e) => write!(f, "{}", e),
-            Error::CannotParse(ref e, ref json) => write!(
-                f,
-                "{}\n{}",
-                ::serde_json::to_string_pretty(
-                    &::serde_json::from_str::<::serde_json::Value>(json).unwrap()
-                )
-                .unwrap(),
-                e
-            ),
-            Error::Reqwest(ref e) => write!(f, "{}", e),
-            Error::Other(ref e) => write!(f, "{}", e),
-        }
-    }
+fn format_json(text: &str) -> String {
+    ::serde_json::from_str::<::serde_json::Value>(text)
+        .and_then(|v| ::serde_json::to_string_pretty(&v))
+        .unwrap_or_else(|_| String::from(text))
 }
 
 use std::thread::JoinHandle;
@@ -91,39 +58,28 @@ where
             endpoint,
             token,
             ::serde_urlencoded::to_string(request).unwrap_or_default()
-        )
-        .parse::<::reqwest::Url>()
+        ).parse::<::reqwest::Url>()
         .unwrap();
 
         CLIENT
             .get(url.clone())
             .send()
-            .map_err(|e| Error::Reqwest(e))
-            .and_then(|mut response| response.text().map_err(|e| Error::Reqwest(e)))
+            .map_err(|e| error!("{:#?}", e))
+            .and_then(|mut response| response.text().map_err(|e| error!("{:#?}", e)))
             .and_then(|body| {
                 match ::serde_json::from_str::<SlackError>(&body)
-                    .map_err(|e| Error::CannotParse(e, body.clone()))
+                    .map_err(|e| error!("{}\n{:#?}", format_json(&body), e))
                 {
                     Ok(SlackError { ok: true, .. }) => ::serde_json::from_str::<R>(&body)
-                        .map_err(|e| Error::CannotParse(e, body.clone())),
-                    Ok(SlackError { ok: false, error }) => Err(Error::Slack(
-                        error.unwrap_or_else(|| String::from("no error given")),
+                        .map_err(|e| error!("{}\n{:#?}", format_json(&body), e)),
+                    Ok(SlackError { ok: false, error }) => Err(error!(
+                        "{}",
+                        error.unwrap_or_else(|| "no error given".into())
                     )),
                     Err(e) => Err(e),
                 }
             })
-            .map_err(|e| error!("{}", e))
     })
-}
-
-struct Handler {
-    channels: BiMap<::slack::ConversationId, IString>,
-    users: BiMap<::slack::UserId, IString>,
-    server_name: IString,
-    my_name: IString,
-    input_sender: ::futures::sync::mpsc::Sender<::websocket::OwnedMessage>,
-    tui_sender: SyncSender<Event>,
-    pending_messages: Vec<PendingMessage>,
 }
 
 #[derive(Deserialize)]
@@ -141,6 +97,16 @@ struct PendingMessage {
     channel: IString,
 }
 
+struct Handler {
+    channels: BiMap<::slack::ConversationId, IString>,
+    users: BiMap<::slack::UserId, IString>,
+    server_name: IString,
+    my_name: IString,
+    input_sender: ::futures::sync::mpsc::Sender<::websocket::OwnedMessage>,
+    tui_sender: SyncSender<Event>,
+    pending_messages: Vec<PendingMessage>,
+}
+
 impl Handler {
     pub fn convert_mentions(&self, original: &str) -> String {
         let text = MENTION_REGEX
@@ -150,8 +116,7 @@ impl Handler {
                 } else {
                     format!("@{}", &caps[0][2..11])
                 }
-            })
-            .into_owned();
+            }).into_owned();
 
         CHANNEL_REGEX.replace_all(&text, "#$n").into_owned()
     }
@@ -173,7 +138,6 @@ impl Handler {
     }
 
     pub fn process_slack_message(&mut self, message: &str) {
-        // TODO: keep track of message indices
         if let Ok(ack) = ::serde_json::from_str::<MessageAck>(&message) {
             // Remove the message from pending messages
             if let Some(index) = self
@@ -184,7 +148,6 @@ impl Handler {
                 let _ = self.tui_sender.send(Event::Message(Message {
                     channel: self.pending_messages[index].channel.clone(),
                     contents: ack.text,
-                    is_mention: false,
                     reactions: Vec::new(),
                     sender: self.my_name.clone(),
                     server: self.server_name.clone(),
@@ -259,23 +222,56 @@ impl Handler {
                 user,
                 username,
                 channel,
-                text: contents,
+                text,
                 ts,
+                attachments,
+                files,
+                ..
             }) => {
                 if let Some(sender) = user
                     .and_then(|id| self.users.get_right(&id))
                     .cloned()
-                    .or(username.map(IString::from))
+                    .or_else(|| username.map(IString::from))
                 {
+                    use std::fmt::Write;
+                    let mut body = match text {
+                        Some(ref t) => self.convert_mentions(t),
+                        None => String::new(),
+                    };
+
+                    for f in &files {
+                        write!(body, "\n{}", f.url_private);
+                    }
+
+                    for a in &attachments {
+                        if let Some(ref title) = a.title {
+                            write!(body, "\n{}", title);
+                        }
+                        if let Some(ref pretext) = a.pretext {
+                            write!(body, "\n{}", pretext);
+                        }
+                        if let Some(ref text) = a.text {
+                            write!(body, "\n{}", text);
+                        }
+                        for f in &a.files {
+                            write!(body, "\n{}", f.url_private);
+                        }
+                    }
+
+                    body = body.replace("&amp;", "&");
+                    body = body.replace("&lt;", "<");
+                    body = body.replace("&gt;", ">");
+
+                    let contents = body.trim().to_string();
+
                     let _ = self.tui_sender.send(Event::Message(Message {
                         server: self.server_name.clone(),
                         channel: self
                             .channels
                             .get_right(&channel)
                             .cloned()
-                            .unwrap_or(channel.to_string().into()),
+                            .unwrap_or_else(|| channel.to_string().into()),
                         sender,
-                        is_mention: false,
                         timestamp: ts.into(),
                         reactions: Vec::new(),
                         contents,
@@ -306,17 +302,7 @@ impl Handler {
                 });
             }
 
-            Ok(_) => {}
-
-            // Don't yet support this thing
-            Err(e) => {
-                let v: ::serde_json::Value = ::serde_json::from_str(&message).unwrap();
-                error!(
-                    "Failed to parse:\n{}\n{}",
-                    ::serde_json::to_string_pretty(&v).unwrap(),
-                    e
-                );
-            }
+            _ => {}
         }
     }
 }
@@ -459,8 +445,7 @@ impl SlackConn {
                                 None
                             }
                             _ => None,
-                        })
-                        .select(input_channel.map_err(|_| WebSocketError::NoDataAvailable))
+                        }).select(input_channel.map_err(|_| WebSocketError::NoDataAvailable))
                         .forward(sink)
                 });
             core.run(runner).unwrap();
@@ -479,10 +464,8 @@ impl SlackConn {
                     token,
                     ::serde_urlencoded::to_string(&conversations::InfoRequest::new(
                         conversation_id
-                    ))
-                    .unwrap_or_default()
-                )
-                .parse::<::reqwest::Url>()
+                    )).unwrap_or_default()
+                ).parse::<::reqwest::Url>()
                 .unwrap();
 
                 let info_response = CLIENT
@@ -492,8 +475,7 @@ impl SlackConn {
                     .map(|mut r| Response {
                         text: r.text().unwrap(),
                         status: r.status(),
-                    })
-                    .unwrap();
+                    }).unwrap();
 
                 let info = deserialize_or_log!(info_response, conversations::InfoResponse).unwrap();
                 use slack::http::conversations::ConversationInfo;
@@ -512,8 +494,7 @@ impl SlackConn {
                     "https://slack.com/api/conversations.history?token={}&{}",
                     token,
                     ::serde_urlencoded::to_string(request).unwrap_or_default()
-                )
-                .parse::<::reqwest::Url>()
+                ).parse::<::reqwest::Url>()
                 .unwrap();
 
                 let history_response = CLIENT
@@ -523,8 +504,7 @@ impl SlackConn {
                     .map(|mut r| Response {
                         text: r.text().unwrap(),
                         status: r.status(),
-                    })
-                    .unwrap();
+                    }).unwrap();
 
                 let history = deserialize_or_log!(history_response, HistoryResponse).unwrap();
 
@@ -533,22 +513,20 @@ impl SlackConn {
                     if let Some(name) = msg
                         .user
                         .and_then(|name| handle.users.get_right(&name).cloned())
-                        .or(msg.username.clone())
+                        .or_else(|| msg.username.clone())
                         .or_else(|| msg.bot_id.map(|b| IString::from(b.to_string())))
                     {
                         let _ = sender.send(Event::Message(Message {
                             server: team_name.clone(),
                             channel: conversation_name.clone(),
                             sender: name.clone(),
-                            is_mention: false,
                             timestamp: msg.ts.into(),
                             reactions: msg
                                 .reactions
                                 .iter()
                                 .map(|r| (r.name.clone(), r.count as usize))
                                 .collect(),
-                            contents: handle
-                                .convert_mentions(&msg.text.unwrap_or_default().borrow()),
+                            contents: msg.to_omni(&handle),
                         }));
                     }
                 });
@@ -714,11 +692,44 @@ impl Conn for SlackConn {
             "reactions.add",
             token,
             ::serde_urlencoded::to_string(req).unwrap_or_default()
-        )
-        .parse::<::reqwest::Url>()
+        ).parse::<::reqwest::Url>()
         .unwrap();
 
-        let _ = CLIENT.get(url).send();
+        let _ = CLIENT.post(url).send().map_err(|e| error!("{:#?}", e));
+    }
+
+    fn handle_cmd(&mut self, channel: &str, cmd: &str) {
+        let args: Vec<_> = cmd.split_whitespace().collect();
+        match args.as_slice() {
+            ["upload", path] => {
+                let url = self.channels.get_left(channel).map(|id| {
+                    format!(
+                        "https://slack.com/api/files.upload?token={}&channels={}",
+                        self.token, id
+                    )
+                });
+                let form = reqwest::multipart::Form::new()
+                    .file("file", path)
+                    .map_err(|e| error!("{:#?}", e));
+
+                thread::spawn(move || {
+                    if let (Some(url), Ok(form)) = (url, form) {
+                        CLIENT
+                            .post(&url)
+                            .multipart(form)
+                            .send()
+                            .map(|r| {
+                                if !r.status().is_success() {
+                                    error!("{:#?}", r);
+                                }
+                            }).unwrap_or_else(|e| error!("{:#?}", e));
+                    }
+                });
+            }
+            _ => {
+                error!("unsupported command: {}", cmd);
+            }
+        }
     }
 }
 
@@ -729,17 +740,70 @@ struct Reaction {
 }
 
 #[derive(Deserialize)]
-struct HistoryMessage<'a> {
-    text: Option<Cow<'a, str>>,
+struct Attachment {
+    pretext: Option<String>,
+    text: Option<String>,
+    title: Option<String>,
+    #[serde(default)]
+    files: Vec<File>,
+}
+
+#[derive(Deserialize)]
+struct File {
+    url_private: String,
+}
+
+#[derive(Deserialize)]
+struct HistoryMessage {
+    text: Option<String>,
     user: Option<slack::UserId>,
     username: Option<IString>,
     bot_id: Option<slack::BotId>,
     ts: slack::Timestamp,
     #[serde(default)]
     reactions: Vec<Reaction>,
+    #[serde(default)]
+    attachments: Vec<Attachment>,
+    #[serde(default)]
+    files: Vec<File>,
+}
+
+impl HistoryMessage {
+    fn to_omni(&self, handler: &Handler) -> String {
+        use std::fmt::Write;
+        let mut body = match self.text {
+            Some(ref t) => handler.convert_mentions(t),
+            None => String::new(),
+        };
+
+        for f in &self.files {
+            write!(body, "\n{}", f.url_private);
+        }
+
+        for a in &self.attachments {
+            if let Some(ref title) = a.title {
+                write!(body, "\n{}", title);
+            }
+            if let Some(ref pretext) = a.pretext {
+                write!(body, "\n{}", pretext);
+            }
+            if let Some(ref text) = a.text {
+                write!(body, "\n{}", text);
+            }
+            for f in &a.files {
+                write!(body, "\n{}", f.url_private);
+            }
+        }
+
+        body = body.replace("&amp;", "&");
+        body = body.replace("&lt;", "<");
+        body = body.replace("&gt;", ">");
+
+        body.trim().to_string()
+    }
 }
 
 #[derive(Deserialize)]
-struct HistoryResponse<'a> {
-    messages: Vec<HistoryMessage<'a>>,
+struct HistoryResponse {
+    messages: Vec<HistoryMessage>,
 }

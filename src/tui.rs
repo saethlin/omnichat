@@ -90,7 +90,7 @@ impl Tui {
 
         Self {
             servers: CursorVec::new(Server {
-                channels: vec!["Errors", "Mentions"]
+                channels: vec!["Errors"]
                     .iter()
                     .map(|name| Channel {
                         messages: Vec::new(),
@@ -98,8 +98,7 @@ impl Tui {
                         read_at: ::chrono::Utc::now().into(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
-                    })
-                    .collect(),
+                    }).collect(),
                 connection: ClientConn::create_on(sender.clone()),
                 channel_scroll_offset: 0,
                 current_channel: 0,
@@ -180,8 +179,7 @@ impl Tui {
             (0..server.channels.len())
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
-                })
-                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+                }).find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -228,7 +226,6 @@ impl Tui {
                 server: "Client".into(),
                 channel: "Errors".into(),
                 contents: message,
-                is_mention: false,
                 timestamp: ::chrono::Utc::now().into(),
                 sender: "Client".into(),
                 reactions: Vec::new(),
@@ -248,8 +245,7 @@ impl Tui {
                     read_at: ::chrono::Utc::now().into(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                })
-                .collect(),
+                }).collect(),
             name: connection.name().into(),
             connection,
             current_channel: 0,
@@ -272,12 +268,6 @@ impl Tui {
     }
 
     fn add_message(&mut self, message: Message) {
-        if message.is_mention {
-            self.servers.get_first_mut().channels[1]
-                .messages
-                .push(message.clone().into());
-        }
-
         let channel = match self
             .servers
             .iter_mut()
@@ -285,8 +275,7 @@ impl Tui {
             .or_else(|| {
                 error!("Unable to add message, no server named {}", message.server);
                 None
-            })
-            .and_then(|server| {
+            }).and_then(|server| {
                 server
                     .channels
                     .iter_mut()
@@ -339,6 +328,11 @@ impl Tui {
                         .to_string(),
                 );
             }
+        } else if contents.starts_with('/') {
+            self.servers
+                .get_mut()
+                .connection
+                .handle_cmd(&current_channel_name, &contents[1..]);
         } else {
             self.servers
                 .get_mut()
@@ -360,7 +354,7 @@ impl Tui {
             render_buffer.clear();
             let _ = write!(render_buffer, "{}", ::termion::clear::All);
 
-            for i in 1..terminal_height + 1 {
+            for i in 1..=terminal_height {
                 let _ = write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i));
             }
             self.truncate_buffer_to = render_buffer.len();
@@ -866,14 +860,14 @@ impl Tui {
 
 pub struct ClientConn {
     sender: SyncSender<Event>,
-    channel_names: [IString; 2],
+    channel_names: [IString; 1],
 }
 
 impl ClientConn {
     pub fn create_on(sender: SyncSender<Event>) -> Box<Conn> {
         Box::new(ClientConn {
             sender,
-            channel_names: ["Errors".into(), "Messages".into()],
+            channel_names: ["Errors".into()],
         })
     }
 }
@@ -889,7 +883,6 @@ impl Conn for ClientConn {
             channel: channel.into(),
             contents: contents.into(),
             sender: "You".into(),
-            is_mention: false,
             timestamp: ::chrono::Utc::now().into(),
             reactions: Vec::new(),
         }));

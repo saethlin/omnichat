@@ -222,7 +222,9 @@ pub struct MessageBotMessage {
 pub struct MessageBotMessageIcons {
     pub image_36: Option<String>,
     pub image_48: Option<String>,
+    pub image_64: Option<String>,
     pub image_72: Option<String>,
+    pub emoji: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -268,6 +270,7 @@ pub struct MessageChannelName {
     pub text: String,
     pub ts: Option<Timestamp>,
     pub user: Option<UserId>,
+    pub reactions: Option<Vec<Reaction>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -278,6 +281,7 @@ pub struct MessageChannelPurpose {
     pub text: String,
     pub ts: Option<Timestamp>,
     pub user: Option<UserId>,
+    pub reactions: Option<Vec<Reaction>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -553,10 +557,10 @@ pub struct MessagePinnedItem {
     pub text: String,
     pub ts: Option<Timestamp>,
     pub user: Option<UserId>,
+    pub attachments: Option<Vec<Attachment>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MessagePinnedItemItem {}
 
 #[derive(Clone, Debug, Deserialize)]
@@ -567,6 +571,7 @@ pub struct MessageReminderAdd {
     pub user: Option<UserId>,
     pub channel: Option<ConversationId>,
     pub text: Option<String>,
+    pub reactions: Option<Vec<Reaction>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -631,7 +636,7 @@ pub struct MessageStandardReply {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+//#[serde(deny_unknown_fields)]
 pub struct Attachment {
     // TODO: This feels like an untagged enum...
     pub author_icon: Option<String>,
@@ -670,8 +675,8 @@ pub struct Attachment {
     pub channel_name: Option<String>,
     pub is_msg_unfurl: Option<bool>,
     pub video_html: Option<String>,
-    pub video_html_height: Option<u32>,
-    pub video_html_width: Option<u32>,
+    //pub video_html_height: Option<u32>,
+    //pub video_html_width: Option<u32>,
     pub is_animated: Option<bool>,
     pub is_share: Option<bool>,
     pub audio_html: Option<String>,
@@ -684,6 +689,7 @@ pub struct Attachment {
     pub bot_id: Option<BotId>,
     pub is_app_unfurl: Option<bool>,
     pub msg_subtype: Option<String>, // TODO: no idea what to do with this
+    pub from_hidden_wksp: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -767,6 +773,7 @@ pub struct MessageSlackbotResponse {
     pub reactions: Vec<Reaction>,
     pub attachments: Option<Vec<Attachment>>,
     pub source_team: Option<TeamId>,
+    pub thread_ts: Option<Timestamp>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
