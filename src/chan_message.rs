@@ -28,7 +28,7 @@ fn djb2(input: &str) -> u64 {
 
 pub struct ChanMessage {
     formatted_width: Option<usize>,
-    raw: String,
+    pub raw: String,
     formatted: String,
     sender: IString,
     timestamp: DateTime,

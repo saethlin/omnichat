@@ -1,8 +1,16 @@
 use chan_message::ChanMessage;
+use clipboard::{ClipboardContext, ClipboardProvider};
 use conn::{Conn, DateTime, Event, IString, Message};
 use cursor_vec::CursorVec;
+use regex::Regex;
 use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+
+lazy_static! {
+    // https://daringfireball.net/2010/07/improved_regex_for_matching_urls
+    // John Gruber
+    pub static ref URL_REGEX: Regex = Regex::new(r#"(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))"#).unwrap();
+}
 
 const CHAN_WIDTH: u16 = 20;
 
@@ -327,6 +335,17 @@ impl Tui {
                     "Can't react to most recent message if there are no messages in this channel!"
                         .to_string(),
                 );
+            }
+        // The /url command searches for a URL mentioned in the current channel and
+        // copies it to the clipboard if one is found
+        } else if contents == "/url" {
+            for msg in self.current_channel().messages.iter().rev() {
+                if let Some(url) = URL_REGEX.find(&msg.raw) {
+                    let _ = ClipboardProvider::new()
+                        .map(|mut ctx: ClipboardContext| ctx.set_contents(url.as_str().to_string()))
+                        .map_err(|e| error!("{:#?}", e));
+                    break;
+                }
             }
         } else if contents.starts_with('/') {
             self.servers

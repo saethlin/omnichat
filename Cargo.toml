@@ -25,6 +25,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 tokio-core = "0.1"
 serde_urlencoded = "0.5"
 reqwest = "0.9"
+clipboard = "0.5"
 slack = {path = "tiny_slack"}
 discord = {path = "discord"}
 

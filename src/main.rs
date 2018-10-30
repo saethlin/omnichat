@@ -8,6 +8,7 @@ extern crate lazy_static;
 extern crate libc;
 #[macro_use]
 extern crate log;
+extern crate clipboard;
 extern crate openssl_probe;
 extern crate regex;
 extern crate reqwest;
