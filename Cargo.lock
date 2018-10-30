@@ -434,6 +434,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "inlinable_string"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "iovec"
@@ -1137,8 +1140,6 @@ dependencies = [
  "derive-new 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde_json 1.0.32 (registry+https://github.com/rust-lang/crates.io-index)",
- "uuid 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1526,7 +1527,6 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "rand 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
