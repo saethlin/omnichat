@@ -272,7 +272,7 @@ impl Handler {
                 });
             }
 
-            _ => error!("{}", format_json(message)),
+            _ => {}
         }
     }
 }
