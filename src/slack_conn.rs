@@ -531,7 +531,6 @@ impl Conn for SlackConn {
             return;
         } else {
             self.last_typing_message = chrono::Utc::now();
-            error!("sending typing");
         }
         let mut handler_handle = self.handler.write().unwrap();
         let channel_id = match handler_handle.channels.get_left(channel) {

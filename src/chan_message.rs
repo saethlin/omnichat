@@ -149,7 +149,7 @@ impl ChanMessage {
         }
 
         if !self.reactions.is_empty() {
-            let _ = write!(self.formatted, "{}", Fg(AnsiValue::grayscale(12)));
+            let gray = Fg(AnsiValue::grayscale(10)).to_string();
 
             let mut reactions_string = String::new();
             for (r, count) in &self.reactions {
@@ -161,8 +161,16 @@ impl ChanMessage {
                 .initial_indent(indent_str)
                 .subsequent_indent(indent_str);
             for line in wrapper.wrap_iter(&reactions_string) {
+                // Apparently terminal colors are reset by the Goto mechanism I'm using to move
+                // from one line to another
+                self.formatted.push_str(&gray);
                 self.formatted.push_str(&line);
                 self.formatted.push('\n');
+            }
+
+            // Clean trailing whitespace from messages
+            while self.formatted.ends_with(|p: char| p.is_whitespace()) {
+                self.formatted.pop();
             }
 
             let _ = write!(self.formatted, "{}", Fg(Reset));
