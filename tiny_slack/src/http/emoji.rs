@@ -5,7 +5,7 @@ use std::collections::HashMap;
 ///
 /// Wraps https://api.slack.com/methods/emoji.list
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ListResponse {
     ok: bool,
     pub emoji: Option<HashMap<String, String>>,

@@ -51,6 +51,7 @@ struct Channel {
     read_at: DateTime,
     message_scroll_offset: usize,
     message_buffer: String,
+    last_typing_message: DateTime,
 }
 
 impl Channel {
@@ -102,9 +103,10 @@ impl Tui {
                     .map(|name| Channel {
                         messages: Vec::new(),
                         name: (*name).into(),
-                        read_at: ::chrono::Utc::now().into(),
+                        read_at: DateTime::now(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
+                        last_typing_message: DateTime::now(),
                     }).collect(),
                 connection: ClientConn::create_on(sender.clone()),
                 channel_scroll_offset: 0,
@@ -249,9 +251,10 @@ impl Tui {
                 .map(|name| Channel {
                     messages: Vec::new(),
                     name,
-                    read_at: ::chrono::Utc::now().into(), // This is a Bad Idea; we've marked everything as read by default, when we have no right to but I'm not sure what else to use as a default
+                    read_at: DateTime::now(),
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
+                    last_typing_message: DateTime::now(),
                 }).collect(),
             name: connection.name().into(),
             connection,
@@ -686,6 +689,11 @@ impl Tui {
                 }
             }
             Key(Char(c)) => {
+                let current_channel_name = self.current_channel().name.clone();
+                self.servers
+                    .get_mut()
+                    .connection
+                    .send_typing(&current_channel_name);
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
                 let current_pos = self.cursor_pos as usize;

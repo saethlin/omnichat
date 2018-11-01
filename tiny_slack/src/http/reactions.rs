@@ -5,7 +5,7 @@ use crate::timestamp::Timestamp;
 ///
 /// Wraps https://api.slack.com/methods/reactions.add
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct AddRequest<'a> {
     /// Reaction (emoji) name.
     pub name: &'a str,
@@ -17,7 +17,7 @@ pub struct AddRequest<'a> {
 ///
 /// Wraps https://api.slack.com/methods/reactions.remove
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct RemoveRequest<'a> {
     /// Reaction (emoji) name.
     pub name: &'a str,

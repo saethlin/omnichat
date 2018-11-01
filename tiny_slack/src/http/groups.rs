@@ -1,4 +1,4 @@
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct MarkRequest {
     /// Private channel to set reading cursor in.
     pub channel: crate::GroupId,

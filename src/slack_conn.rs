@@ -20,7 +20,7 @@ macro_rules! deserialize_or_log {
             ::serde_json::from_str::<$type>(&$response.text)
                 .map_err(|e| error!("{}\n{:#?}", format_json(&$response.text), e))
         } else {
-            match ::serde_json::from_str::<::discord::Error>(&$response.text) {
+            match ::serde_json::from_str::<::slack::http::Error>(&$response.text) {
                 Ok(e) => {
                     error!("{:#?}", e);
                     Err(())
@@ -51,7 +51,6 @@ where
     T: ::serde::Serialize + Send + 'static,
     R: ::serde::de::DeserializeOwned + Send + 'static,
 {
-    use slack::http::SlackError;
     let token = token.to_string();
     thread::spawn(move || {
         let url = format!(
@@ -67,12 +66,12 @@ where
             .map_err(|e| error!("{:#?}", e))
             .and_then(|mut response| response.text().map_err(|e| error!("{:#?}", e)))
             .and_then(|body| {
-                match ::serde_json::from_str::<SlackError>(&body)
+                match ::serde_json::from_str::<::slack::http::Error>(&body)
                     .map_err(|e| error!("{}\n{:#?}", format_json(&body), e))
                 {
-                    Ok(SlackError { ok: true, .. }) => ::serde_json::from_str::<R>(&body)
+                    Ok(slack::http::Error { ok: true, .. }) => ::serde_json::from_str::<R>(&body)
                         .map_err(|e| error!("{}\n{:#?}", format_json(&body), e)),
-                    Ok(SlackError { ok: false, error }) => Err(error!(
+                    Ok(slack::http::Error { ok: false, error }) => Err(error!(
                         "{}",
                         error.unwrap_or_else(|| "no error given".into())
                     )),
@@ -147,7 +146,7 @@ impl Handler {
             {
                 let _ = self.tui_sender.send(Event::Message(Message {
                     channel: self.pending_messages[index].channel.clone(),
-                    contents: ack.text,
+                    contents: self.convert_mentions(&ack.text),
                     reactions: Vec::new(),
                     sender: self.my_name.clone(),
                     server: self.server_name.clone(),
@@ -287,6 +286,7 @@ pub struct SlackConn {
     handler: Arc<RwLock<Handler>>,
     _sender: SyncSender<Event>,
     emoji: Vec<IString>,
+    last_typing_message: chrono::DateTime<chrono::Utc>,
 }
 
 impl SlackConn {
@@ -387,6 +387,7 @@ impl SlackConn {
             _sender: sender.clone(),
             handler: handler.clone(),
             emoji,
+            last_typing_message: chrono::Utc::now(),
         })));
 
         let thread_handler = Arc::clone(&handler);
@@ -524,6 +525,50 @@ impl Conn for SlackConn {
         &self.channel_names
     }
 
+    fn send_typing(&mut self, channel: &str) {
+        let now = chrono::Utc::now();
+        if (now - self.last_typing_message) < chrono::Duration::seconds(3) {
+            return;
+        } else {
+            self.last_typing_message = chrono::Utc::now();
+            error!("sending typing");
+        }
+        let mut handler_handle = self.handler.write().unwrap();
+        let channel_id = match handler_handle.channels.get_left(channel) {
+            Some(id) => *id,
+            None => {
+                error!("Unknown channel: {}", channel);
+                return;
+            }
+        };
+
+        let mut id = 0;
+        while handler_handle.pending_messages.iter().any(|m| m.id == id) {
+            id += 1;
+        }
+        handler_handle.pending_messages.push(PendingMessage {
+            channel: IString::from(channel),
+            id,
+        });
+
+        let message = json!({
+            "id": id,
+            "type": "typing",
+            "channel": channel_id,
+        });
+
+        let _ = ::serde_json::to_string(&message)
+            .map_err(|e| error!("{:#?}", e))
+            .and_then(|the_json| {
+                handler_handle
+                    .input_sender
+                    .clone()
+                    .send(::websocket::OwnedMessage::Text(the_json))
+                    .wait()
+                    .map_err(|e| error!("{:#?}", e))
+            });
+    }
+
     fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let mut handler_handle = self.handler.write().unwrap();
         let contents = handler_handle.to_slack(contents.to_string());
@@ -582,20 +627,19 @@ impl Conn for SlackConn {
 
         let timestamp = conn::DateTime::now().into();
 
-        use slack::http::SlackError;
+        use slack::http::Error;
         match channel_or_group_id {
             ::slack::ConversationId::Channel(channel_id) => {
                 let req = channels::MarkRequest::new(channel_id, timestamp);
-                let _ =
-                    get_slack::<channels::MarkRequest, SlackError>("channels.mark", &token, req);
+                let _ = get_slack::<channels::MarkRequest, Error>("channels.mark", &token, req);
             }
             ::slack::ConversationId::Group(group_id) => {
                 let req = groups::MarkRequest::new(group_id, timestamp);
-                let _ = get_slack::<groups::MarkRequest, SlackError>("groups.mark", &token, req);
+                let _ = get_slack::<groups::MarkRequest, Error>("groups.mark", &token, req);
             }
             ::slack::ConversationId::DirectMessage(dm_id) => {
                 let req = im::MarkRequest::new(dm_id, timestamp);
-                let _ = get_slack::<im::MarkRequest, SlackError>("im.mark", &token, req);
+                let _ = get_slack::<im::MarkRequest, Error>("im.mark", &token, req);
             }
         }
     }

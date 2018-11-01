@@ -4,7 +4,7 @@ use crate::TeamId;
 ///
 /// Wraps https://api.slack.com/methods/rtm.connect
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct ConnectRequest {
     #[new(default)]
     batch_presence_aware: Option<bool>,
@@ -12,7 +12,7 @@ pub struct ConnectRequest {
     presence_sub: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ConnectResponse {
     ok: bool,
     #[serde(rename = "self")]
@@ -21,13 +21,13 @@ pub struct ConnectResponse {
     pub url: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ConnectResponseSelf {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ConnectResponseTeam {
     pub domain: String,
     pub enterprise_id: Option<String>,

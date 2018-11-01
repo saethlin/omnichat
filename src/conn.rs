@@ -110,4 +110,6 @@ pub trait Conn: Send {
     }
 
     fn add_reaction(&self, _reaction: &str, _channel: &str, _timestamp: DateTime) {}
+
+    fn send_typing(&mut self, _channel: &str) {}
 }

@@ -1,7 +1,7 @@
 use crate::id::*;
 use crate::timestamp::Timestamp;
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct MarkRequest {
     /// Channel to set reading cursor in.
     pub channel: ChannelId,

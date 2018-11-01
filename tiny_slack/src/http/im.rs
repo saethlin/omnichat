@@ -1,7 +1,7 @@
 use crate::id::DmId;
 use crate::timestamp::Timestamp;
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct MarkRequest {
     /// Direct message channel to set reading cursor in.
     pub channel: DmId,

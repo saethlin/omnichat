@@ -2,7 +2,7 @@ use crate::http::Cursor;
 use crate::id::*;
 use crate::timestamp::Timestamp;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ResponseMetadata {
     pub next_cursor: String,
 }
@@ -11,7 +11,7 @@ pub struct ResponseMetadata {
 ///
 /// Wraps https://api.slack.com/methods/conversations.history
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct HistoryRequest {
     /// Conversation ID to fetch history for.
     pub channel: ConversationId,
@@ -41,7 +41,7 @@ pub struct HistoryRequest {
 ///
 /// Wraps https://api.slack.com/methods/conversations.info
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct InfoRequest {
     /// Conversation ID to learn more about
     pub channel: ConversationId,
@@ -50,13 +50,13 @@ pub struct InfoRequest {
     pub include_locale: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct InfoResponse {
     ok: bool,
     pub channel: ConversationInfo,
 }
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct ListRequest {
     /// Paginate through collections of data by setting the cursor parameter to a next_cursor attribute returned by a previous request's response_metadata. Default value fetches the first "page" of the collection. See pagination for more detail.
     #[new(default)]
@@ -76,7 +76,7 @@ pub struct ListRequest {
     pub types: Vec<ChannelType>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelType {
     PublicChannel,
@@ -98,7 +98,7 @@ impl ::std::fmt::Display for ChannelType {
 }
 
 // TODO: This returns a _partial_ conversation object, per the slack docs
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ListResponse {
     ok: bool,
     pub channels: Vec<Conversation>,
@@ -109,7 +109,7 @@ pub struct ListResponse {
 ///
 /// Wraps https://api.slack.com/methods/users.conversations
 
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct ConversationsRequest {
     /// Paginate through collections of data by setting the cursor parameter to a next_cursor attribute returned by a previous request's response_metadata. Default value fetches the first "page" of the collection. See pagination for more detail.
     #[new(default)]
@@ -132,14 +132,14 @@ pub struct ConversationsRequest {
     pub user: Option<UserId>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ConversationsResponse {
     ok: bool,
     pub channels: Vec<Conversation>,
     pub response_metadata: Option<ResponseMetadata>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(untagged)]
 pub enum Conversation {
     Channel {
@@ -208,7 +208,7 @@ pub enum Conversation {
     },
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ConversationPurpose {
     #[serde(deserialize_with = "deserialize_userid_or_empty")]
     pub creator: Option<UserId>,
@@ -216,7 +216,7 @@ pub struct ConversationPurpose {
     pub value: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ConversationTopic {
     #[serde(deserialize_with = "deserialize_userid_or_empty")]
     pub creator: Option<UserId>,
@@ -248,7 +248,7 @@ where
     deserializer.deserialize_str(TheVisitor)
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(untagged)]
 pub enum ConversationInfo {
     Channel {

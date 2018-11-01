@@ -13,7 +13,7 @@ use crate::Timestamp;
 /// Resolve this scenario by using pagination.
 ///
 /// One day pagination will become required to use this method.
-#[derive(Clone, Debug, Serialize, new)]
+#[derive(Serialize, new)]
 pub struct ListRequest {
     /// Whether to include presence data in the output
     #[new(default)]
@@ -26,7 +26,7 @@ pub struct ListRequest {
     pub include_locale: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct ListResponse {
     ok: bool,
     pub members: Vec<User>,
@@ -35,7 +35,7 @@ pub struct ListResponse {
     pub is_limited: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Deserialize)]
 pub struct User {
     pub id: UserId,
     pub name: String,
