@@ -727,6 +727,7 @@ impl Conn for SlackConn {
                     )
                 });
                 let form = reqwest::multipart::Form::new()
+                    .text("filename", "Image from omnichat")
                     .file("file", path)
                     .map_err(|e| error!("{:#?}", e));
 
