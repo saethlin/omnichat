@@ -8,7 +8,6 @@ extern crate lazy_static;
 extern crate libc;
 #[macro_use]
 extern crate log;
-extern crate clipboard;
 extern crate openssl_probe;
 extern crate regex;
 extern crate reqwest;
@@ -31,9 +30,10 @@ mod conn;
 mod bimap;
 mod chan_message;
 mod cursor_vec;
-mod discord_conn;
+//mod discord_conn;
 mod logger;
 mod slack_conn;
+mod strvec;
 mod tui;
 
 #[derive(Deserialize)]
@@ -41,20 +41,22 @@ struct SlackConfig {
     token: String,
 }
 
+/*
 #[derive(Deserialize)]
 struct DiscordConfig {
     name: String,
 }
+*/
 
 #[derive(Deserialize)]
 struct Config {
-    discord_token: Option<String>,
+    //discord_token: Option<String>,
     slack: Option<Vec<SlackConfig>>,
-    discord: Option<Vec<DiscordConfig>>,
+    //discord: Option<Vec<DiscordConfig>>,
 }
 
 fn main() {
-    use discord_conn::DiscordConn;
+    //use discord_conn::DiscordConn;
     use slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -103,7 +105,7 @@ fn main() {
             });
         }
     }
-
+    /*
     if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
         for d in discord {
             let sender = tui.sender();
@@ -113,6 +115,7 @@ fn main() {
             });
         }
     }
+    */
 
     tui.run();
 }

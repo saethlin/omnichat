@@ -1,6 +1,6 @@
-use http::Cursor;
-use id::*;
-use timestamp::Timestamp;
+use crate::http::Cursor;
+use crate::id::*;
+use crate::timestamp::Timestamp;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ResponseMetadata {
@@ -14,7 +14,7 @@ pub struct ResponseMetadata {
 #[derive(Clone, Debug, Serialize, new)]
 pub struct HistoryRequest {
     /// Conversation ID to fetch history for.
-    pub channel: ::ConversationId,
+    pub channel: ConversationId,
 
     /// Paginate through collections of data by setting the cursor parameter to a next_cursor attribute returned by a previous request's response_metadata. Default value fetches the first "page" of the collection. See pagination for more detail.
     #[new(default)]
@@ -44,7 +44,7 @@ pub struct HistoryRequest {
 #[derive(Clone, Debug, Serialize, new)]
 pub struct InfoRequest {
     /// Conversation ID to learn more about
-    pub channel: ::ConversationId,
+    pub channel: ConversationId,
     /// Set this to true to receive the locale for this conversation. Defaults to false
     #[new(default)]
     pub include_locale: Option<bool>,
@@ -72,7 +72,7 @@ pub struct ListRequest {
 
     /// Mix and match channel types by providing a comma-separated list of any combination of public_channel, private_channel, mpim, im
     #[new(value = "vec![ChannelType::PublicChannel]")]
-    #[serde(serialize_with = "::serialize_comma_separated")]
+    #[serde(serialize_with = "crate::serialize_comma_separated")]
     pub types: Vec<ChannelType>,
 }
 
@@ -129,7 +129,7 @@ pub struct ConversationsRequest {
 
     /// Browse conversations by a specific user ID's membership. Non-public channels are restricted to those where the calling user shares membership.
     #[new(default)]
-    pub user: Option<::UserId>,
+    pub user: Option<UserId>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

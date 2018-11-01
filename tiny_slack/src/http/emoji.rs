@@ -1,3 +1,4 @@
+use crate::Timestamp;
 use std::collections::HashMap;
 
 /// Lists custom emoji for a team.
@@ -8,5 +9,5 @@ use std::collections::HashMap;
 pub struct ListResponse {
     ok: bool,
     pub emoji: Option<HashMap<String, String>>,
-    cache_ts: Option<::Timestamp>,
+    cache_ts: Option<Timestamp>,
 }

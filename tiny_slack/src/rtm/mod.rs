@@ -1,5 +1,5 @@
-use id::*;
-use timestamp::Timestamp;
+use crate::id::*;
+use crate::timestamp::Timestamp;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]

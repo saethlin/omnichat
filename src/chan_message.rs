@@ -1,4 +1,5 @@
 use chrono::Timelike;
+use conn;
 use conn::{DateTime, IString};
 
 lazy_static! {
@@ -35,8 +36,8 @@ pub struct ChanMessage {
     reactions: Vec<(IString, usize)>,
 }
 
-impl From<::conn::Message> for ChanMessage {
-    fn from(message: ::conn::Message) -> ChanMessage {
+impl From<conn::Message> for ChanMessage {
+    fn from(message: conn::Message) -> ChanMessage {
         ChanMessage {
             formatted_width: None,
             raw: message.contents,

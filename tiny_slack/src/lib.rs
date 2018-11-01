@@ -8,9 +8,9 @@ pub mod http;
 pub mod rtm;
 
 mod id;
-pub use id::*;
+pub use self::id::*;
 mod timestamp;
-pub use timestamp::Timestamp;
+pub use self::timestamp::Timestamp;
 
 fn serialize_comma_separated<T, S>(items: &[T], serializer: S) -> Result<S::Ok, S::Error>
 where

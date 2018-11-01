@@ -68,6 +68,7 @@ pub enum Event {
     HistoryLoaded {
         server: IString,
         channel: IString,
+        messages: Vec<Message>,
         read_at: DateTime,
     },
     Input(termion::event::Event),

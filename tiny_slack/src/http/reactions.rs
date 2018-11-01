@@ -1,4 +1,5 @@
-use timestamp::Timestamp;
+use crate::id::*;
+use crate::timestamp::Timestamp;
 
 /// Adds a reaction to an item.
 ///
@@ -26,9 +27,9 @@ pub struct RemoveRequest<'a> {
 
 #[derive(Clone, Debug)]
 pub enum Reactable {
-    File(::FileId),
+    File(FileId),
     Message {
-        channel: ::ConversationId,
+        channel: ConversationId,
         timestamp: Timestamp,
     },
 }

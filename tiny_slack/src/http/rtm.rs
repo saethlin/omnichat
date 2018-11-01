@@ -1,3 +1,5 @@
+use crate::TeamId;
+
 /// Starts a Real Time Messaging session.
 ///
 /// Wraps https://api.slack.com/methods/rtm.connect
@@ -30,6 +32,6 @@ pub struct ConnectResponseTeam {
     pub domain: String,
     pub enterprise_id: Option<String>,
     pub enterprise_name: Option<String>,
-    pub id: ::TeamId,
+    pub id: TeamId,
     pub name: String,
 }

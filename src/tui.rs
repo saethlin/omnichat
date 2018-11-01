@@ -1,5 +1,4 @@
 use chan_message::ChanMessage;
-use clipboard::{ClipboardContext, ClipboardProvider};
 use conn::{Conn, DateTime, Event, IString, Message};
 use cursor_vec::CursorVec;
 use regex::Regex;
@@ -230,7 +229,7 @@ impl Tui {
     fn add_client_message(&mut self, message: String) {
         self.servers.get_first_mut().channels[0]
             .messages
-            .push(ChanMessage::from(::conn::Message {
+            .push(ChanMessage::from(Message {
                 server: "Client".into(),
                 channel: "Errors".into(),
                 contents: message,
@@ -339,14 +338,28 @@ impl Tui {
         // The /url command searches for a URL mentioned in the current channel and
         // copies it to the clipboard if one is found
         } else if contents == "/url" {
-            for msg in self.current_channel().messages.iter().rev() {
-                if let Some(url) = URL_REGEX.find(&msg.raw) {
-                    let _ = ClipboardProvider::new()
-                        .map(|mut ctx: ClipboardContext| ctx.set_contents(url.as_str().to_string()))
-                        .map_err(|e| error!("{:#?}", e));
-                    break;
-                }
-            }
+            use std::io::Write;
+            use std::process::{Command, Stdio};
+            self.current_channel()
+                .messages
+                .iter()
+                .rev()
+                .filter_map(|message| URL_REGEX.find(&message.raw))
+                .next()
+                .map(|url| {
+                    let _ = Command::new("xclip")
+                        .arg("-selection")
+                        .arg("clipboard")
+                        .stdin(Stdio::piped())
+                        .spawn()
+                        .and_then(|mut child| {
+                            child
+                                .stdin
+                                .as_mut()
+                                .unwrap()
+                                .write_all(url.as_str().as_bytes())
+                        }).map_err(|e| error!("{:#?}", e));
+                });
         } else if contents.starts_with('/') {
             self.servers
                 .get_mut()
@@ -801,6 +814,7 @@ impl Tui {
                 self.add_client_message(message);
             }
             Event::HistoryLoaded {
+                messages,
                 server,
                 channel,
                 read_at,
@@ -810,9 +824,14 @@ impl Tui {
                 .find(|s| s.name == server)
                 .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
             {
+                for m in messages {
+                    c.messages.push(m.into());
+                }
+               c.messages
+                .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
                 c.read_at = read_at;
             } else {
-                error!("Failed to load history from {}, {}", channel, server);
+                error!("Got history for an unknown channel {} in server {}", channel, server);
             },
             Event::Connected(conn) => {
                 self.add_server(conn);

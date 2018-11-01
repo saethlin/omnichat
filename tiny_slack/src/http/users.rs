@@ -1,8 +1,7 @@
 //! Get info on members of your Slack team.
-
 use crate::http::{Cursor, Paging};
-use id::*;
-use timestamp::Timestamp;
+use crate::id::*;
+use crate::Timestamp;
 
 /// Lists all users in a Slack team.
 ///
