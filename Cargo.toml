@@ -31,4 +31,3 @@ discord = {path = "discord"}
 [profile.release]
 lto = true
 panic = 'abort'
-debug = true
