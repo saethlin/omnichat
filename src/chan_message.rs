@@ -149,15 +149,20 @@ impl ChanMessage {
         }
 
         if !self.reactions.is_empty() {
-            let _ = write!(
-                self.formatted,
-                "{}{}",
-                indent_str,
-                Fg(AnsiValue::grayscale(12))
-            );
+            let _ = write!(self.formatted, "{}", Fg(AnsiValue::grayscale(12)));
 
+            let mut reactions_string = String::new();
             for (r, count) in &self.reactions {
-                let _ = write!(self.formatted, "{}({}) ", r, count);
+                let _ = write!(reactions_string, "{}({}) ", r, count);
+            }
+
+            let wrapper = Wrapper::with_splitter(width, NoHyphenation)
+                .break_words(true)
+                .initial_indent(indent_str)
+                .subsequent_indent(indent_str);
+            for line in wrapper.wrap_iter(&reactions_string) {
+                self.formatted.push_str(&line);
+                self.formatted.push('\n');
             }
 
             let _ = write!(self.formatted, "{}", Fg(Reset));

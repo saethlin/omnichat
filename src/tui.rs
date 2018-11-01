@@ -51,7 +51,6 @@ struct Channel {
     read_at: DateTime,
     message_scroll_offset: usize,
     message_buffer: String,
-    last_typing_message: DateTime,
 }
 
 impl Channel {
@@ -106,7 +105,6 @@ impl Tui {
                         read_at: DateTime::now(),
                         message_scroll_offset: 0,
                         message_buffer: String::new(),
-                        last_typing_message: DateTime::now(),
                     }).collect(),
                 connection: ClientConn::create_on(sender.clone()),
                 channel_scroll_offset: 0,
@@ -254,7 +252,6 @@ impl Tui {
                     read_at: DateTime::now(),
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                    last_typing_message: DateTime::now(),
                 }).collect(),
             name: connection.name().into(),
             connection,
