@@ -24,16 +24,19 @@ impl<T> CursorVec<T> {
     }
 
     pub fn next(&mut self) {
-        self.index += 1;
-        self.index %= self.vec.len();
+        self.index = self.index.wrapping_add(1);
+        if self.index >= self.vec.len() {
+            self.index = 0;
+        }
     }
 
     pub fn prev(&mut self) {
         if self.index == 0 {
-            self.index = self.vec.len() - 1;
+            self.index = self.vec.len().saturating_sub(1);
         } else {
-            self.index -= 1;
-            self.index %= self.vec.len();
+            // Doesn't matter what we use here, because it's always > 0
+            // but we can't just -= because that can panic
+            self.index = self.index.saturating_sub(1);
         }
     }
 

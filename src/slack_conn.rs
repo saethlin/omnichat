@@ -303,14 +303,17 @@ impl SlackConn {
         let conversations_recv = get_slack("conversations.list", &token, req);
 
         // We need to know about the users first so that we can digest the list of conversations
-        let users_response: users::ListResponse = users_recv.join().unwrap()?;
+        let users_response: users::ListResponse =
+            users_recv.join().map_err(|e| error!("{:#?}", e))??;
 
         let mut users: BiMap<::slack::UserId, IString> = BiMap::new();
         for user in users_response.members {
             users.insert(user.id, IString::from(user.name));
         }
 
-        let response_channels: conversations::ListResponse = conversations_recv.join().unwrap()?;
+        let response_channels: conversations::ListResponse = conversations_recv
+            .join()
+            .map_err(|e| error!("{:#?}", e))??;
 
         use slack::http::conversations::Conversation::*;
         let mut channels = BiMap::new();
@@ -349,7 +352,8 @@ impl SlackConn {
 
         channel_names.sort();
 
-        let connect_response: rtm::ConnectResponse = connect_recv.join().unwrap()?;
+        let connect_response: rtm::ConnectResponse =
+            connect_recv.join().map_err(|e| error!("{:#?}", e))??;
 
         let websocket_url = connect_response.url.clone();
 
@@ -368,7 +372,7 @@ impl SlackConn {
         }));
 
         // Give the emoji handle as long as possible to complete
-        let emoji: emoji::ListResponse = emoji_recv.join().unwrap()?;
+        let emoji: emoji::ListResponse = emoji_recv.join().map_err(|e| error!("{:#?}", e))??;
 
         let mut emoji = emoji
             .emoji
@@ -464,11 +468,10 @@ impl SlackConn {
                     "https://slack.com/api/conversations.history?token={}&{}",
                     token,
                     ::serde_urlencoded::to_string(request).unwrap_or_default()
-                ).parse::<::reqwest::Url>()
-                .unwrap();
+                );
 
                 let history_response = CLIENT
-                    .get(url)
+                    .get(&url)
                     .send()
                     .map_err(|e| error!("{:#?}", e))
                     .map(|mut r| Response {
