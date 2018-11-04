@@ -1,4 +1,5 @@
 pub use inlinable_string::InlinableString as IString;
+use std::sync::mpsc::SyncSender;
 use termion;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -57,14 +58,16 @@ pub struct Message {
 }
 
 /// Events that a connection can send to a frontend
-pub enum Event {
+pub enum ConnEvent {
     Message(Message),
+    /*
     MessageEdited {
         server: IString,
         channel: IString,
         contents: String,
         timestamp: DateTime,
     },
+    */
     HistoryLoaded {
         server: IString,
         channel: IString,
@@ -73,7 +76,12 @@ pub enum Event {
     },
     Input(termion::event::Event),
     Error(String),
-    Connected(Box<Conn>),
+    ServerConnected {
+        name: IString,
+        channels: Vec<IString>,
+        completer: Option<Box<Completer>>, // Autocompletion should be a blocking operation, no channels
+        sender: SyncSender<TuiEvent>,      // How we tell the connection to do something
+    },
     MarkChannelRead {
         server: IString,
         channel: IString,
@@ -94,22 +102,36 @@ pub enum Event {
     Resize,
 }
 
-pub trait Conn: Send {
-    fn name(&self) -> &str;
+/// Messages sent by a frontend to a connection
+pub enum TuiEvent {
+    SendMessage {
+        server: IString,
+        channel: IString,
+        contents: String,
+    },
+    MarkRead {
+        server: IString,
+        channel: IString,
+    },
+    Command {
+        server: IString,
+        channel: IString,
+        command: IString,
+    },
+    AddReaction {
+        server: IString,
+        channel: IString,
+        reaction: IString,
+        timestamp: DateTime,
+    },
+    SendTyping {
+        server: IString,
+        channel: IString,
+    },
+}
 
-    fn channels(&self) -> &[IString];
-
-    fn send_channel_message(&mut self, _channel: &str, _contents: &str) {}
-
-    fn mark_read(&self, _channel: &str) {}
-
-    fn handle_cmd(&mut self, _channel: &str, _cmd: &str) {}
-
-    fn autocomplete(&self, _word: &str) -> Vec<String> {
-        Vec::new()
-    }
-
-    fn add_reaction(&self, _reaction: &str, _channel: &str, _timestamp: DateTime) {}
-
-    fn send_typing(&mut self, _channel: &str) {}
+// This is very derpy
+// Don't want to do this with channels, because autocompletion should happen instantly
+pub trait Completer: Send {
+    fn autocomplete(&self, _word: &str) -> Vec<String>;
 }

@@ -30,4 +30,4 @@ discord = {path = "discord"}
 
 [profile.release]
 lto = true
-panic = 'abort'
+panic = "abort"

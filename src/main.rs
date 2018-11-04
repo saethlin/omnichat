@@ -30,10 +30,10 @@ mod conn;
 mod bimap;
 mod chan_message;
 mod cursor_vec;
+mod slack_conn;
 //mod discord_conn;
 mod logger;
-mod slack_conn;
-mod strvec;
+//mod strvec;
 mod tui;
 
 #[derive(Deserialize)]

@@ -35,7 +35,6 @@ impl<T> CursorVec<T> {
             self.index = self.vec.len().saturating_sub(1);
         } else {
             // Doesn't matter what we use here, because it's always > 0
-            // but we can't just -= because that can panic
             self.index = self.index.saturating_sub(1);
         }
     }

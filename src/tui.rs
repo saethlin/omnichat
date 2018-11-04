@@ -1,5 +1,5 @@
 use chan_message::ChanMessage;
-use conn::{Conn, DateTime, Event, IString, Message};
+use conn::{Completer, ConnEvent, DateTime, IString, Message, TuiEvent};
 use cursor_vec::CursorVec;
 use regex::Regex;
 use std::cmp::{max, min};
@@ -17,8 +17,8 @@ pub struct Tui {
     servers: CursorVec<Server>,
     longest_channel_name: u16,
     shutdown: bool,
-    events: Receiver<Event>,
-    sender: SyncSender<Event>,
+    events: Receiver<ConnEvent>,
+    sender: SyncSender<ConnEvent>, // Tui can send events to itself, this is also cloned and sent to backend connections
     server_scroll_offset: usize,
     autocompletions: Vec<String>,
     autocomplete_index: usize,
@@ -33,10 +33,11 @@ pub struct Tui {
 
 struct Server {
     channels: Vec<Channel>,
-    connection: Box<Conn>,
+    completer: Option<Box<Completer>>,
     name: IString,
     current_channel: usize,
     channel_scroll_offset: usize,
+    sender: SyncSender<TuiEvent>,
 }
 
 impl Server {
@@ -76,42 +77,70 @@ impl Tui {
 
         let (sender, reciever) = sync_channel(100);
 
+        // Set up a signal handler so we get notified when the terminal is resized
         // Must be called before any threads are launched
         let winch_send = sender.clone();
         let signals = ::signal_hook::iterator::Signals::new(&[::libc::SIGWINCH])
             .expect("Couldn't register resize signal handler");
         thread::spawn(move || {
             for _ in &signals {
-                let _ = winch_send.send(Event::Resize);
+                let _ = winch_send.send(ConnEvent::Resize);
             }
         });
 
+        // Launch a background thread to feed input from stdin
+        // Note this isn't raw keyboard events, it's termion's opinion of an event
         let send = sender.clone();
         thread::spawn(move || {
             for event in ::std::io::stdin().events() {
                 if let Ok(ev) = event {
-                    let _ = send.send(Event::Input(ev));
+                    let _ = send.send(ConnEvent::Input(ev));
                 }
             }
         });
 
+        // Launch a background thread to ping back attempts to type in the errors tab
+        // This is pretty stupid, but otherwise we have to special-case the Client
+        // tab in other parts of the code
+        let to_tui = sender.clone();
+        let (to_client, from_client) = sync_channel(100);
+        thread::spawn(move || {
+            while let Ok(ev) = from_client.recv() {
+                if let TuiEvent::SendMessage {
+                    contents, channel, ..
+                } = ev
+                {
+                    let _ = to_tui.send(ConnEvent::Message(Message {
+                        server: "Client".into(),
+                        channel,
+                        sender: "You".into(),
+                        contents,
+                        timestamp: DateTime::now(),
+                        reactions: Vec::new(),
+                    }));
+                }
+            }
+        });
+
+        // Initialize with the Client's server which displays an error log
+        let client = Server {
+            channels: vec![Channel {
+                messages: Vec::new(),
+                name: "Errors".into(),
+                read_at: DateTime::now(),
+                message_scroll_offset: 0,
+                message_buffer: String::new(),
+            }],
+            completer: None,
+            channel_scroll_offset: 0,
+            current_channel: 0,
+            name: "Client".into(),
+            sender: to_client,
+        };
+
         Self {
-            servers: CursorVec::new(Server {
-                channels: vec!["Errors"]
-                    .iter()
-                    .map(|name| Channel {
-                        messages: Vec::new(),
-                        name: (*name).into(),
-                        read_at: DateTime::now(),
-                        message_scroll_offset: 0,
-                        message_buffer: String::new(),
-                    }).collect(),
-                connection: ClientConn::create_on(sender.clone()),
-                channel_scroll_offset: 0,
-                current_channel: 0,
-                name: IString::from("Client"),
-            }),
-            longest_channel_name: 0,
+            servers: CursorVec::new(client),
+            longest_channel_name: 6, // "Client"
             shutdown: false,
             events: reciever,
             sender,
@@ -125,7 +154,7 @@ impl Tui {
         }
     }
 
-    pub fn sender(&self) -> SyncSender<Event> {
+    pub fn sender(&self) -> SyncSender<ConnEvent> {
         self.sender.clone()
     }
 
@@ -145,7 +174,10 @@ impl Tui {
             server.channels[server.current_channel].read_at = ::chrono::Utc::now().into();
             let current_channel = &server.channels[server.current_channel];
 
-            server.connection.mark_read(&current_channel.name);
+            server.sender.send(TuiEvent::MarkRead {
+                server: server.name.clone(),
+                channel: current_channel.name.clone(),
+            });
         }
     }
 
@@ -239,8 +271,13 @@ impl Tui {
             }));
     }
 
-    pub fn add_server(&mut self, connection: Box<Conn>) {
-        let mut channels = connection.channels().to_vec();
+    pub fn add_server(
+        &mut self,
+        name: IString,
+        mut channels: Vec<IString>,
+        completer: Option<Box<Completer>>,
+        sender: SyncSender<TuiEvent>,
+    ) {
         channels.sort();
 
         self.servers.push(Server {
@@ -253,10 +290,11 @@ impl Tui {
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
                 }).collect(),
-            name: connection.name().into(),
-            connection,
+            name,
+            completer,
             current_channel: 0,
             channel_scroll_offset: 0,
+            sender,
         });
 
         self.longest_channel_name = self
@@ -316,6 +354,11 @@ impl Tui {
 
     fn send_message(&mut self) {
         let contents = self.current_channel().message_buffer.clone();
+        if self.servers.tell() == 0 {
+            self.add_client_message(contents);
+            return;
+        }
+        let current_server_name = self.servers.get().name.clone();
         let current_channel_name = self.current_channel().name.clone();
         if contents.starts_with("+:") {
             if let Some(ts) = self
@@ -325,10 +368,12 @@ impl Tui {
                 .map(|m| *m.timestamp())
             {
                 let reaction = &contents[2..contents.len() - 1];
-                self.servers
-                    .get()
-                    .connection
-                    .add_reaction(reaction, &current_channel_name, ts);
+                self.servers.get().sender.send(TuiEvent::AddReaction {
+                    reaction: reaction.into(),
+                    server: current_server_name,
+                    channel: current_channel_name,
+                    timestamp: ts,
+                });
             } else {
                 self.add_client_message(
                     "Can't react to most recent message if there are no messages in this channel!"
@@ -361,15 +406,17 @@ impl Tui {
                         }).map_err(|e| error!("{:#?}", e));
                 });
         } else if contents.starts_with('/') {
-            self.servers
-                .get_mut()
-                .connection
-                .handle_cmd(&current_channel_name, &contents[1..]);
+            self.servers.get_mut().sender.send(TuiEvent::Command {
+                server: current_server_name,
+                channel: current_channel_name,
+                command: IString::from(&contents[1..]),
+            });
         } else {
-            self.servers
-                .get_mut()
-                .connection
-                .send_channel_message(&current_channel_name, &contents);
+            self.servers.get_mut().sender.send(TuiEvent::SendMessage {
+                server: current_server_name,
+                channel: current_channel_name,
+                contents,
+            });
         }
     }
 
@@ -663,7 +710,12 @@ impl Tui {
                         .split_whitespace()
                         .last()
                     {
-                        self.servers.get().connection.autocomplete(last_word)
+                        self.servers
+                            .get()
+                            .completer
+                            .as_ref()
+                            .map(|c| c.autocomplete(last_word))
+                            .unwrap_or(Vec::new())
                     } else {
                         Vec::new()
                     }
@@ -686,11 +738,12 @@ impl Tui {
                 }
             }
             Key(Char(c)) => {
+                let current_server_name = self.servers.get().name.clone();
                 let current_channel_name = self.current_channel().name.clone();
-                self.servers
-                    .get_mut()
-                    .connection
-                    .send_typing(&current_channel_name);
+                let _ = self.servers.get_mut().sender.send(TuiEvent::SendTyping {
+                    server: current_server_name,
+                    channel: current_channel_name,
+                });
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
                 let current_pos = self.cursor_pos as usize;
@@ -701,14 +754,14 @@ impl Tui {
             }
             Unsupported(ref bytes) => match bytes.as_slice() {
                 [27, 79, 65] => {
-                    let _ = self.sender.send(Event::Input(Mouse(MouseEvent::Press(
+                    let _ = self.sender.send(ConnEvent::Input(Mouse(MouseEvent::Press(
                         MouseButton::WheelUp,
                         1,
                         1,
                     ))));
                 }
                 [27, 79, 66] => {
-                    let _ = self.sender.send(Event::Input(Mouse(MouseEvent::Press(
+                    let _ = self.sender.send(ConnEvent::Input(Mouse(MouseEvent::Press(
                         MouseButton::WheelDown,
                         1,
                         1,
@@ -721,16 +774,18 @@ impl Tui {
         }
     }
 
-    fn handle_event(&mut self, event: Event) {
+    fn handle_event(&mut self, event: ConnEvent) {
         match event {
-            Event::Resize => {} // Will be redrawn because we got an event
-            Event::Input(event) => {
+            ConnEvent::Resize => {} // Will be redrawn because we got an event
+            ConnEvent::Input(event) => {
                 self.handle_input(&event);
             }
-            Event::Message(message) => {
+            ConnEvent::Message(message) => {
                 self.add_message(message);
             }
-            Event::MessageEdited {
+            // TODO: Rebuild this around an immutable message history
+            /*
+            ConnEvent::MessageEdited {
                 server,
                 channel,
                 contents,
@@ -765,7 +820,8 @@ impl Tui {
                     msg.edit_to(contents);
                     }
             }
-            Event::ReactionAdded {
+            */
+            ConnEvent::ReactionAdded {
                 server,
                 channel,
                 timestamp,
@@ -790,7 +846,7 @@ impl Tui {
                     );
                 }
             }
-            Event::ReactionRemoved {
+            ConnEvent::ReactionRemoved {
                 server,
                 channel,
                 timestamp,
@@ -807,7 +863,7 @@ impl Tui {
                             .rev()
                             .find(|m| m.timestamp() == &timestamp)
                     }) {
-                        msg.remove_reaction(&reaction);
+                    msg.remove_reaction(&reaction);
                 } else {
                     error!(
                         "Couldn't remove reaction {} from message server: {}, channel: {}, timestamp: {}",
@@ -815,10 +871,10 @@ impl Tui {
                     );
                 }
             }
-            Event::Error(message) => {
+            ConnEvent::Error(message) => {
                 self.add_client_message(message);
             }
-            Event::HistoryLoaded {
+            ConnEvent::HistoryLoaded {
                 messages,
                 server,
                 channel,
@@ -832,16 +888,24 @@ impl Tui {
                 for m in messages {
                     c.messages.push(m.into());
                 }
-               c.messages
-                .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
+                c.messages
+                    .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
                 c.read_at = read_at;
             } else {
-                error!("Got history for an unknown channel {} in server {}", channel, server);
+                error!(
+                    "Got history for an unknown channel {} in server {}",
+                    channel, server
+                );
             },
-            Event::Connected(conn) => {
-                self.add_server(conn);
+            ConnEvent::ServerConnected {
+                name,
+                channels,
+                completer,
+                sender,
+            } => {
+                self.add_server(name, channels, completer, sender);
             }
-            Event::MarkChannelRead {
+            ConnEvent::MarkChannelRead {
                 server,
                 channel,
                 read_at,
@@ -893,40 +957,5 @@ impl Tui {
                 break;
             }
         }
-    }
-}
-
-pub struct ClientConn {
-    sender: SyncSender<Event>,
-    channel_names: [IString; 1],
-}
-
-impl ClientConn {
-    pub fn create_on(sender: SyncSender<Event>) -> Box<Conn> {
-        Box::new(ClientConn {
-            sender,
-            channel_names: ["Errors".into()],
-        })
-    }
-}
-
-impl Conn for ClientConn {
-    fn name(&self) -> &str {
-        "Client"
-    }
-
-    fn send_channel_message(&mut self, channel: &str, contents: &str) {
-        let _ = self.sender.send(Event::Message(Message {
-            server: "Client".into(),
-            channel: channel.into(),
-            contents: contents.into(),
-            sender: "You".into(),
-            timestamp: ::chrono::Utc::now().into(),
-            reactions: Vec::new(),
-        }));
-    }
-
-    fn channels(&self) -> &[IString] {
-        &self.channel_names
     }
 }

@@ -75,10 +75,13 @@ impl ChanMessage {
         self.reactions = self.reactions.iter().cloned().filter(|r| r.1 > 0).collect();
     }
 
+    // TODO: This should probably just go away if we have immutable message history
+    /*
     pub fn edit_to(&mut self, contents: String) {
         self.raw = contents;
         self.formatted_width = None;
     }
+    */
 
     pub fn formatted_to(&mut self, width: usize) -> &str {
         use std::fmt::Write;

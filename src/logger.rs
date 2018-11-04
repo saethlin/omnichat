@@ -1,4 +1,4 @@
-use conn::Event;
+use conn::ConnEvent;
 use log::{Log, Metadata, Record};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -7,11 +7,11 @@ use std::sync::Mutex;
 
 pub struct Logger {
     file_output: Mutex<File>,
-    sender: SyncSender<Event>,
+    sender: SyncSender<ConnEvent>,
 }
 
 impl Logger {
-    pub fn new(sender: SyncSender<Event>) -> Self {
+    pub fn new(sender: SyncSender<ConnEvent>) -> Self {
         let log_path = ::dirs::home_dir()
             .expect("You must have a home directory")
             .join(".omnichat_log");
@@ -46,7 +46,7 @@ impl Log for Logger {
             let _ = writeln!(file_handle, "{}", message);
             let _ = file_handle.flush();
         }
-        let _ = self.sender.send(Event::Error(message));
+        let _ = self.sender.send(ConnEvent::Error(message));
     }
 
     fn flush(&self) {
