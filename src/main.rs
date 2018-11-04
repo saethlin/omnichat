@@ -30,9 +30,10 @@ mod conn;
 mod bimap;
 mod chan_message;
 mod cursor_vec;
-mod slack_conn;
-//mod discord_conn;
+#[cfg(feature = "discord_support")]
+mod discord_conn;
 mod logger;
+mod slack_conn;
 //mod strvec;
 mod tui;
 
@@ -41,22 +42,24 @@ struct SlackConfig {
     token: String,
 }
 
-/*
+#[cfg(feature = "discord_support")]
 #[derive(Deserialize)]
 struct DiscordConfig {
     name: String,
 }
-*/
 
 #[derive(Deserialize)]
 struct Config {
-    //discord_token: Option<String>,
     slack: Option<Vec<SlackConfig>>,
-    //discord: Option<Vec<DiscordConfig>>,
+    #[cfg(feature = "discord_support")]
+    discord_token: Option<String>,
+    #[cfg(feature = "discord_support")]
+    discord: Option<Vec<DiscordConfig>>,
 }
 
 fn main() {
-    //use discord_conn::DiscordConn;
+    #[cfg(feature = "discord_support")]
+    use discord_conn::DiscordConn;
     use slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -105,17 +108,19 @@ fn main() {
             });
         }
     }
-    /*
-    if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
-        for d in discord {
-            let sender = tui.sender();
-            let token = discord_token.clone();
-            thread::spawn(move || {
-                let _ = DiscordConn::create_on(&token, sender.clone(), &d.name);
-            });
+
+    #[cfg(feature = "discord_support")]
+    {
+        if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
+            for d in discord {
+                let sender = tui.sender();
+                let token = discord_token.clone();
+                thread::spawn(move || {
+                    let _ = DiscordConn::create_on(&token, sender.clone(), &d.name);
+                });
+            }
         }
     }
-    */
 
     tui.run();
 }

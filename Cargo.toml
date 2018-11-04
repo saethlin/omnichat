@@ -31,3 +31,7 @@ discord = {path = "discord"}
 [profile.release]
 lto = true
 panic = "abort"
+
+[features]
+default = ["discord_support"]
+discord_support = []
