@@ -174,7 +174,7 @@ impl Tui {
             server.channels[server.current_channel].read_at = ::chrono::Utc::now().into();
             let current_channel = &server.channels[server.current_channel];
 
-            server.sender.send(TuiEvent::MarkRead {
+            let _ = server.sender.send(TuiEvent::MarkRead {
                 server: server.name.clone(),
                 channel: current_channel.name.clone(),
             });
@@ -368,7 +368,7 @@ impl Tui {
                 .map(|m| *m.timestamp())
             {
                 let reaction = &contents[2..contents.len() - 1];
-                self.servers.get().sender.send(TuiEvent::AddReaction {
+                let _ = self.servers.get().sender.send(TuiEvent::AddReaction {
                     reaction: reaction.into(),
                     server: current_server_name,
                     channel: current_channel_name,
@@ -406,13 +406,13 @@ impl Tui {
                         }).map_err(|e| error!("{:#?}", e));
                 });
         } else if contents.starts_with('/') {
-            self.servers.get_mut().sender.send(TuiEvent::Command {
+            let _ = self.servers.get_mut().sender.send(TuiEvent::Command {
                 server: current_server_name,
                 channel: current_channel_name,
                 command: IString::from(&contents[1..]),
             });
         } else {
-            self.servers.get_mut().sender.send(TuiEvent::SendMessage {
+            let _ = self.servers.get_mut().sender.send(TuiEvent::SendMessage {
                 server: current_server_name,
                 channel: current_channel_name,
                 contents,
