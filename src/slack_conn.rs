@@ -13,8 +13,6 @@ use std::thread;
 ::lazy_static::lazy_static! {
     pub static ref MENTION_REGEX: Regex = Regex::new(r"<@[A-Z0-9]{9}>").unwrap();
     pub static ref CHANNEL_REGEX: Regex = Regex::new(r"<#[A-Z0-9]{9}\|(?P<n>.*?)>").unwrap();
-    //pub static ref CLIENT: ::reqwest::Client = ::reqwest::Client::new();
-    pub static ref CLIENT: ::weeqwest::Client = ::weeqwest::Client::new();
 }
 
 macro_rules! deserialize_or_log {
@@ -75,26 +73,6 @@ where
                     Err(e) => Err(e),
                 }
             })
-        /*
-        CLIENT
-            .get(&url)
-            .send()
-            .map_err(|e| error!("{:#?}", e))
-            .and_then(|mut response| response.text().map_err(|e| error!("{:#?}", e)))
-            .and_then(|body| {
-                match ::serde_json::from_str::<::slack::http::Error>(&body)
-                    .map_err(|e| error!("{}\n{:#?}", format_json(&body), e))
-                {
-                    Ok(slack::http::Error { ok: true, .. }) => ::serde_json::from_str::<R>(&body)
-                        .map_err(|e| error!("{}\n{:#?}", format_json(&body), e)),
-                    Ok(slack::http::Error { ok: false, error }) => Err(error!(
-                        "{}",
-                        error.unwrap_or_else(|| "no error given".into())
-                    )),
-                    Err(e) => Err(e),
-                }
-            })
-        */
     })
 }
 
@@ -480,88 +458,90 @@ impl SlackConn {
             ::tokio::runtime::current_thread::block_on_all(runner).unwrap();
         });
 
+        let mut client = weeqwest::Client::new();
+        let mut pending_requests = Vec::new();
+
+        // Launch all the history requests
         for (conversation_id, conversation_name) in channels.clone() {
-            let token = token.to_string();
-            let handler = connection.clone(); // TODO: Change this variable name
-            let sender = sender.clone();
-            let team_name = team_name.clone();
+            use slack::http::conversations;
 
-            thread::spawn(move || {
-                use slack::http::conversations;
-
-                let url = format!(
-                    "https://slack.com/api/conversations.info?token={}&{}",
-                    token,
-                    ::serde_urlencoded::to_string(&conversations::InfoRequest::new(
-                        conversation_id
-                    ))
+            let url = format!(
+                "https://slack.com/api/conversations.info?token={}&{}",
+                token,
+                ::serde_urlencoded::to_string(&conversations::InfoRequest::new(conversation_id))
                     .unwrap_or_default()
-                );
+            );
 
-                // TODO: More parallelism can be added here
-                let info_response = ::weeqwest::get(&url).unwrap();
+            let info_response = client.get(&url).unwrap();
 
-                let mut request = conversations::HistoryRequest::new(conversation_id);
-                request.limit = Some(1000);
-                let url = format!(
-                    "https://slack.com/api/conversations.history?token={}&{}",
-                    token,
-                    ::serde_urlencoded::to_string(request).unwrap_or_default()
-                );
+            let mut request = conversations::HistoryRequest::new(conversation_id);
+            request.limit = Some(1000);
+            let url = format!(
+                "https://slack.com/api/conversations.history?token={}&{}",
+                token,
+                ::serde_urlencoded::to_string(request).unwrap_or_default()
+            );
 
-                let history_response = ::weeqwest::get(&url).unwrap();
+            let history_response = client.get(&url).unwrap();
 
-                use slack::http::conversations::ConversationInfo;
-                let read_at = deserialize_or_log!(info_response, conversations::InfoResponse)
-                    .map(|info| match info.channel {
-                        ConversationInfo::Channel { last_read, .. } => last_read
-                            .map(|t| t.into())
-                            .unwrap_or_else(conn::DateTime::now),
-                        ConversationInfo::Group { last_read, .. } => last_read.into(),
-                        ConversationInfo::ClosedDirectMessage { .. } => conn::DateTime::now(),
-                        ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
-                    })
-                    .unwrap_or_else(|_| conn::DateTime::now());
+            pending_requests.push((info_response, history_response, conversation_name));
+        }
 
-                let handle = handler.read().unwrap();
-                // TODO: This is sometimes an error because url_private is missing???
-                // The error message is awful and shouldn't even happen
-                // TODO: replace the deserialize_or_log macro with something that reports errors
-                // better?
-                let history_messages = deserialize_or_log!(history_response, HistoryResponse)
-                    .map(|h| h.messages)
-                    .unwrap_or_default();
+        // Handle all the launched requests
+        for (info_response, history_response, conversation_name) in pending_requests {
+            use slack::http::conversations::ConversationInfo;
 
-                let messages = history_messages
-                    .into_iter()
-                    .map(|msg| {
-                        let name = msg
-                            .user
-                            .and_then(|name| handle.users.get_right(&name).cloned())
-                            .or_else(|| msg.username.clone())
-                            .or_else(|| msg.bot_id.map(|b| IString::from(b.to_string())))
-                            .unwrap_or_else(|| "UNKNOWNUSER".into());
-                        Message {
-                            server: team_name.clone(),
-                            channel: conversation_name.clone(),
-                            sender: name.clone(),
-                            timestamp: msg.ts.into(),
-                            reactions: msg
-                                .reactions
-                                .iter()
-                                .map(|r| (r.name.clone(), r.count as usize))
-                                .collect(),
-                            contents: msg.to_omni(&handle),
-                        }
-                    })
-                    .collect();
+            let info_response = info_response.wait().unwrap();
+            let read_at = deserialize_or_log!(info_response, conversations::InfoResponse)
+                .map(|info| match info.channel {
+                    ConversationInfo::Channel { last_read, .. } => last_read
+                        .map(|t| t.into())
+                        .unwrap_or_else(conn::DateTime::now),
+                    ConversationInfo::Group { last_read, .. } => last_read.into(),
+                    ConversationInfo::ClosedDirectMessage { .. } => conn::DateTime::now(),
+                    ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
+                })
+                .unwrap_or_else(|_| conn::DateTime::now());
 
-                let _ = sender.send(ConnEvent::HistoryLoaded {
-                    messages,
-                    server: team_name.clone(),
-                    channel: conversation_name,
-                    read_at,
-                });
+            let handle = connection.read().unwrap();
+            // TODO: This is sometimes an error because url_private is missing???
+            // The error message is awful and shouldn't even happen
+            // TODO: replace the deserialize_or_log macro with something that reports errors
+            // better?
+            let history_response = history_response.wait().unwrap();
+            let history_messages = deserialize_or_log!(history_response, HistoryResponse)
+                .map(|h| h.messages)
+                .unwrap_or_default();
+
+            let messages = history_messages
+                .into_iter()
+                .map(|msg| {
+                    let name = msg
+                        .user
+                        .and_then(|name| handle.users.get_right(&name).cloned())
+                        .or_else(|| msg.username.clone())
+                        .or_else(|| msg.bot_id.map(|b| IString::from(b.to_string())))
+                        .unwrap_or_else(|| "UNKNOWNUSER".into());
+                    Message {
+                        server: team_name.clone(),
+                        channel: conversation_name.clone(),
+                        sender: name.clone(),
+                        timestamp: msg.ts.into(),
+                        reactions: msg
+                            .reactions
+                            .iter()
+                            .map(|r| (r.name.clone(), r.count as usize))
+                            .collect(),
+                        contents: msg.to_omni(&handle),
+                    }
+                })
+                .collect();
+
+            let _ = sender.send(ConnEvent::HistoryLoaded {
+                messages,
+                server: team_name.clone(),
+                channel: conversation_name.clone(),
+                read_at,
             });
         }
 
@@ -751,7 +731,6 @@ impl SlackConn {
 
         thread::spawn(move || {
             let _ = ::weeqwest::post(&url).map_err(|e| error!("{:#?}", e));
-            //let _ = CLIENT.post(&url).send().map_err(|e| error!("{:#?}", e));
         });
     }
 
@@ -759,34 +738,39 @@ impl SlackConn {
         let args: Vec<_> = cmd.split_whitespace().collect();
         match args.as_slice() {
             ["upload", path] => {
-                let url = self.channels.get_left(channel).map(|id| {
+                let url = match self.channels.get_left(channel).map(|id| {
                     format!(
                         "https://slack.com/api/files.upload?token={}&channels={}",
                         self.token, id
                     )
-                });
-
-                let path = path.to_string();
-                thread::spawn(move || {
-                    if let Some(url) = url {
-                        ::weeqwest::send(&::weeqwest::Request::post(&url).unwrap().form(&[
-                            ("contents", &std::fs::read(&path).unwrap()),
-                            ("filename", path.as_bytes()),
-                        ]));
-                        /*
-                        CLIENT
-                            .post(&url)
-                            .multipart(form)
-                            .send()
-                            .map(|r| {
-                                if !r.status().is_success() {
-                                    error!("{:#?}", r);
-                                }
-                            })
-                            .unwrap_or_else(|e| error!("{:#?}", e));
-                        */
+                }) {
+                    Some(v) => v,
+                    None => {
+                        error!("unknown channel {}", channel);
+                        return;
                     }
-                });
+                };
+
+                let content = match std::fs::read(path) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        error!("{:#?}", e);
+                        return;
+                    }
+                };
+
+                match ::weeqwest::send(
+                    &::weeqwest::Request::post(&url)
+                        .unwrap()
+                        .form(&[("content", &content), ("filename", path.as_bytes())]),
+                ) {
+                    Ok(response) => {
+                        if !response.status().is_success() {
+                            error!("{}", response.text().unwrap())
+                        }
+                    }
+                    Err(e) => error!("{:#?}", e),
+                }
             }
             _ => {
                 error!("unsupported command: {}", cmd);
