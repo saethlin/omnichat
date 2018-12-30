@@ -32,3 +32,4 @@ weeqwest = {git = "https://github.com/saethlin/weeqwest"}
 [profile.release]
 lto = true
 panic = "abort"
+debug = true

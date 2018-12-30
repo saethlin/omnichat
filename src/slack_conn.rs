@@ -41,39 +41,13 @@ fn format_json(text: &[u8]) -> String {
         .unwrap_or_else(|_| String::from_utf8(text.to_vec()).unwrap_or_default())
 }
 
-use std::thread::JoinHandle;
-fn get_slack<T, R>(endpoint: &'static str, token: &str, request: T) -> JoinHandle<Result<R, ()>>
-where
-    T: ::serde::Serialize + Send + 'static,
-    R: ::serde::de::DeserializeOwned + Send + 'static,
-{
-    let token = token.to_string();
-    thread::spawn(move || {
-        let url = format!(
-            "https://slack.com/api/{}?token={}&{}",
-            endpoint,
-            token,
-            ::serde_urlencoded::to_string(request).unwrap_or_default()
-        );
-
-        ::weeqwest::get(&url)
-            .map_err(|e| error!("{:#?}", e))
-            .and_then(|body| {
-                match ::serde_json::from_slice::<::slack::http::Error>(body.bytes())
-                    .map_err(|e| error!("{}\n{:#?}", format_json(body.bytes()), e))
-                {
-                    Ok(slack::http::Error { ok: true, .. }) => {
-                        ::serde_json::from_slice::<R>(body.bytes())
-                            .map_err(|e| error!("{}\n{:#?}", format_json(body.bytes()), e))
-                    }
-                    Ok(slack::http::Error { ok: false, error }) => Err(error!(
-                        "{}",
-                        error.unwrap_or_else(|| "no error given".into())
-                    )),
-                    Err(e) => Err(e),
-                }
-            })
-    })
+fn slack_url<T: ::serde::Serialize>(endpoint: &'static str, token: &str, request: T) -> String {
+    format!(
+        "https://slack.com/api/{}?token={}&{}",
+        endpoint,
+        token,
+        ::serde_urlencoded::to_string(request).unwrap_or_default()
+    )
 }
 
 #[derive(Deserialize)]
@@ -293,29 +267,37 @@ impl Completer for SlackCompleter {
 
 impl SlackConn {
     pub fn create_on(token: &str, sender: SyncSender<ConnEvent>) -> Result<(), ()> {
+        let mut client = ::weeqwest::Client::new();
         // Launch all of the requests
         use slack::http::{conversations, emoji, rtm, users};
-        let emoji_recv = get_slack("emoji.list", &token, &());
-        let connect_recv = get_slack("rtm.connect", &token, &());
-        let users_recv = get_slack("users.list", &token, users::ListRequest::new());
+
+        let emoji_recv = client.get(&slack_url("emoji.list", &token, &())).unwrap();
+        let connect_recv = client.get(&slack_url("rtm.connect", &token, &())).unwrap();
+        let users_recv = client
+            .get(&slack_url("users.list", &token, users::ListRequest::new()))
+            .unwrap();
 
         use slack::http::conversations::ChannelType::*;
         let mut req = conversations::ListRequest::new();
         req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
-        let conversations_recv = get_slack("conversations.list", &token, req);
+        let conversations_recv = client
+            .get(&slack_url("conversations.list", &token, req))
+            .unwrap();
 
         // We need to know about the users first so that we can digest the list of conversations
-        let users_response: users::ListResponse =
-            users_recv.join().map_err(|e| error!("{:#?}", e))??;
+        let users_response = users_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let users_response = deserialize_or_log!(users_response, users::ListResponse)
+            .map_err(|e| error!("{:#?}", e))?;
 
         let mut users: BiMap<::slack::UserId, IString> = BiMap::new();
         for user in users_response.members {
             users.insert(user.id, IString::from(user.name));
         }
 
-        let response_channels: conversations::ListResponse = conversations_recv
-            .join()
-            .map_err(|e| error!("{:#?}", e))??;
+        let conversations_response = conversations_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let response_channels =
+            deserialize_or_log!(conversations_response, conversations::ListResponse)
+                .map_err(|e| error!("{:#?}", e))?;
 
         use slack::http::conversations::Conversation::*;
         let mut channels = BiMap::new();
@@ -355,8 +337,9 @@ impl SlackConn {
 
         channel_names.sort();
 
-        let connect_response: rtm::ConnectResponse =
-            connect_recv.join().map_err(|e| error!("{:#?}", e))??;
+        let connect_response = connect_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let connect_response = deserialize_or_log!(connect_response, rtm::ConnectResponse)
+            .map_err(|e| error!("{:#?}", e))?;
 
         let websocket_url = connect_response.url.clone();
 
@@ -365,7 +348,9 @@ impl SlackConn {
         let (input_sender, input_channel) = mpsc::channel(0);
 
         // Give the emoji handle as long as possible to complete
-        let emoji: emoji::ListResponse = emoji_recv.join().map_err(|e| error!("{:#?}", e))??;
+        let emoji_response = emoji_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let emoji = deserialize_or_log!(emoji_response, emoji::ListResponse)
+            .map_err(|e| error!("{:#?}", e))?;
 
         let mut emoji = emoji
             .emoji
@@ -458,7 +443,6 @@ impl SlackConn {
             ::tokio::runtime::current_thread::block_on_all(runner).unwrap();
         });
 
-        let mut client = weeqwest::Client::new();
         let mut pending_requests = Vec::new();
 
         // Launch all the history requests
@@ -678,24 +662,37 @@ impl SlackConn {
         };
 
         let token = self.token.clone();
-
         let timestamp = conn::DateTime::now().into();
 
-        use slack::http::Error;
-        match channel_or_group_id {
+        let url = match channel_or_group_id {
             ::slack::ConversationId::Channel(channel_id) => {
                 let req = channels::MarkRequest::new(channel_id, timestamp);
-                let _ = get_slack::<channels::MarkRequest, Error>("channels.mark", &token, req);
+                slack_url("channels.mark", &token, req)
             }
             ::slack::ConversationId::Group(group_id) => {
                 let req = groups::MarkRequest::new(group_id, timestamp);
-                let _ = get_slack::<groups::MarkRequest, Error>("groups.mark", &token, req);
+                slack_url("groups.mark", &token, req)
             }
             ::slack::ConversationId::DirectMessage(dm_id) => {
                 let req = im::MarkRequest::new(dm_id, timestamp);
-                let _ = get_slack::<im::MarkRequest, Error>("im.mark", &token, req);
+                slack_url("im.mark", &token, req)
             }
-        }
+        };
+
+        let channel = channel.to_string();
+        std::thread::spawn(move || {
+            if let Ok(r) = ::weeqwest::post(&url).map_err(|e| error!("{:#?}", e)) {
+                use slack::http::Error;
+                if let Ok(Error { ok: false, error }) = ::serde_json::from_slice::<Error>(r.bytes())
+                {
+                    error!(
+                        "Couldn't mark {} as read: {}",
+                        channel,
+                        error.unwrap_or_default()
+                    );
+                }
+            }
+        });
     }
 
     fn add_reaction(&self, channel: &str, reaction: &str, timestamp: conn::DateTime) {
