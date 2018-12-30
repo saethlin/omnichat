@@ -1,32 +1,35 @@
-use bimap::BiMap;
-use conn;
-use conn::{Completer, ConnEvent, IString, Message, TuiEvent};
+use crate::bimap::BiMap;
+use crate::conn;
+use crate::conn::{Completer, ConnEvent, IString, Message, TuiEvent};
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
+use log::error;
 use regex::Regex;
+use serde_derive::Deserialize;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-lazy_static! {
+::lazy_static::lazy_static! {
     pub static ref MENTION_REGEX: Regex = Regex::new(r"<@[A-Z0-9]{9}>").unwrap();
     pub static ref CHANNEL_REGEX: Regex = Regex::new(r"<#[A-Z0-9]{9}\|(?P<n>.*?)>").unwrap();
-    pub static ref CLIENT: ::reqwest::Client = ::reqwest::Client::new();
+    //pub static ref CLIENT: ::reqwest::Client = ::reqwest::Client::new();
+    pub static ref CLIENT: ::weeqwest::Client = ::weeqwest::Client::new();
 }
 
 macro_rules! deserialize_or_log {
     ($response:expr, $type:ty) => {{
-        if $response.status.is_success() {
-            ::serde_json::from_str::<$type>(&$response.text)
-                .map_err(|e| error!("{}\n{:#?}", format_json(&$response.text), e))
+        if $response.status().is_success() {
+            ::serde_json::from_slice::<$type>(&$response.bytes())
+                .map_err(|e| error!("{}\n{:#?}", format_json(&$response.bytes()), e))
         } else {
-            match ::serde_json::from_str::<::slack::http::Error>(&$response.text) {
+            match ::serde_json::from_slice::<::slack::http::Error>(&$response.bytes()) {
                 Ok(e) => {
                     error!("{:#?}", e);
                     Err(())
                 }
                 Err(e) => {
-                    error!("{}\n{:#?}", $response.text, e);
+                    error!("{}\n{:#?}", $response.text().unwrap(), e);
                     Err(())
                 }
             }
@@ -34,15 +37,10 @@ macro_rules! deserialize_or_log {
     }};
 }
 
-struct Response {
-    text: String,
-    status: ::reqwest::StatusCode,
-}
-
-fn format_json(text: &str) -> String {
-    ::serde_json::from_str::<::serde_json::Value>(text)
+fn format_json(text: &[u8]) -> String {
+    ::serde_json::from_slice::<::serde_json::Value>(text)
         .and_then(|v| ::serde_json::to_string_pretty(&v))
-        .unwrap_or_else(|_| String::from(text))
+        .unwrap_or_else(|_| String::from_utf8(text.to_vec()).unwrap_or_default())
 }
 
 use std::thread::JoinHandle;
@@ -60,6 +58,24 @@ where
             ::serde_urlencoded::to_string(request).unwrap_or_default()
         );
 
+        ::weeqwest::get(&url)
+            .map_err(|e| error!("{:#?}", e))
+            .and_then(|body| {
+                match ::serde_json::from_slice::<::slack::http::Error>(body.bytes())
+                    .map_err(|e| error!("{}\n{:#?}", format_json(body.bytes()), e))
+                {
+                    Ok(slack::http::Error { ok: true, .. }) => {
+                        ::serde_json::from_slice::<R>(body.bytes())
+                            .map_err(|e| error!("{}\n{:#?}", format_json(body.bytes()), e))
+                    }
+                    Ok(slack::http::Error { ok: false, error }) => Err(error!(
+                        "{}",
+                        error.unwrap_or_else(|| "no error given".into())
+                    )),
+                    Err(e) => Err(e),
+                }
+            })
+        /*
         CLIENT
             .get(&url)
             .send()
@@ -78,6 +94,7 @@ where
                     Err(e) => Err(e),
                 }
             })
+        */
     })
 }
 
@@ -105,7 +122,8 @@ impl SlackConn {
                 } else {
                     format!("@{}", &caps[0][2..11])
                 }
-            }).into_owned();
+            })
+            .into_owned();
 
         CHANNEL_REGEX.replace_all(&text, "#$n").into_owned()
     }
@@ -134,9 +152,14 @@ impl SlackConn {
                 .iter()
                 .position(|m| m.id == ack.reply_to)
             {
+                let mut body = ack.text.clone();
+                body = body.replace("&amp;", "&");
+                body = body.replace("&lt;", "<");
+                body = body.replace("&gt;", ">");
+
                 let _ = self.tui_sender.send(ConnEvent::Message(Message {
                     channel: self.pending_messages[index].channel.clone(),
-                    contents: self.convert_mentions(&ack.text),
+                    contents: self.convert_mentions(&body),
                     reactions: Vec::new(),
                     sender: self.my_name.clone(),
                     server: self.team_name.clone(),
@@ -200,21 +223,21 @@ impl SlackConn {
                     };
 
                     for f in &files {
-                        write!(body, "\n{}", f.url_private);
+                        let _ = write!(body, "\n{}", f.url_private);
                     }
 
                     for a in &attachments {
                         if let Some(ref title) = a.title {
-                            write!(body, "\n{}", title);
+                            let _ = write!(body, "\n{}", title);
                         }
                         if let Some(ref pretext) = a.pretext {
-                            write!(body, "\n{}", pretext);
+                            let _ = write!(body, "\n{}", pretext);
                         }
                         if let Some(ref text) = a.text {
-                            write!(body, "\n{}", text);
+                            let _ = write!(body, "\n{}", text);
                         }
                         for f in &a.files {
-                            write!(body, "\n{}", f.url_private);
+                            let _ = write!(body, "\n{}", f.url_private);
                         }
                     }
 
@@ -345,7 +368,8 @@ impl SlackConn {
                     users.get_right(&user).map(|name| (id, name.clone()))
                 }
                 _ => None,
-            }) {
+            })
+        {
             let name: IString = name;
             channel_names.push(name.clone());
             channels.insert(id, name);
@@ -429,15 +453,12 @@ impl SlackConn {
 
         let thread_conn = connection.clone();
 
-        // Spin off a thread that will feed message events back to the TUI
-        // websocket does not support the new tokio :(
         thread::spawn(move || {
             use websocket::result::WebSocketError;
             use websocket::OwnedMessage::{Close, Ping, Pong, Text};
-            let mut core = ::tokio_core::reactor::Core::new().unwrap();
             let runner = ::websocket::ClientBuilder::new(&websocket_url)
                 .unwrap()
-                .async_connect_secure(None, &core.handle())
+                .async_connect_secure(None)
                 .and_then(|(duplex, _)| {
                     let (sink, stream) = duplex.split();
                     stream
@@ -452,10 +473,11 @@ impl SlackConn {
                                 None
                             }
                             _ => None,
-                        }).select(input_channel.map_err(|_| WebSocketError::NoDataAvailable))
+                        })
+                        .select(input_channel.map_err(|_| WebSocketError::NoDataAvailable))
                         .forward(sink)
                 });
-            core.run(runner).unwrap();
+            ::tokio::runtime::current_thread::block_on_all(runner).unwrap();
         });
 
         for (conversation_id, conversation_name) in channels.clone() {
@@ -472,28 +494,12 @@ impl SlackConn {
                     token,
                     ::serde_urlencoded::to_string(&conversations::InfoRequest::new(
                         conversation_id
-                    )).unwrap_or_default()
+                    ))
+                    .unwrap_or_default()
                 );
 
-                let info_response = CLIENT
-                    .get(&url)
-                    .send()
-                    .map_err(|e| error!("{:#?}", e))
-                    .map(|mut r| Response {
-                        text: r.text().unwrap(),
-                        status: r.status(),
-                    }).unwrap();
-
-                let info = deserialize_or_log!(info_response, conversations::InfoResponse).unwrap();
-                use slack::http::conversations::ConversationInfo;
-                let read_at = match info.channel {
-                    ConversationInfo::Channel { last_read, .. } => last_read
-                        .map(|t| t.into())
-                        .unwrap_or_else(conn::DateTime::now),
-                    ConversationInfo::Group { last_read, .. } => last_read.into(),
-                    ConversationInfo::ClosedDirectMessage { .. } => conn::DateTime::now(),
-                    ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
-                };
+                // TODO: More parallelism can be added here
+                let info_response = ::weeqwest::get(&url).unwrap();
 
                 let mut request = conversations::HistoryRequest::new(conversation_id);
                 request.limit = Some(1000);
@@ -503,20 +509,30 @@ impl SlackConn {
                     ::serde_urlencoded::to_string(request).unwrap_or_default()
                 );
 
-                let history_response = CLIENT
-                    .get(&url)
-                    .send()
-                    .map_err(|e| error!("{:#?}", e))
-                    .map(|mut r| Response {
-                        text: r.text().unwrap(),
-                        status: r.status(),
-                    }).unwrap();
+                let history_response = ::weeqwest::get(&url).unwrap();
 
-                let history = deserialize_or_log!(history_response, HistoryResponse).unwrap();
+                use slack::http::conversations::ConversationInfo;
+                let read_at = deserialize_or_log!(info_response, conversations::InfoResponse)
+                    .map(|info| match info.channel {
+                        ConversationInfo::Channel { last_read, .. } => last_read
+                            .map(|t| t.into())
+                            .unwrap_or_else(conn::DateTime::now),
+                        ConversationInfo::Group { last_read, .. } => last_read.into(),
+                        ConversationInfo::ClosedDirectMessage { .. } => conn::DateTime::now(),
+                        ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
+                    })
+                    .unwrap_or_else(|_| conn::DateTime::now());
 
                 let handle = handler.read().unwrap();
-                let messages = history
-                    .messages
+                // TODO: This is sometimes an error because url_private is missing???
+                // The error message is awful and shouldn't even happen
+                // TODO: replace the deserialize_or_log macro with something that reports errors
+                // better?
+                let history_messages = deserialize_or_log!(history_response, HistoryResponse)
+                    .map(|h| h.messages)
+                    .unwrap_or_default();
+
+                let messages = history_messages
                     .into_iter()
                     .map(|msg| {
                         let name = msg
@@ -537,7 +553,8 @@ impl SlackConn {
                                 .collect(),
                             contents: msg.to_omni(&handle),
                         }
-                    }).collect();
+                    })
+                    .collect();
 
                 let _ = sender.send(ConnEvent::HistoryLoaded {
                     messages,
@@ -612,7 +629,7 @@ impl SlackConn {
             id,
         });
 
-        let message = json!({
+        let message = ::serde_json::json!({
             "id": id,
             "type": "typing",
             "channel": channel_id,
@@ -648,7 +665,7 @@ impl SlackConn {
             id,
         });
 
-        let message = json!({
+        let message = ::serde_json::json!({
             "id": id,
             "type": "message",
             "channel": channel_id,
@@ -733,7 +750,8 @@ impl SlackConn {
         );
 
         thread::spawn(move || {
-            let _ = CLIENT.post(&url).send().map_err(|e| error!("{:#?}", e));
+            let _ = ::weeqwest::post(&url).map_err(|e| error!("{:#?}", e));
+            //let _ = CLIENT.post(&url).send().map_err(|e| error!("{:#?}", e));
         });
     }
 
@@ -747,13 +765,15 @@ impl SlackConn {
                         self.token, id
                     )
                 });
-                let form = reqwest::multipart::Form::new()
-                    .text("filename", "Image from omnichat")
-                    .file("file", path)
-                    .map_err(|e| error!("{:#?}", e));
 
+                let path = path.to_string();
                 thread::spawn(move || {
-                    if let (Some(url), Ok(form)) = (url, form) {
+                    if let Some(url) = url {
+                        ::weeqwest::send(&::weeqwest::Request::post(&url).unwrap().form(&[
+                            ("contents", &std::fs::read(&path).unwrap()),
+                            ("filename", path.as_bytes()),
+                        ]));
+                        /*
                         CLIENT
                             .post(&url)
                             .multipart(form)
@@ -762,7 +782,9 @@ impl SlackConn {
                                 if !r.status().is_success() {
                                     error!("{:#?}", r);
                                 }
-                            }).unwrap_or_else(|e| error!("{:#?}", e));
+                            })
+                            .unwrap_or_else(|e| error!("{:#?}", e));
+                        */
                     }
                 });
             }
@@ -817,21 +839,21 @@ impl HistoryMessage {
         };
 
         for f in &self.files {
-            write!(body, "\n{}", f.url_private);
+            let _ = write!(body, "\n{}", f.url_private);
         }
 
         for a in &self.attachments {
             if let Some(ref title) = a.title {
-                write!(body, "\n{}", title);
+                let _ = write!(body, "\n{}", title);
             }
             if let Some(ref pretext) = a.pretext {
-                write!(body, "\n{}", pretext);
+                let _ = write!(body, "\n{}", pretext);
             }
             if let Some(ref text) = a.text {
-                write!(body, "\n{}", text);
+                let _ = write!(body, "\n{}", text);
             }
             for f in &a.files {
-                write!(body, "\n{}", f.url_private);
+                let _ = write!(body, "\n{}", f.url_private);
             }
         }
 

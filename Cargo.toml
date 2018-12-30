@@ -2,10 +2,11 @@
 name = "omnichat"
 version = "0.0.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
+edition = "2018"
 
 [dependencies]
 inlinable_string = { version = "0.1", features = ["serde"] }
-websocket = "0.21"
+websocket = "0.22"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
@@ -19,19 +20,15 @@ log = {version="0.4", features=["std"]}
 termion = "1.5"
 libc = "0.2"
 signal-hook = "0.1"
-textwrap = "0.10"
+textwrap = "0.11"
 dirs = "1.0"
-openssl = { version = "0.10", features = ["vendored"] }
-tokio-core = "0.1"
+tokio = "0.1"
+#openssl = { version = "0.10", features = ["vendored"] }
 serde_urlencoded = "0.5"
-reqwest = "0.9"
 slack = {path = "tiny_slack"}
 discord = {path = "discord"}
+weeqwest = {git = "https://github.com/saethlin/weeqwest"}
 
 [profile.release]
 lto = true
 panic = "abort"
-
-[features]
-default = ["discord_support"]
-discord_support = []

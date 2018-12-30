@@ -28,7 +28,7 @@ pub struct ListRequest {
 
 #[derive(Deserialize)]
 pub struct ListResponse {
-    ok: bool,
+    pub ok: bool,
     pub members: Vec<User>,
     pub cache_ts: Option<Timestamp>,
     pub response_metadata: Option<Paging>,

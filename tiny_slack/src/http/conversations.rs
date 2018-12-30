@@ -52,7 +52,7 @@ pub struct InfoRequest {
 
 #[derive(Deserialize)]
 pub struct InfoResponse {
-    ok: bool,
+    pub ok: bool,
     pub channel: ConversationInfo,
 }
 
@@ -100,7 +100,7 @@ impl ::std::fmt::Display for ChannelType {
 // TODO: This returns a _partial_ conversation object, per the slack docs
 #[derive(Deserialize)]
 pub struct ListResponse {
-    ok: bool,
+    pub ok: bool,
     pub channels: Vec<Conversation>,
     pub response_metadata: Option<ResponseMetadata>,
 }
@@ -134,7 +134,7 @@ pub struct ConversationsRequest {
 
 #[derive(Deserialize)]
 pub struct ConversationsResponse {
-    ok: bool,
+    pub ok: bool,
     pub channels: Vec<Conversation>,
     pub response_metadata: Option<ResponseMetadata>,
 }

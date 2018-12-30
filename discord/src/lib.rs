@@ -1,42 +1,70 @@
-#[macro_use]
-extern crate bitflags;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
 use std::borrow::Cow;
+
+use bitflags::bitflags;
+use serde_derive::{Deserialize, Serialize};
+
+pub mod gateway;
 
 pub const BASE_URL: &'static str = "https://discordapp.com/api";
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewayResponse {
+    pub url: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Error<'a> {
+pub struct Error {
     // for rate limits
     pub global: Option<bool>,
     // in ms
     pub retry_after: Option<u64>,
     // max error code is 90001
     pub code: Option<u32>,
-    pub message: &'a str,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct User<'a> {
+pub struct User {
     pub id: Snowflake,
-    #[serde(borrow)]
-    pub username: Cow<'a, str>,
-    pub discriminator: &'a str,
+    pub username: String,
+    pub discriminator: String,
     pub avatar: Option<Snowflake>,
     pub bot: Option<bool>,
     pub mfa_enabled: Option<bool>,
-    pub locale: Option<&'a str>,
+    pub locale: Option<String>,
     pub verified: Option<bool>,
-    pub email: Option<&'a str>,
-    pub phone: Option<&'a str>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
     pub flags: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GuildMember {
+    pub user: User,
+    pub nick: Option<String>,
+    pub roles: Vec<Snowflake>,
+    pub joined_at: String,
+    pub deaf: bool,
+    pub mute: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Role {
+    pub color: u64,
+    pub hoist: bool,
+    pub id: Snowflake,
+    pub managed: bool,
+    pub mentionable: bool,
+    pub name: String,
+    pub permissions: Permissions,
+    pub position: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snowflake(String); // Actually a u64
 
 impl ::std::fmt::Display for Snowflake {
@@ -46,10 +74,10 @@ impl ::std::fmt::Display for Snowflake {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct Guild<'a> {
+#[serde(deny_unknown_fields)]
+pub struct Guild {
     pub id: Snowflake,
-    #[serde(borrow)]
-    pub name: Cow<'a, str>,
+    pub name: String,
     pub icon: Option<Snowflake>,
     pub owner: bool,
     pub permissions: Permissions, // Oh no they've encoded them strangely
@@ -57,24 +85,22 @@ pub struct Guild<'a> {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Channel<'a> {
+pub struct Channel {
     pub id: Snowflake,
     #[serde(rename = "type")]
     pub ty: u8,
     pub guild_id: Option<Snowflake>,
     pub position: Option<u64>,
     pub permission_overwrites: Vec<Overwrite>,
-    #[serde(borrow)]
-    pub name: Option<Cow<'a, str>>,
-    #[serde(borrow)]
-    pub topic: Option<Cow<'a, str>>,
+    pub name: Option<String>,
+    pub topic: Option<String>,
     pub nsfw: Option<bool>,
     pub last_message_id: Option<Snowflake>,
     pub bitrate: Option<u64>,
     pub user_limit: Option<u64>,
     pub rate_limit_per_user: Option<u64>,
-    pub recipients: Option<Vec<User<'a>>>,
-    pub icon: Option<Cow<'a, str>>,
+    pub recipients: Option<Vec<User>>,
+    pub icon: Option<String>,
     pub owner_id: Option<Snowflake>,
     pub application_id: Option<Snowflake>,
     pub parent_id: Option<Snowflake>,
@@ -151,7 +177,7 @@ pub struct Message<'a> {
     pub channel_id: Snowflake,
     pub guild_id: Option<Snowflake>,
     // There's an author field but it's an untagged enum
-    pub author: User<'a>,
+    pub author: User,
     //pub member: Option<PartialGuild>,
     #[serde(borrow)]
     pub content: Cow<'a, str>,
@@ -159,10 +185,10 @@ pub struct Message<'a> {
     pub edited_timestamp: Option<&'a str>,
     pub tts: bool,
     pub mention_everyone: bool,
-    pub mentions: Vec<User<'a>>,
+    pub mentions: Vec<User>,
     pub mention_roles: Vec<Snowflake>,
     //pub attachments: Vec<Attachment>,
-    //jpub embeds: Vec<Embed>,
+    //pub embeds: Vec<Embed>,
     //pub reactions: Option<Vec<Reaction>>,
     pub nonce: Option<Snowflake>,
     pub pinned: bool,
@@ -173,6 +199,7 @@ pub struct Message<'a> {
     //pub application: Option<MessageApplication>,
 }
 
+// All this was taken from spacemaniac/discord-rs
 macro_rules! serial_single_field {
     ($typ:ident as $field:ident: $inner:path) => {
         impl ::serde::Serialize for $typ {

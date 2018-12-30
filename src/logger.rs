@@ -1,4 +1,4 @@
-use conn::ConnEvent;
+use crate::conn::ConnEvent;
 use log::{Log, Metadata, Record};
 use std::fs::{File, OpenOptions};
 use std::io::Write;

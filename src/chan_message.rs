@@ -1,8 +1,8 @@
+use crate::conn;
+use crate::conn::{DateTime, IString};
 use chrono::Timelike;
-use conn;
-use conn::{DateTime, IString};
 
-lazy_static! {
+::lazy_static::lazy_static! {
     static ref COLORS: Vec<::termion::color::AnsiValue> = {
         let mut c = Vec::with_capacity(45);
         for r in 1..6 {

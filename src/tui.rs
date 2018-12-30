@@ -1,11 +1,12 @@
-use chan_message::ChanMessage;
-use conn::{Completer, ConnEvent, DateTime, IString, Message, TuiEvent};
-use cursor_vec::CursorVec;
+use crate::chan_message::ChanMessage;
+use crate::conn::{Completer, ConnEvent, DateTime, IString, Message, TuiEvent};
+use crate::cursor_vec::CursorVec;
+use log::error;
 use regex::Regex;
 use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
-lazy_static! {
+::lazy_static::lazy_static! {
     // https://daringfireball.net/2010/07/improved_regex_for_matching_urls
     // John Gruber
     pub static ref URL_REGEX: Regex = Regex::new(r#"(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))"#).unwrap();
@@ -218,7 +219,8 @@ impl Tui {
             (0..server.channels.len())
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
-                }).find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+                })
+                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -289,7 +291,8 @@ impl Tui {
                     read_at: DateTime::now(),
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                }).collect(),
+                })
+                .collect(),
             name,
             completer,
             current_channel: 0,
@@ -320,7 +323,8 @@ impl Tui {
             .or_else(|| {
                 error!("Unable to add message, no server named {}", message.server);
                 None
-            }).and_then(|server| {
+            })
+            .and_then(|server| {
                 server
                     .channels
                     .iter_mut()
@@ -403,7 +407,8 @@ impl Tui {
                                 .as_mut()
                                 .unwrap()
                                 .write_all(url.as_str().as_bytes())
-                        }).map_err(|e| error!("{:#?}", e));
+                        })
+                        .map_err(|e| error!("{:#?}", e));
                 });
         } else if contents.starts_with('/') {
             let _ = self.servers.get_mut().sender.send(TuiEvent::Command {
@@ -837,7 +842,8 @@ impl Tui {
                             .iter_mut()
                             .rev()
                             .find(|m| m.timestamp() == &timestamp)
-                    }) {
+                    })
+                {
                     msg.add_reaction(&reaction);
                 } else {
                     error!(
@@ -862,7 +868,8 @@ impl Tui {
                             .iter_mut()
                             .rev()
                             .find(|m| m.timestamp() == &timestamp)
-                    }) {
+                    })
+                {
                     msg.remove_reaction(&reaction);
                 } else {
                     error!(
@@ -879,24 +886,26 @@ impl Tui {
                 server,
                 channel,
                 read_at,
-            } => if let Some(c) = self
-                .servers
-                .iter_mut()
-                .find(|s| s.name == server)
-                .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
-            {
-                for m in messages {
-                    c.messages.push(m.into());
+            } => {
+                if let Some(c) = self
+                    .servers
+                    .iter_mut()
+                    .find(|s| s.name == server)
+                    .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
+                {
+                    for m in messages {
+                        c.messages.push(m.into());
+                    }
+                    c.messages
+                        .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
+                    c.read_at = read_at;
+                } else {
+                    error!(
+                        "Got history for an unknown channel {} in server {}",
+                        channel, server
+                    );
                 }
-                c.messages
-                    .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
-                c.read_at = read_at;
-            } else {
-                error!(
-                    "Got history for an unknown channel {} in server {}",
-                    channel, server
-                );
-            },
+            }
             ConnEvent::ServerConnected {
                 name,
                 channels,

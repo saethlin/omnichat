@@ -1,40 +1,17 @@
-extern crate chrono;
-extern crate dirs;
-extern crate discord;
-extern crate futures;
-extern crate inlinable_string;
-#[macro_use]
-extern crate lazy_static;
-extern crate libc;
-#[macro_use]
-extern crate log;
-extern crate openssl_probe;
-extern crate regex;
-extern crate reqwest;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate serde_json;
-extern crate serde_urlencoded;
-extern crate signal_hook;
-extern crate slack;
-extern crate termion;
-extern crate textwrap;
-extern crate tokio_core;
-extern crate toml;
-extern crate websocket;
+use std::alloc::System;
 
-#[macro_use]
-mod conn;
+#[global_allocator]
+static GLOBAL: System = System;
+
+use serde_derive::Deserialize;
+
 mod bimap;
 mod chan_message;
+mod conn;
 mod cursor_vec;
-#[cfg(feature = "discord_support")]
-mod discord_conn;
+//mod discord_conn;
 mod logger;
 mod slack_conn;
-//mod strvec;
 mod tui;
 
 #[derive(Deserialize)]
@@ -42,7 +19,6 @@ struct SlackConfig {
     token: String,
 }
 
-#[cfg(feature = "discord_support")]
 #[derive(Deserialize)]
 struct DiscordConfig {
     name: String,
@@ -51,16 +27,13 @@ struct DiscordConfig {
 #[derive(Deserialize)]
 struct Config {
     slack: Option<Vec<SlackConfig>>,
-    #[cfg(feature = "discord_support")]
-    discord_token: Option<String>,
-    #[cfg(feature = "discord_support")]
-    discord: Option<Vec<DiscordConfig>>,
+    //discord_token: Option<String>,
+    //discord: Option<Vec<DiscordConfig>>,
 }
 
 fn main() {
-    #[cfg(feature = "discord_support")]
-    use discord_conn::DiscordConn;
-    use slack_conn::SlackConn;
+    //use crate::discord_conn::DiscordConn;
+    use crate::slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
     use std::path::PathBuf;
@@ -81,7 +54,8 @@ fn main() {
                 config_path
             );
             std::process::exit(1)
-        }).read_to_string(&mut contents)
+        })
+        .read_to_string(&mut contents)
         .unwrap_or_else(|_| {
             println!("Unable to read config file at {:?}", &config_path);
             std::process::exit(1)
@@ -109,7 +83,7 @@ fn main() {
         }
     }
 
-    #[cfg(feature = "discord_support")]
+    /*
     {
         if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
             for d in discord {
@@ -121,6 +95,7 @@ fn main() {
             }
         }
     }
+    */
 
     tui.run();
 }

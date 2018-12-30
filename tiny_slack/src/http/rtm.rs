@@ -14,7 +14,7 @@ pub struct ConnectRequest {
 
 #[derive(Deserialize)]
 pub struct ConnectResponse {
-    ok: bool,
+    pub ok: bool,
     #[serde(rename = "self")]
     pub slf: ConnectResponseSelf,
     pub team: ConnectResponseTeam,
