@@ -1,15 +1,19 @@
 use crate::chan_message::ChanMessage;
 use crate::conn::{Completer, ConnEvent, DateTime, IString, Message, TuiEvent};
 use crate::cursor_vec::CursorVec;
+use crate::DFAExtension;
 use log::error;
-use regex::Regex;
+use regex_automata::DenseDFA;
 use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
 ::lazy_static::lazy_static! {
+    /*
     // https://daringfireball.net/2010/07/improved_regex_for_matching_urls
     // John Gruber
     pub static ref URL_REGEX: Regex = Regex::new(r#"(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))"#).unwrap();
+    */
+    pub static ref URL_REGEX: DenseDFA<&'static [u16], u16> = unsafe {DenseDFA::from_bytes(include_bytes!("../url_regex"))};
 }
 
 const CHAN_WIDTH: u16 = 20;
@@ -384,6 +388,9 @@ impl Tui {
                         .to_string(),
                 );
             }
+        // Mark current channel as read
+        } else if contents == "/mark" || contents == "/m" {
+            self.reset_current_unreads();
         // The /url command searches for a URL mentioned in the current channel and
         // copies it to the clipboard if one is found
         } else if contents == "/url" {
@@ -393,7 +400,7 @@ impl Tui {
                 .messages
                 .iter()
                 .rev()
-                .filter_map(|message| URL_REGEX.find(&message.raw))
+                .filter_map(|message| URL_REGEX.get_first(&message.raw.as_bytes()))
                 .next()
                 .map(|url| {
                     let _ = Command::new("xclip")
@@ -401,13 +408,7 @@ impl Tui {
                         .arg("clipboard")
                         .stdin(Stdio::piped())
                         .spawn()
-                        .and_then(|mut child| {
-                            child
-                                .stdin
-                                .as_mut()
-                                .unwrap()
-                                .write_all(url.as_str().as_bytes())
-                        })
+                        .and_then(|mut child| child.stdin.as_mut().unwrap().write_all(url))
                         .map_err(|e| error!("{:#?}", e));
                 });
         } else if contents.starts_with('/') {

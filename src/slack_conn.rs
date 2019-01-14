@@ -1,18 +1,19 @@
 use crate::bimap::BiMap;
 use crate::conn;
 use crate::conn::{Completer, ConnEvent, IString, Message, TuiEvent};
+use crate::DFAExtension;
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
 use log::error;
-use regex::Regex;
+use regex_automata::DenseDFA;
 use serde_derive::Deserialize;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
 ::lazy_static::lazy_static! {
-    pub static ref MENTION_REGEX: Regex = Regex::new(r"<@[A-Z0-9]{9}>").unwrap();
-    pub static ref CHANNEL_REGEX: Regex = Regex::new(r"<#[A-Z0-9]{9}\|(?P<n>.*?)>").unwrap();
+pub static ref MENTION_REGEX: DenseDFA<&'static [u16], u16> = unsafe {DenseDFA::from_bytes(include_bytes!("../mention_regex"))};
+pub static ref CHANNEL_REGEX: DenseDFA<&'static [u16], u16> = unsafe {DenseDFA::from_bytes(include_bytes!("../channel_regex"))};
 }
 
 macro_rules! deserialize_or_log {
@@ -27,7 +28,11 @@ macro_rules! deserialize_or_log {
                     Err(())
                 }
                 Err(e) => {
-                    error!("{}\n{:#?}", $response.text().unwrap(), e);
+                    error!(
+                        "{}\n{:#?}",
+                        std::str::from_utf8($response.bytes()).unwrap(),
+                        e
+                    );
                     Err(())
                 }
             }
@@ -67,17 +72,25 @@ struct PendingMessage {
 
 impl SlackConn {
     pub fn convert_mentions(&self, original: &str) -> String {
-        let text = MENTION_REGEX
-            .replace_all(original, |caps: &::regex::Captures| {
-                if let Some(name) = self.users.get_right(&caps[0][2..11].into()) {
-                    format!("@{}", name)
-                } else {
-                    format!("@{}", &caps[0][2..11])
-                }
-            })
-            .into_owned();
+        let mut text = original.to_string();
+        while let Some(mention) = MENTION_REGEX.get_first(text.as_bytes()) {
+            let mention = std::str::from_utf8(mention).unwrap();
+            let replacement = if let Some(name) = self.users.get_right(&mention[2..11].into()) {
+                format!("@{}", name)
+            } else {
+                format!("@{}", &mention[2..11])
+            };
+            text = text.replace(mention, &replacement);
+        }
 
-        CHANNEL_REGEX.replace_all(&text, "#$n").into_owned()
+        while let Some(mention) = CHANNEL_REGEX.get_first(text.as_bytes()) {
+            let mention = std::str::from_utf8(mention).unwrap();
+            let name_start = mention.rfind('|').unwrap();
+            let replacement = format!("#{}", &mention[name_start + 1..mention.len() - 1]);
+            text = text.replace(mention, &replacement);
+        }
+
+        text
     }
 
     pub fn to_slack(&self, mut text: String) -> String {
@@ -763,7 +776,7 @@ impl SlackConn {
                 ) {
                     Ok(response) => {
                         if !response.status().is_success() {
-                            error!("{}", response.text().unwrap())
+                            error!("{}", std::str::from_utf8(response.bytes()).unwrap())
                         }
                     }
                     Err(e) => error!("{:#?}", e),

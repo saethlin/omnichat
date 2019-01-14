@@ -19,10 +19,12 @@ struct SlackConfig {
     token: String,
 }
 
+/*
 #[derive(Deserialize)]
 struct DiscordConfig {
     name: String,
 }
+*/
 
 #[derive(Deserialize)]
 struct Config {
@@ -98,4 +100,24 @@ fn main() {
     */
 
     tui.run();
+}
+
+use regex_automata::{DenseDFA, DFA};
+
+trait DFAExtension: DFA {
+    fn get_first<'a>(&self, text: &'a [u8]) -> Option<&'a [u8]>;
+}
+
+impl DFAExtension for DenseDFA<&'static [u16], u16> {
+    fn get_first<'a>(&self, text: &'a [u8]) -> Option<&'a [u8]> {
+        let end = self.find(text)?;
+        for i in 1..=end {
+            let start = end - i;
+            let slice = &text[start..end];
+            if self.is_match(slice) {
+                return Some(text.get(start..end)?);
+            }
+        }
+        None
+    }
 }

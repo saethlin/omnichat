@@ -2,6 +2,7 @@
 name = "omnichat"
 version = "0.0.0"
 authors = ["Ben Kimock <kimockb@gmail.com>"]
+build = "build.rs"
 edition = "2018"
 
 [dependencies]
@@ -12,7 +13,7 @@ serde_json = "1.0"
 serde_derive = "1.0"
 toml = "0.4"
 lazy_static = "1.0"
-regex = "1.0"
+regex-automata = "0.1"
 futures = "0.1"
 openssl-probe = "0.1"
 chrono = "0.4"
@@ -29,7 +30,9 @@ slack = {path = "tiny_slack"}
 discord = {path = "discord"}
 weeqwest = {git = "https://github.com/saethlin/weeqwest"}
 
+[build-dependencies]
+regex-automata = "0.1"
+
 [profile.release]
 lto = true
 panic = "abort"
-debug = true
