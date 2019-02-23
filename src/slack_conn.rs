@@ -11,9 +11,26 @@ use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
-::lazy_static::lazy_static! {
-pub static ref MENTION_REGEX: DenseDFA<&'static [u16], u16> = unsafe {DenseDFA::from_bytes(include_bytes!("../mention_regex"))};
-pub static ref CHANNEL_REGEX: DenseDFA<&'static [u16], u16> = unsafe {DenseDFA::from_bytes(include_bytes!("../channel_regex"))};
+lazy_static::lazy_static! {
+    static ref MENTION_REGEX_DATA: Vec<u16> = {
+        let raw = include_bytes!("../mention_regex");
+        raw.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]])).collect()
+    };
+    pub static ref MENTION_REGEX: DenseDFA<&'static [u16], u16> = unsafe {
+        DenseDFA::from_bytes(std::slice::from_raw_parts(
+            MENTION_REGEX_DATA.as_ptr() as *const u8, MENTION_REGEX_DATA.len() * 2)
+        )
+    };
+
+    static ref CHANNEL_REGEX_DATA: Vec<u16> = {
+        let raw = include_bytes!("../channel_regex");
+        raw.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]])).collect()
+    };
+    pub static ref CHANNEL_REGEX: DenseDFA<&'static [u16], u16> = unsafe {
+        DenseDFA::from_bytes(std::slice::from_raw_parts(
+            CHANNEL_REGEX_DATA.as_ptr() as *const u8, CHANNEL_REGEX_DATA.len() * 2)
+        )
+    };
 }
 
 macro_rules! deserialize_or_log {

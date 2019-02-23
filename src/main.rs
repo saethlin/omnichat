@@ -1,8 +1,3 @@
-use std::alloc::System;
-
-#[global_allocator]
-static GLOBAL: System = System;
-
 use serde_derive::Deserialize;
 
 mod bimap;

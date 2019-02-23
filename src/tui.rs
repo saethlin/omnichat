@@ -7,13 +7,16 @@ use regex_automata::DenseDFA;
 use std::cmp::{max, min};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
-::lazy_static::lazy_static! {
-    /*
-    // https://daringfireball.net/2010/07/improved_regex_for_matching_urls
-    // John Gruber
-    pub static ref URL_REGEX: Regex = Regex::new(r#"(?i)\b((?:[a-z][\w-]+:(?:/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,4}/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»“”‘’]))"#).unwrap();
-    */
-    pub static ref URL_REGEX: DenseDFA<&'static [u16], u16> = unsafe {DenseDFA::from_bytes(include_bytes!("../url_regex"))};
+lazy_static::lazy_static! {
+    static ref URL_REGEX_DATA: Vec<u16> = {
+        let raw = include_bytes!("../url_regex");
+        raw.chunks_exact(2).map(|c| u16::from_ne_bytes([c[0], c[1]])).collect()
+    };
+    static ref URL_REGEX: DenseDFA<&'static [u16], u16> = unsafe {
+        DenseDFA::from_bytes(std::slice::from_raw_parts(
+            URL_REGEX_DATA.as_ptr() as *const u8, URL_REGEX_DATA.len() * 2)
+        )
+    };
 }
 
 const CHAN_WIDTH: u16 = 20;
