@@ -60,6 +60,7 @@ struct Channel {
     read_at: DateTime,
     message_scroll_offset: usize,
     message_buffer: String,
+    is_dm: bool,
 }
 
 impl Channel {
@@ -138,6 +139,7 @@ impl Tui {
                 read_at: DateTime::now(),
                 message_scroll_offset: 0,
                 message_buffer: String::new(),
+                is_dm: false,
             }],
             completer: None,
             channel_scroll_offset: 0,
@@ -241,27 +243,21 @@ impl Tui {
 
     fn next_channel(&mut self) {
         self.reset_current_unreads();
-        // NLL HACK
-        {
-            let server = self.servers.get_mut();
-            server.current_channel += 1;
-            if server.current_channel >= server.channels.len() {
-                server.current_channel = 0;
-            }
+        let server = self.servers.get_mut();
+        server.current_channel += 1;
+        if server.current_channel >= server.channels.len() {
+            server.current_channel = 0;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
 
     fn previous_channel(&mut self) {
         self.reset_current_unreads();
-        // NLL HACK
-        {
-            let server = &mut self.servers.get_mut();
-            if server.current_channel > 0 {
-                server.current_channel -= 1;
-            } else {
-                server.current_channel = server.channels.len() - 1;
-            }
+        let server = self.servers.get_mut();
+        if server.current_channel > 0 {
+            server.current_channel -= 1;
+        } else {
+            server.current_channel = server.channels.len() - 1;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }
@@ -298,6 +294,7 @@ impl Tui {
                     read_at: DateTime::now(),
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
+                    is_dm: false,
                 })
                 .collect(),
             name,
@@ -365,7 +362,8 @@ impl Tui {
 
     fn send_message(&mut self) {
         let contents = self.current_channel().message_buffer.clone();
-        if self.servers.tell() == 0 {
+        self.current_channel_mut().message_buffer.clear();
+        if self.servers.tell() == 0 && !contents.starts_with('/') {
             self.add_client_message(contents);
             return;
         }
@@ -391,29 +389,62 @@ impl Tui {
                         .to_string(),
                 );
             }
-        // Mark current channel as read
         } else if contents == "/mark" || contents == "/m" {
+            // Mark current channel as read
             self.reset_current_unreads();
-        // The /url command searches for a URL mentioned in the current channel and
-        // copies it to the clipboard if one is found
+        } else if contents.starts_with("/c") {
+            // Find and switch to the specified channel
+            if let Some(requested_channel) = contents.splitn(2, ' ').nth(1) {
+                if let Some(index) = self
+                    .servers
+                    .get()
+                    .channels
+                    .iter()
+                    .position(|c| c.name == requested_channel)
+                {
+                    self.reset_current_unreads();
+                    self.servers.get_mut().current_channel = index;
+                } else {
+                    error!("unknown channel {}", requested_channel);
+                }
+            }
+        } else if contents.starts_with("/s") {
+            // Find and switch to a server
+            if let Some(requested_server) = contents.splitn(2, ' ').nth(1) {
+                let index = self.servers.iter().position(|s| s.name == requested_server);
+                if let Some(index) = index {
+                    self.reset_current_unreads();
+                    while self.servers.tell() != index {
+                        self.servers.next();
+                    }
+                } else {
+                    error!("unknown server {}", requested_server);
+                }
+            }
         } else if contents == "/url" {
+            // The /url command searches for a URL mentioned in the current channel and
+            // copies it to the clipboard if one is found
             use std::io::Write;
             use std::process::{Command, Stdio};
-            self.current_channel()
+            if let Some(mut url) = self
+                .current_channel()
                 .messages
                 .iter()
                 .rev()
                 .filter_map(|message| URL_REGEX.get_first(&message.raw.as_bytes()))
                 .next()
-                .map(|url| {
-                    let _ = Command::new("xclip")
-                        .arg("-selection")
-                        .arg("clipboard")
-                        .stdin(Stdio::piped())
-                        .spawn()
-                        .and_then(|mut child| child.stdin.as_mut().unwrap().write_all(url))
-                        .map_err(|e| error!("{:#?}", e));
-                });
+            {
+                if url.ends_with(&[b'>']) {
+                    url = &url[..url.len() - 1];
+                }
+                let _ = Command::new("xclip")
+                    .arg("-selection")
+                    .arg("clipboard")
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .and_then(|mut child| child.stdin.as_mut().unwrap().write_all(url))
+                    .map_err(|e| error!("{:#?}", e));
+            }
         } else if contents.starts_with('/') {
             let _ = self.servers.get_mut().sender.send(TuiEvent::Command {
                 server: current_server_name,
@@ -656,7 +687,6 @@ impl Tui {
             Key(Char('\n')) => {
                 if !self.current_channel().message_buffer.is_empty() {
                     self.send_message();
-                    self.current_channel_mut().message_buffer.clear();
                     self.cursor_pos = 0;
                 }
             }
@@ -713,20 +743,48 @@ impl Tui {
             }
             Key(Char('\t')) => {
                 if self.autocompletions.is_empty() {
-                    self.autocompletions = if let Some(last_word) = self
+                    // Pick a source to autocomplete from
+                    let search_name_fragment = self
                         .current_channel()
                         .message_buffer
-                        .split_whitespace()
-                        .last()
-                    {
-                        self.servers
+                        .splitn(2, ' ')
+                        .nth(1)
+                        .unwrap_or_default();
+
+                    if self.current_channel().message_buffer.starts_with("/c ") {
+                        // Autocomplete from current server's channel names
+                        self.autocompletions = self
+                            .servers
                             .get()
-                            .completer
-                            .as_ref()
-                            .map(|c| c.autocomplete(last_word))
-                            .unwrap_or(Vec::new())
+                            .channels
+                            .iter()
+                            .map(|c| c.name.to_string())
+                            .filter(|name| name.starts_with(search_name_fragment))
+                            .collect();
+                    } else if self.current_channel().message_buffer.starts_with("/s ") {
+                        // Autocomplete from available server names
+                        self.autocompletions = self
+                            .servers
+                            .iter()
+                            .map(|s| s.name.to_string())
+                            .filter(|name| name.starts_with(search_name_fragment))
+                            .collect();
                     } else {
-                        Vec::new()
+                        self.autocompletions = if let Some(last_word) = self
+                            .current_channel()
+                            .message_buffer
+                            .split_whitespace()
+                            .last()
+                        {
+                            self.servers
+                                .get()
+                                .completer
+                                .as_ref()
+                                .map(|c| c.autocomplete(last_word))
+                                .unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        }
                     }
                 }
                 if !self.autocompletions.is_empty() {

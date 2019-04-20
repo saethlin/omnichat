@@ -5,7 +5,7 @@ use std::sync::mpsc::SyncSender;
 
 use futures::{Future, Stream};
 
-::lazy_static::lazy_static! {
+lazy_static::lazy_static! {
     pub static ref CLIENT: ::reqwest::Client = ::reqwest::Client::new();
 }
 

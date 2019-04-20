@@ -765,10 +765,11 @@ impl SlackConn {
         let args: Vec<_> = cmd.split_whitespace().collect();
         match args.as_slice() {
             ["upload", path] => {
+                error!("uploading {}", path);
                 let url = match self.channels.get_left(channel).map(|id| {
                     format!(
                         "https://slack.com/api/files.upload?token={}&channels={}",
-                        self.token, id
+                        self.token, id,
                     )
                 }) {
                     Some(v) => v,
@@ -786,15 +787,18 @@ impl SlackConn {
                     }
                 };
 
-                match ::weeqwest::send(
-                    &::weeqwest::Request::post(&url)
-                        .unwrap()
-                        .form(&[("content", &content), ("filename", path.as_bytes())]),
-                ) {
+                let req = ::weeqwest::Request::post(&url).unwrap().form(&[
+                    ("content", &content),
+                    ("filename", path.as_bytes()),
+                    ("filetype", b"png"),
+                ]);
+
+                match ::weeqwest::send(&req) {
                     Ok(response) => {
                         if !response.status().is_success() {
-                            error!("{}", std::str::from_utf8(response.bytes()).unwrap())
+                            error!("{:?}", std::str::from_utf8(response.bytes()))
                         }
+                        error!("response: {:?}", std::str::from_utf8(response.bytes()));
                     }
                     Err(e) => error!("{:#?}", e),
                 }

@@ -29,10 +29,11 @@ serde_urlencoded = "0.5"
 slack = {path = "tiny_slack"}
 #discord = {path = "discord"}
 weeqwest = {git = "https://github.com/saethlin/weeqwest"}
+#weeqwest = {path = "../weeqwest"}
 
 [build-dependencies]
 regex-automata = "0.1"
 
 [profile.release]
 lto = true
-panic = "abort"
+debug = true

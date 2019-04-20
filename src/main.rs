@@ -1,3 +1,4 @@
+#![deny(clippy::same_adjacent_type)]
 use serde_derive::Deserialize;
 
 mod bimap;
@@ -35,6 +36,8 @@ fn main() {
     use std::io::Read;
     use std::path::PathBuf;
     use std::thread;
+
+    std::env::set_var("RUST_BACKTRACE", "1");
 
     openssl_probe::init_ssl_cert_env_vars();
 

@@ -2,7 +2,7 @@ use crate::conn;
 use crate::conn::{DateTime, IString};
 use chrono::Timelike;
 
-::lazy_static::lazy_static! {
+lazy_static::lazy_static! {
     static ref COLORS: Vec<::termion::color::AnsiValue> = {
         let mut c = Vec::with_capacity(45);
         for r in 1..6 {
@@ -117,7 +117,7 @@ impl ChanMessage {
             }
 
             if l == 0 {
-                for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_left()).enumerate()
+                for (l, wrapped_line) in first_line_wrapper.wrap_iter(line.trim_start()).enumerate()
                 {
                     if l == 0 {
                         let _ = write!(
@@ -172,7 +172,7 @@ impl ChanMessage {
             }
 
             // Clean trailing whitespace from messages
-            while self.formatted.ends_with(|p: char| p.is_whitespace()) {
+            while self.formatted.ends_with(char::is_whitespace) {
                 self.formatted.pop();
             }
 
@@ -180,7 +180,7 @@ impl ChanMessage {
         }
 
         // Clean trailing whitespace from messages
-        while self.formatted.ends_with(|p: char| p.is_whitespace()) {
+        while self.formatted.ends_with(char::is_whitespace) {
             self.formatted.pop();
         }
 
