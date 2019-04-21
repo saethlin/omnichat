@@ -57,6 +57,12 @@ pub struct Message {
     pub reactions: Vec<(IString, usize)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Eq, Ord)]
+pub enum ChannelType {
+    Normal,
+    DirectMessage,
+}
+
 /// Events that a connection can send to a frontend
 pub enum ConnEvent {
     Message(Message),
@@ -78,7 +84,7 @@ pub enum ConnEvent {
     Error(String),
     ServerConnected {
         name: IString,
-        channels: Vec<IString>,
+        channels: Vec<(IString, ChannelType)>,
         completer: Option<Box<Completer>>, // Autocompletion should be a blocking operation, no channels
         sender: SyncSender<TuiEvent>,      // How we tell the connection to do something
     },

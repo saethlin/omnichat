@@ -1,6 +1,6 @@
 use crate::bimap::BiMap;
 use crate::conn;
-use crate::conn::{Completer, ConnEvent, IString, Message, TuiEvent};
+use crate::conn::{ChannelType, Completer, ConnEvent, IString, Message, TuiEvent};
 use crate::DFAExtension;
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
@@ -332,7 +332,8 @@ impl SlackConn {
         use slack::http::conversations::Conversation::*;
         let mut channels = BiMap::new();
         let mut channel_names: Vec<IString> = Vec::new();
-        for (id, name) in response_channels
+        let mut channel_types = Vec::new();
+        for (id, name, is_dm) in response_channels
             .channels
             .into_iter()
             .filter_map(|channel| match channel {
@@ -344,7 +345,7 @@ impl SlackConn {
                     is_mpim: false,
                     is_archived: false,
                     ..
-                } => Some((id, name.into())),
+                } => Some((id, name.into(), ChannelType::Normal)),
                 Group {
                     id,
                     name,
@@ -353,19 +354,18 @@ impl SlackConn {
                     is_mpim: false,
                     is_archived: false,
                     ..
-                } => Some((id, name.into())),
-                DirectMessage { id, user, .. } => {
-                    users.get_right(&user).map(|name| (id, name.clone()))
-                }
+                } => Some((id, name.into(), ChannelType::Normal)),
+                DirectMessage { id, user, .. } => users
+                    .get_right(&user)
+                    .map(|name| (id, name.clone(), ChannelType::DirectMessage)),
                 _ => None,
             })
         {
             let name: IString = name;
             channel_names.push(name.clone());
             channels.insert(id, name);
+            channel_types.push(is_dm);
         }
-
-        channel_names.sort();
 
         let connect_response = connect_recv.wait().map_err(|e| error!("{:#?}", e))?;
         let connect_response = deserialize_or_log!(connect_response, rtm::ConnectResponse)
@@ -406,7 +406,11 @@ impl SlackConn {
         let (tui_send, tui_recv) = std::sync::mpsc::sync_channel(100);
         let _ = sender.send(ConnEvent::ServerConnected {
             name: team_name.clone(),
-            channels: channel_names.clone(),
+            channels: channel_names
+                .iter()
+                .cloned()
+                .zip(channel_types.into_iter())
+                .collect(),
             completer: Some(Box::new(SlackCompleter {
                 inner: connection.clone(),
             })),
@@ -765,7 +769,6 @@ impl SlackConn {
         let args: Vec<_> = cmd.split_whitespace().collect();
         match args.as_slice() {
             ["upload", path] => {
-                error!("uploading {}", path);
                 let url = match self.channels.get_left(channel).map(|id| {
                     format!(
                         "https://slack.com/api/files.upload?token={}&channels={}",
@@ -787,18 +790,15 @@ impl SlackConn {
                     }
                 };
 
-                let req = ::weeqwest::Request::post(&url).unwrap().form(&[
-                    ("content", &content),
-                    ("filename", path.as_bytes()),
-                    ("filetype", b"png"),
-                ]);
+                let req = ::weeqwest::Request::post(&url)
+                    .unwrap()
+                    .file_form(path, &content);
 
                 match ::weeqwest::send(&req) {
                     Ok(response) => {
                         if !response.status().is_success() {
                             error!("{:?}", std::str::from_utf8(response.bytes()))
                         }
-                        error!("response: {:?}", std::str::from_utf8(response.bytes()));
                     }
                     Err(e) => error!("{:#?}", e),
                 }

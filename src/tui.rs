@@ -1,5 +1,5 @@
 use crate::chan_message::ChanMessage;
-use crate::conn::{Completer, ConnEvent, DateTime, IString, Message, TuiEvent};
+use crate::conn::{ChannelType, Completer, ConnEvent, DateTime, IString, Message, TuiEvent};
 use crate::cursor_vec::CursorVec;
 use crate::DFAExtension;
 use log::error;
@@ -60,7 +60,7 @@ struct Channel {
     read_at: DateTime,
     message_scroll_offset: usize,
     message_buffer: String,
-    is_dm: bool,
+    channel_type: ChannelType,
 }
 
 impl Channel {
@@ -139,7 +139,7 @@ impl Tui {
                 read_at: DateTime::now(),
                 message_scroll_offset: 0,
                 message_buffer: String::new(),
-                is_dm: false,
+                channel_type: ChannelType::Normal,
             }],
             completer: None,
             channel_scroll_offset: 0,
@@ -279,27 +279,30 @@ impl Tui {
     pub fn add_server(
         &mut self,
         name: IString,
-        mut channels: Vec<IString>,
+        mut channels: Vec<(IString, ChannelType)>,
         completer: Option<Box<Completer>>,
         sender: SyncSender<TuiEvent>,
     ) {
         channels.sort();
+        channels.sort_by_key(|c| c.1 == ChannelType::DirectMessage);
+
+        let general_index = channels.iter().position(|(c, _)| c == "general");
 
         self.servers.push(Server {
             channels: channels
                 .into_iter()
-                .map(|name| Channel {
+                .map(|(name, channel_type)| Channel {
                     messages: Vec::new(),
                     name,
                     read_at: DateTime::now(),
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
-                    is_dm: false,
+                    channel_type,
                 })
                 .collect(),
             name,
             completer,
-            current_channel: 0,
+            current_channel: general_index.unwrap_or(0),
             channel_scroll_offset: 0,
             sender,
         });
@@ -627,32 +630,21 @@ impl Tui {
                 .skip(server.channel_scroll_offset)
                 .take(terminal_height as usize)
             {
+                let draw_at = (c - server.channel_scroll_offset) as u16
+                    + 1
+                    + ((channel.channel_type == ChannelType::DirectMessage) as u16);
+                // Skip a row if we're transitioning from the normal to DM channels
                 if c == server.current_channel {
-                    let _ = write!(
-                        render_buffer,
-                        "{}{}",
-                        Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
-                        style::Bold
-                    );
+                    let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), style::Bold);
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
                     let _ = write!(render_buffer, "{}", style::Reset);
                 } else if channel.num_unreads() > 0 {
-                    let _ = write!(
-                        render_buffer,
-                        "{}{}",
-                        Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
-                        Fg(color::Red)
-                    );
+                    let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), Fg(color::Red));
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
                     let _ = write!(render_buffer, "{}", style::Reset);
                 } else {
                     let gray = color::AnsiValue::rgb(3, 3, 3);
-                    let _ = write!(
-                        render_buffer,
-                        "{}{}",
-                        Goto(1, (c - server.channel_scroll_offset) as u16 + 1),
-                        Fg(gray)
-                    );
+                    let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), Fg(gray));
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
                     let _ = write!(render_buffer, "{}", style::Reset);
                 }
@@ -769,6 +761,48 @@ impl Tui {
                             .map(|s| s.name.to_string())
                             .filter(|name| name.starts_with(search_name_fragment))
                             .collect();
+                    } else if self
+                        .current_channel()
+                        .message_buffer
+                        .starts_with("/upload ")
+                    {
+                        fn complete_from(argument: &str) -> Option<Vec<String>> {
+                            use std::path::Path;
+
+                            let current_dir = std::env::current_dir().unwrap();
+                            let full_path = current_dir.join(Path::new(&argument));
+                            let start_of_entry = full_path.file_name()?.to_str()?;
+                            let dir_part = full_path.parent()?;
+
+                            let mut output = Vec::new();
+                            // Autocomplete from the path provided
+                            for entry in std::fs::read_dir(dir_part).unwrap() {
+                                let entry = entry.unwrap();
+                                let path = entry.path();
+                                if path.file_name()?.to_str()?.starts_with(start_of_entry) {
+                                    let mut suggestion = path
+                                        .strip_prefix(&current_dir)
+                                        .unwrap()
+                                        .to_str()?
+                                        .to_string();
+                                    if path.is_dir() {
+                                        suggestion.push(std::path::MAIN_SEPARATOR);
+                                    }
+                                    output.push(suggestion);
+                                }
+                            }
+                            Some(output)
+                        }
+
+                        let argument = self
+                            .current_channel()
+                            .message_buffer
+                            .splitn(2, ' ')
+                            .nth(1)
+                            .unwrap_or(".");
+
+                        self.autocompletions = complete_from(argument).unwrap_or_default();
+                        self.autocompletions.sort();
                     } else {
                         self.autocompletions = if let Some(last_word) = self
                             .current_channel()
