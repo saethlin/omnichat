@@ -39,13 +39,13 @@ pub struct Tui {
     truncate_buffer_to: usize,
 }
 
-struct Server {
-    channels: Vec<Channel>,
-    completer: Option<Box<Completer>>,
-    name: IString,
-    current_channel: usize,
-    channel_scroll_offset: usize,
-    sender: SyncSender<TuiEvent>,
+pub struct Server {
+    pub channels: Vec<Channel>,
+    pub completer: Option<Box<Completer>>,
+    pub name: IString,
+    pub current_channel: usize,
+    pub channel_scroll_offset: usize,
+    pub sender: SyncSender<TuiEvent>,
 }
 
 impl Server {
@@ -54,13 +54,13 @@ impl Server {
     }
 }
 
-struct Channel {
-    messages: Vec<ChanMessage>,
-    name: IString,
-    read_at: DateTime,
-    message_scroll_offset: usize,
-    message_buffer: String,
-    channel_type: ChannelType,
+pub struct Channel {
+    pub messages: Vec<ChanMessage>,
+    pub name: IString,
+    pub read_at: DateTime,
+    pub message_scroll_offset: usize,
+    pub message_buffer: String,
+    pub channel_type: ChannelType,
 }
 
 impl Channel {
@@ -276,36 +276,13 @@ impl Tui {
             }));
     }
 
-    pub fn add_server(
-        &mut self,
-        name: IString,
-        mut channels: Vec<(IString, ChannelType)>,
-        completer: Option<Box<Completer>>,
-        sender: SyncSender<TuiEvent>,
-    ) {
-        channels.sort();
-        channels.sort_by_key(|c| c.1 == ChannelType::DirectMessage);
+    pub fn add_server(&mut self, mut server: Server) {
+        server.channels.sort_by(|c1, c2| c1.name.cmp(&c2.name));
+        server
+            .channels
+            .sort_by_key(|c| c.channel_type == ChannelType::DirectMessage);
 
-        let general_index = channels.iter().position(|(c, _)| c == "general");
-
-        self.servers.push(Server {
-            channels: channels
-                .into_iter()
-                .map(|(name, channel_type)| Channel {
-                    messages: Vec::new(),
-                    name,
-                    read_at: DateTime::now(),
-                    message_scroll_offset: 0,
-                    message_buffer: String::new(),
-                    channel_type,
-                })
-                .collect(),
-            name,
-            completer,
-            current_channel: general_index.unwrap_or(0),
-            channel_scroll_offset: 0,
-            sender,
-        });
+        self.servers.push(server);
 
         self.longest_channel_name = self
             .servers
@@ -1002,13 +979,8 @@ impl Tui {
                     );
                 }
             }
-            ConnEvent::ServerConnected {
-                name,
-                channels,
-                completer,
-                sender,
-            } => {
-                self.add_server(name, channels, completer, sender);
+            ConnEvent::ServerConnected(server) => {
+                self.add_server(server);
             }
             ConnEvent::MarkChannelRead {
                 server,

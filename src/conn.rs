@@ -1,5 +1,4 @@
 pub use inlinable_string::InlinableString as IString;
-use std::sync::mpsc::SyncSender;
 use termion;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -82,12 +81,7 @@ pub enum ConnEvent {
     },
     Input(termion::event::Event),
     Error(String),
-    ServerConnected {
-        name: IString,
-        channels: Vec<(IString, ChannelType)>,
-        completer: Option<Box<Completer>>, // Autocompletion should be a blocking operation, no channels
-        sender: SyncSender<TuiEvent>,      // How we tell the connection to do something
-    },
+    ServerConnected(crate::tui::Server),
     MarkChannelRead {
         server: IString,
         channel: IString,

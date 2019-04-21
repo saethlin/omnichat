@@ -331,40 +331,46 @@ impl SlackConn {
 
         use slack::http::conversations::Conversation::*;
         let mut channels = BiMap::new();
-        let mut channel_names: Vec<IString> = Vec::new();
-        let mut channel_types = Vec::new();
-        for (id, name, is_dm) in response_channels
-            .channels
-            .into_iter()
-            .filter_map(|channel| match channel {
-                Channel {
-                    id,
-                    name,
-                    is_member: true,
-                    is_im: false,
-                    is_mpim: false,
-                    is_archived: false,
-                    ..
-                } => Some((id, name.into(), ChannelType::Normal)),
-                Group {
-                    id,
-                    name,
-                    is_member: true,
-                    is_im: false,
-                    is_mpim: false,
-                    is_archived: false,
-                    ..
-                } => Some((id, name.into(), ChannelType::Normal)),
-                DirectMessage { id, user, .. } => users
-                    .get_right(&user)
-                    .map(|name| (id, name.clone(), ChannelType::DirectMessage)),
-                _ => None,
-            })
+        let mut tui_channels = Vec::new();
+        for (id, name, channel_type) in
+            response_channels
+                .channels
+                .into_iter()
+                .filter_map(|channel| match channel {
+                    Channel {
+                        id,
+                        name,
+                        is_member: true,
+                        is_im: false,
+                        is_mpim: false,
+                        is_archived: false,
+                        ..
+                    } => Some((id, name.into(), ChannelType::Normal)),
+                    Group {
+                        id,
+                        name,
+                        is_member: true,
+                        is_im: false,
+                        is_mpim: false,
+                        is_archived: false,
+                        ..
+                    } => Some((id, name.into(), ChannelType::Normal)),
+                    DirectMessage { id, user, .. } => users
+                        .get_right(&user)
+                        .map(|name| (id, name.clone(), ChannelType::DirectMessage)),
+                    _ => None,
+                })
         {
             let name: IString = name;
-            channel_names.push(name.clone());
-            channels.insert(id, name);
-            channel_types.push(is_dm);
+            channels.insert(id, name.clone());
+            tui_channels.push(crate::tui::Channel {
+                messages: Vec::new(),
+                name,
+                read_at: conn::DateTime::now(),
+                message_scroll_offset: 0,
+                message_buffer: String::new(),
+                channel_type,
+            });
         }
 
         let connect_response = connect_recv.wait().map_err(|e| error!("{:#?}", e))?;
@@ -404,7 +410,20 @@ impl SlackConn {
         }));
 
         let (tui_send, tui_recv) = std::sync::mpsc::sync_channel(100);
-        let _ = sender.send(ConnEvent::ServerConnected {
+        let _ = sender.send(ConnEvent::ServerConnected(crate::tui::Server {
+            current_channel: tui_channels
+                .iter()
+                .position(|c| c.name == "general")
+                .unwrap_or(0),
+            channels: tui_channels,
+            completer: Some(Box::new(SlackCompleter {
+                inner: connection.clone(),
+            })),
+            name: team_name.clone(),
+            channel_scroll_offset: 0,
+            sender: tui_send,
+        }));
+        /*
             name: team_name.clone(),
             channels: channel_names
                 .iter()
@@ -416,6 +435,7 @@ impl SlackConn {
             })),
             sender: tui_send,
         });
+        */
 
         let conn = connection.clone();
         // Create a background thread that will handle events from the TUI
