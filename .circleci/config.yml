@@ -19,10 +19,11 @@ jobs:
           key: project-cache-{{ checksum "Cargo.lock" }}
       - run:
           name: Stable Build
-          command: cargo build
+          command: cargo build --target=x86_64-unknown-linux-musl
       - save_cache:
           key: project-cache-{{ checksum "Cargo.lock" }}
           paths:
             - "target"
             - "~/.cargo"
+            - "tiny_slack/target"
 
