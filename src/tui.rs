@@ -37,6 +37,16 @@ pub struct Tui {
     ),
     previous_terminal_height: u16,
     truncate_buffer_to: usize,
+    regions: DirtyIndicators,
+}
+
+pub struct DirtyIndicators {
+    current_server: usize,
+    current_channel: usize,
+    message_scroll_offset: usize,
+    latest_message: crate::conn::DateTime,
+    message_buffer_lines: usize,
+    message_buffer_len: usize,
 }
 
 pub struct Server {
@@ -161,6 +171,14 @@ impl Tui {
             _guards: (screenguard, rawguard),
             truncate_buffer_to: 0,
             previous_terminal_height: 0,
+            regions: DirtyIndicators {
+                current_server: 0,
+                current_channel: 0,
+                message_scroll_offset: 0,
+                latest_message: crate::conn::DateTime::now(),
+                message_buffer_lines: 0,
+                message_buffer_len: 0,
+            },
         }
     }
 
