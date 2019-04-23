@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::{Snowflake, User};
+
 // Things we send to Discord
 #[derive(Serialize)]
 pub enum GatewayCommand {
@@ -48,18 +50,10 @@ pub enum GatewayEvent {
         nonce: String,
         // mentions stuff
         content: String,
-        author: Author,
-        channel_id: crate::Snowflake,
-        guild_id: crate::Snowflake,
+        author: User,
+        channel_id: Snowflake,
+        guild_id: Snowflake,
     },
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Author {
-    pub username: String,
-    pub id: String,
-    pub discriminator: String,
-    pub avatar: String,
 }
 
 /*

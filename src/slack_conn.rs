@@ -509,7 +509,6 @@ impl SlackConn {
 
         // Launch all the history requests
         for (conversation_id, conversation_name) in channels.clone() {
-            use slack::http::conversations;
 
             let url = format!(
                 "https://slack.com/api/conversations.info?token={}&{}",

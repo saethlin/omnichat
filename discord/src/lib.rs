@@ -1,7 +1,6 @@
-use std::borrow::Cow;
-
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 pub mod gateway;
 
@@ -26,11 +25,12 @@ pub struct Error {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct User {
     pub id: Snowflake,
     pub username: String,
     pub discriminator: String,
-    pub avatar: Option<Snowflake>,
+    pub avatar: Option<String>,
     pub bot: Option<bool>,
     pub mfa_enabled: Option<bool>,
     pub locale: Option<String>,
@@ -38,6 +38,7 @@ pub struct User {
     pub email: Option<String>,
     pub phone: Option<String>,
     pub flags: Option<u64>,
+    pub premium_type: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -51,10 +52,10 @@ pub struct GuildMember {
     pub mute: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Role {
-    pub color: u64,
+    pub color: u32,
     pub hoist: bool,
     pub id: Snowflake,
     pub managed: bool,
@@ -64,12 +65,52 @@ pub struct Role {
     pub position: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Snowflake(String); // Actually a u64
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Snowflake(u64);
 
 impl ::std::fmt::Display for Snowflake {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+use serde::de::{self, Visitor};
+use std::fmt;
+struct SnowflakeVisitor;
+
+impl<'de> Visitor<'de> for SnowflakeVisitor {
+    type Value = Snowflake;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("A string that can be deserialized into a u64")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        value
+            .parse::<u64>()
+            .map(|v| Snowflake(v))
+            .map_err(|e| serde::de::Error::custom(e))
+    }
+}
+
+impl<'de> Deserialize<'de> for Snowflake {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SnowflakeVisitor)
+    }
+}
+
+impl Serialize for Snowflake {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&format!("{:?}", self.0))
     }
 }
 
@@ -78,7 +119,7 @@ impl ::std::fmt::Display for Snowflake {
 pub struct Guild {
     pub id: Snowflake,
     pub name: String,
-    pub icon: Option<Snowflake>,
+    pub icon: Option<String>,
     pub owner: bool,
     pub permissions: Permissions, // Oh no they've encoded them strangely
 }
@@ -171,7 +212,16 @@ pub enum OverwriteType {
     Member,
 }
 
+#[derive(serde::Deserialize)]
+struct MessageAck {
+    pub timestamp: String,
+    pub id: Snowflake,
+    pub author: User,
+    pub content: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Message<'a> {
     pub id: Snowflake,
     pub channel_id: Snowflake,
@@ -187,9 +237,9 @@ pub struct Message<'a> {
     pub mention_everyone: bool,
     pub mentions: Vec<User>,
     pub mention_roles: Vec<Snowflake>,
-    //pub attachments: Vec<Attachment>,
-    //pub embeds: Vec<Embed>,
-    //pub reactions: Option<Vec<Reaction>>,
+    pub attachments: Vec<Attachment>,
+    pub embeds: Vec<Embed>,
+    pub reactions: Option<Vec<Reaction>>,
     pub nonce: Option<Snowflake>,
     pub pinned: bool,
     pub webhook_id: Option<Snowflake>,
@@ -197,6 +247,110 @@ pub struct Message<'a> {
     pub ty: u64,
     //pub activity: Option<MessageActivity>,
     //pub application: Option<MessageApplication>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Attachment {
+    pub id: Snowflake,
+    pub filename: String,
+    pub size: u64,
+    pub url: String,
+    pub proxy_url: String,
+    pub height: Option<u64>,
+    pub width: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Embed {
+    pub title: Option<String>,
+    #[serde(rename="type")]
+    pub ty: Option<String>,
+    pub description: Option<String>,
+    pub url: Option<String>,
+    pub timestamp: Option<String>,
+    pub color: Option<u32>,
+    pub author: Option<EmbedAuthor>, // undocumented
+    pub video: Option<Video>, // undocumented
+    pub provider: Option<Provider>, // undocumented
+    pub thumbnail: Option<Image>, //undocumented
+    pub fields: Option<Vec<EmbedField>>, // undocumented
+    pub footer: Option<Footer>, // undocumented
+    pub image: Option<Image>, // undocumented
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Footer {
+    pub text: String,
+    pub icon_url: Option<String>,
+    pub proxy_icon_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmbedField {
+    pub inline: bool,
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Image {
+    pub height: u64,
+    pub url: String,
+    pub width: u64,
+    pub proxy_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Provider {
+    pub name: String,
+    pub url: Option<String>,
+    pub icon_url: Option<String>,
+    pub proxy_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Video {
+    pub height: u64,
+    pub width: u64,
+    pub url: String,
+    pub proxy_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmbedAuthor {
+    pub url: Option<String>,
+    pub name: String,
+    pub icon_url: Option<String>,
+    pub proxy_url: Option<String>,
+    pub proxy_icon_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Reaction {
+    count: u64,
+    me: bool,
+    emoji: Emoji,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Emoji {
+    id: Option<Snowflake>,
+    name: String,
+    roles: Option<Vec<Role>>,
+    user: Option<User>,
+    require_colons: Option<bool>,
+    managed: Option<bool>,
+    animated: Option<bool>,
 }
 
 // All this was taken from spacemaniac/discord-rs

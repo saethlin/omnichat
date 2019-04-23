@@ -24,25 +24,8 @@ fn format_json(text: &[u8]) -> String {
 
 macro_rules! deserialize_or_log {
     ($response:expr, $type:ty) => {{
-        if $response.status().is_success() {
-            ::serde_json::from_slice::<$type>(&$response.bytes())
-                .map_err(|e| error!("{}\n{:#?}", format_json(&$response.bytes()), e))
-        } else {
-            match ::serde_json::from_slice::<::slack::http::Error>(&$response.bytes()) {
-                Ok(e) => {
-                    error!("{:#?}", e);
-                    Err(())
-                }
-                Err(e) => {
-                    error!(
-                        "{}\n{:#?}",
-                        std::str::from_utf8($response.bytes()).unwrap(),
-                        e
-                    );
-                    Err(())
-                }
-            }
-        }
+        ::serde_json::from_slice::<$type>(&$response.bytes())
+            .map_err(|e| error!("{}\n{:#?}", format_json(&$response.bytes()), e))
     }};
 }
 
@@ -201,7 +184,11 @@ impl DiscordConn {
             history_responses.push((
                 channel_name,
                 client
-                    .get(&format!("{}/channels/{}/messages", ::discord::BASE_URL, id))
+                    .get(&format!(
+                        "{}/channels/{}/messages?limit=100",
+                        ::discord::BASE_URL,
+                        id
+                    ))
                     .unwrap()
                     .header("Authorization", token.as_str())
                     .send(),
@@ -374,7 +361,7 @@ impl DiscordConn {
                 d:
                     GatewayEvent::MessageCreate {
                         content,
-                        author: Author { username, .. },
+                        author: discord::User { username, .. },
                         channel_id,
                         guild_id,
                         ..
@@ -424,12 +411,12 @@ impl DiscordConn {
                     .header("Authorization", &token)
                     .json(body);
             if let Ok(response) = weeqwest::send(&request) {
-                if let Ok(ack) = serde_json::from_slice::<MessageAck>(response.bytes()) {
+                if let Ok(ack) = serde_json::from_slice::<discord::Message>(response.bytes()) {
                     sender
                         .send(ConnEvent::Message(conn::Message {
                             server: guild_name.clone(),
                             channel: IString::from(channel),
-                            contents: ack.content,
+                            contents: ack.content.to_string(),
                             reactions: Vec::new(),
                             sender: IString::from(ack.author.username),
                             timestamp: DateTime::now(),
@@ -458,12 +445,4 @@ impl DiscordConn {
             let _ = weeqwest::send(&req).map_err(|e| error!("{:#?}", e));
         });
     }
-}
-
-#[derive(serde::Deserialize)]
-struct MessageAck {
-    //timestamp: String,
-    //id: discord::Snowflake,
-    author: discord::gateway::Author,
-    content: String,
 }
