@@ -23,7 +23,8 @@ jobs:
       - save_cache:
           key: project-cache-{{ checksum "Cargo.lock" }}
           paths:
-            - "target"
+            - "./target"
             - "~/.cargo"
-            - "tiny_slack/target"
+            - "./tiny_slack/target"
+            - "./discord/target"
 

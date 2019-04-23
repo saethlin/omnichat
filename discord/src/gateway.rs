@@ -1,8 +1,8 @@
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 // Things we send to Discord
 #[derive(Serialize)]
-pub enum GatewayComand {
+pub enum GatewayCommand {
     Identify {
         token: String,
         properties: Properties,
@@ -26,8 +26,11 @@ pub enum GatewayComand {
 #[derive(Debug, Deserialize)]
 pub struct GatewayMessage {
     pub op: u64,
+    #[serde(rename = "d")]
     pub d: GatewayEvent,
+    #[serde(rename = "s")]
     pub s: Option<u64>,
+    #[serde(rename = "t")]
     pub t: Option<String>,
 }
 
@@ -38,6 +41,25 @@ pub enum GatewayEvent {
         heartbeat_interval: u32,
         _trace: Vec<String>,
     },
+    MessageCreate {
+        tts: bool,
+        timestamp: String,
+        pinned: bool,
+        nonce: String,
+        // mentions stuff
+        content: String,
+        author: Author,
+        channel_id: crate::Snowflake,
+        guild_id: crate::Snowflake,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Author {
+    pub username: String,
+    pub id: String,
+    pub discriminator: String,
+    pub avatar: String,
 }
 
 /*

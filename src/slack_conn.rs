@@ -301,18 +301,26 @@ impl SlackConn {
         // Launch all of the requests
         use slack::http::{conversations, emoji, rtm, users};
 
-        let emoji_recv = client.get(&slack_url("emoji.list", &token, &())).unwrap();
-        let connect_recv = client.get(&slack_url("rtm.connect", &token, &())).unwrap();
+        let emoji_recv = client
+            .get(&slack_url("emoji.list", &token, &()))
+            .unwrap()
+            .send();
+        let connect_recv = client
+            .get(&slack_url("rtm.connect", &token, &()))
+            .unwrap()
+            .send();
         let users_recv = client
             .get(&slack_url("users.list", &token, users::ListRequest::new()))
-            .unwrap();
+            .unwrap()
+            .send();
 
         use slack::http::conversations::ChannelType::*;
         let mut req = conversations::ListRequest::new();
         req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
         let conversations_recv = client
             .get(&slack_url("conversations.list", &token, req))
-            .unwrap();
+            .unwrap()
+            .send();
 
         // We need to know about the users first so that we can digest the list of conversations
         let users_response = users_recv.wait().map_err(|e| error!("{:#?}", e))?;
@@ -510,7 +518,7 @@ impl SlackConn {
                     .unwrap_or_default()
             );
 
-            let info_response = client.get(&url).unwrap();
+            let info_response = client.get(&url).unwrap().send();
 
             let mut request = conversations::HistoryRequest::new(conversation_id);
             request.limit = Some(1000);
@@ -520,7 +528,7 @@ impl SlackConn {
                 ::serde_urlencoded::to_string(request).unwrap_or_default()
             );
 
-            let history_response = client.get(&url).unwrap();
+            let history_response = client.get(&url).unwrap().send();
 
             pending_requests.push((info_response, history_response, conversation_name));
         }

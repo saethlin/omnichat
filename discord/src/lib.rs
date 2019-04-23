@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use bitflags::bitflags;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 pub mod gateway;
 
@@ -64,7 +64,7 @@ pub struct Role {
     pub position: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Snowflake(String); // Actually a u64
 
 impl ::std::fmt::Display for Snowflake {

@@ -1,7 +1,7 @@
 pub use inlinable_string::InlinableString as IString;
 use termion;
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DateTime(::chrono::DateTime<::chrono::Utc>);
 
 impl From<::slack::Timestamp> for DateTime {
@@ -103,6 +103,7 @@ pub enum ConnEvent {
 }
 
 /// Messages sent by a frontend to a connection
+#[derive(Debug)]
 pub enum TuiEvent {
     SendMessage {
         server: IString,

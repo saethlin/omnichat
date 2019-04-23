@@ -5,7 +5,7 @@ mod bimap;
 mod chan_message;
 mod conn;
 mod cursor_vec;
-//mod discord_conn;
+mod discord_conn;
 mod logger;
 mod slack_conn;
 mod tui;
@@ -15,22 +15,20 @@ struct SlackConfig {
     token: String,
 }
 
-/*
 #[derive(Deserialize)]
 struct DiscordConfig {
     name: String,
 }
-*/
 
 #[derive(Deserialize)]
 struct Config {
     slack: Option<Vec<SlackConfig>>,
-    //discord_token: Option<String>,
-    //discord: Option<Vec<DiscordConfig>>,
+    discord_token: Option<String>,
+    discord: Option<Vec<DiscordConfig>>,
 }
 
 fn main() {
-    //use crate::discord_conn::DiscordConn;
+    use crate::discord_conn::DiscordConn;
     use crate::slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -83,19 +81,15 @@ fn main() {
         }
     }
 
-    /*
-    {
-        if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
-            for d in discord {
-                let sender = tui.sender();
-                let token = discord_token.clone();
-                thread::spawn(move || {
-                    let _ = DiscordConn::create_on(&token, sender.clone(), &d.name);
-                });
-            }
+    if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
+        for d in discord {
+            let sender = tui.sender();
+            let token = discord_token.clone();
+            thread::spawn(move || {
+                let _ = DiscordConn::create_on(&token, sender.clone(), &d.name);
+            });
         }
     }
-    */
 
     tui.run();
 }
