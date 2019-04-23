@@ -1362,7 +1362,7 @@ dependencies = [
 [[package]]
 name = "weeqwest"
 version = "0.1.0"
-source = "git+https://github.com/saethlin/weeqwest#b09a516eb835bc065f258e49f1bf1bb6b4eafbed"
+source = "git+https://github.com/saethlin/weeqwest#812658b0bc14678ae8dbadab102e17ccd1f4dd5d"
 dependencies = [
  "futures 0.1.26 (registry+https://github.com/rust-lang/crates.io-index)",
  "http 0.1.17 (registry+https://github.com/rust-lang/crates.io-index)",
