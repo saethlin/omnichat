@@ -494,6 +494,7 @@ impl SlackConn {
                             }
                             Ping(m) => Some(Pong(m)),
                             Text(text) => {
+                                error!("Slack message: {}", format_json(text.as_bytes()));
                                 thread_conn.write().unwrap().process_slack_message(&text);
                                 None
                             }

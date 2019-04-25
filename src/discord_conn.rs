@@ -11,7 +11,8 @@ pub struct DiscordConn {
     token: String,
     guild_name: IString,
     guild_id: discord::Snowflake,
-    channel_map: BiMap<IString, discord::Snowflake>,
+    channel_ids: BiMap<IString, discord::Snowflake>,
+    last_message_ids: BiMap<IString, discord::Snowflake>,
     tui_sender: std::sync::mpsc::SyncSender<ConnEvent>,
     last_typing_message: chrono::DateTime<chrono::Utc>,
 }
@@ -146,11 +147,13 @@ impl DiscordConn {
             .filter(|c| c.name.is_some())
             .collect();
 
-        let mut channel_map: BiMap<IString, discord::Snowflake> = BiMap::new();
+        let mut channel_ids: BiMap<IString, discord::Snowflake> = BiMap::new();
+        let mut last_message_ids: BiMap<IString, discord::Snowflake> = BiMap::new();
         for channel in &channels {
             let name = channel.name.clone().unwrap();
             let name = IString::from(name);
-            channel_map.insert(name, channel.id.clone());
+            channel_ids.insert(name.clone(), channel.id.clone());
+            last_message_ids.insert(name, channel.last_message_id.clone().unwrap());
         }
 
         // This is how the TUI sends me events
@@ -198,36 +201,33 @@ impl DiscordConn {
         for (channel, history_resp) in history_responses {
             let history_resp = history_resp.wait().unwrap();
 
-            deserialize_or_log!(history_resp, Vec<::discord::Message>)
-                .map(|history| {
-                    let messages = history
-                        .into_iter()
-                        .map(|message| {
-                            let timestamp =
-                                ::chrono::DateTime::parse_from_rfc3339(&message.timestamp)
-                                    .map(|d| d.with_timezone(&::chrono::Utc))
-                                    .map(|d| d.into())
-                                    .unwrap_or_else(|_| DateTime::now());
+            let _ = deserialize_or_log!(history_resp, Vec<::discord::Message>).map(|history| {
+                let messages = history
+                    .into_iter()
+                    .map(|message| {
+                        let timestamp = ::chrono::DateTime::parse_from_rfc3339(&message.timestamp)
+                            .map(|d| d.with_timezone(&::chrono::Utc))
+                            .map(|d| d.into())
+                            .unwrap_or_else(|_| DateTime::now());
 
-                            crate::conn::Message {
-                                sender: IString::from(message.author.username),
-                                server: guild_name.clone(),
-                                timestamp,
-                                contents: String::from(message.content),
-                                channel: channel.clone(),
-                                reactions: Vec::new(),
-                            }
-                        })
-                        .collect();
+                        crate::conn::Message {
+                            sender: IString::from(message.author.username),
+                            server: guild_name.clone(),
+                            timestamp,
+                            contents: String::from(message.content),
+                            channel: channel.clone(),
+                            reactions: Vec::new(),
+                        }
+                    })
+                    .collect();
 
-                    let _ = sender.send(ConnEvent::HistoryLoaded {
-                        server: guild_name.clone(),
-                        channel,
-                        read_at: DateTime::now(),
-                        messages,
-                    });
-                })
-                .map_err(|e| error!("{:#?}", e));
+                let _ = sender.send(ConnEvent::HistoryLoaded {
+                    server: guild_name.clone(),
+                    channel,
+                    read_at: DateTime::now(),
+                    messages,
+                });
+            });
         }
 
         use std::sync::Arc;
@@ -237,7 +237,8 @@ impl DiscordConn {
             token: token.to_string(),
             guild_name: guild_name.clone(),
             guild_id: guild_id.clone(),
-            channel_map: channel_map.clone(),
+            channel_ids: channel_ids.clone(),
+            last_message_ids,
             tui_sender: sender.clone(),
             last_typing_message: chrono::offset::Utc::now(),
         }));
@@ -255,6 +256,9 @@ impl DiscordConn {
                     conn::TuiEvent::SendTyping { channel, .. } => {
                         tconnection.write().unwrap().send_typing(&channel)
                     }
+                    conn::TuiEvent::MarkRead { channel, .. } => {
+                        tconnection.read().unwrap().mark_read(&channel)
+                    }
                     _ => error!("unsupported event {:?}", ev),
                 }
             }
@@ -264,8 +268,7 @@ impl DiscordConn {
         // websocket does not support the new tokio :(
         let i_token = token.to_string();
         std::thread::spawn(move || {
-            use discord::gateway::GatewayEvent;
-            use discord::gateway::GatewayMessage;
+            use discord::gateway::{Event, GatewayEvent, Hello};
 
             let url_resp = client
                 .get(&format!("{}{}", ::discord::BASE_URL, "/gateway"))
@@ -296,14 +299,14 @@ impl DiscordConn {
                             }
                             Ping(m) => Some(Pong(m)),
                             Text(text) => {
-                                let msg = ::serde_json::from_str::<GatewayMessage>(&text);
+                                let msg = ::serde_json::from_str::<GatewayEvent>(&text);
                                 match msg {
-                                    Ok(GatewayMessage {
+                                    Ok(GatewayEvent {
                                         d:
-                                            GatewayEvent::Hello {
+                                            Some(Event::Hello(Hello {
                                                 heartbeat_interval: interval,
                                                 ..
-                                            },
+                                            })),
                                         ..
                                     }) => {
                                         let itx = tx.clone();
@@ -318,18 +321,18 @@ impl DiscordConn {
                                             ));
                                         });
                                         let identify = serde_json::json! {{
-                                                "op": 2,
-                                                "d": {
-                                                    "token": i_token,
-                                                    "properties": {
-                                                        "$os": ::std::env::consts::OS,
-                                                        "$browser": "test-browser",
-                                                        "$device": "test-device",
-                                                    },
-                                                    "large_threshold": 250,
-                                                    "compress": false,
-                                                    "v": 6,
-                                                }
+                                            "op": 2,
+                                            "d": {
+                                                "token": i_token,
+                                                "properties": {
+                                                    "$os": ::std::env::consts::OS,
+                                                    "$browser": "other",
+                                                    "$device": "other",
+                                                },
+                                                "large_threshold": 250,
+                                                "compress": true,
+                                                "v": 6,
+                                            }
                                         }}
                                         .to_string();
                                         Some(Text(identify))
@@ -337,7 +340,14 @@ impl DiscordConn {
                                     Ok(gateway_message) => {
                                         connection.read().unwrap().handle_websocket(gateway_message)
                                     }
-                                    _ => None,
+                                    e => {
+                                        error!(
+                                            "Unrecognized Discord message: {}\n{:#?}",
+                                            format_json(text.as_bytes()),
+                                            e
+                                        );
+                                        None
+                                    }
                                 }
                             }
                             _ => None,
@@ -353,34 +363,43 @@ impl DiscordConn {
 
     fn handle_websocket(
         &self,
-        message: discord::gateway::GatewayMessage,
+        message: discord::gateway::GatewayEvent,
     ) -> Option<websocket::OwnedMessage> {
         use discord::gateway::*;
         match message {
-            GatewayMessage {
+            GatewayEvent {
                 d:
-                    GatewayEvent::MessageCreate {
-                        content,
-                        author: discord::User { username, .. },
+                    Some(Event::MessageCreate(Message {
+                        content: Some(content),
+                        author: Some(discord::User { username, .. }),
                         channel_id,
-                        guild_id,
+                        guild_id: Some(guild_id),
                         ..
-                    },
+                    })),
                 ..
             } => {
                 if self.guild_id == guild_id {
-                    self.channel_map.get_left(&channel_id).map(|channel| {
-                        self.tui_sender
-                            .send(ConnEvent::Message(conn::Message {
-                                server: self.guild_name.clone(),
-                                channel: channel.clone(),
-                                contents: content,
-                                reactions: Vec::new(),
-                                sender: IString::from(username),
-                                timestamp: DateTime::now(),
-                            }))
-                            .unwrap();
-                    });
+                    self.channel_ids
+                        .get_left(&channel_id)
+                        .map(|channel| {
+                            self.tui_sender
+                                .send(ConnEvent::Message(conn::Message {
+                                    server: self.guild_name.clone(),
+                                    channel: channel.clone(),
+                                    contents: content,
+                                    reactions: Vec::new(),
+                                    sender: IString::from(username.clone()),
+                                    timestamp: DateTime::now(),
+                                }))
+                                .unwrap();
+                        })
+                        .or_else(|| {
+                            error!(
+                                "Unrecognized channel id in {:?} from {:?}",
+                                channel_id, username
+                            );
+                            None
+                        });
                 }
             }
             _ => {}
@@ -391,7 +410,7 @@ impl DiscordConn {
     fn send_message(&self, channel: &str, content: &str) {
         let channel = channel.to_string();
         let id: discord::Snowflake = self
-            .channel_map
+            .channel_ids
             .get_right(channel.as_str())
             .unwrap()
             .clone();
@@ -401,8 +420,6 @@ impl DiscordConn {
             "tts": false,
         }}
         .to_string();
-        let sender = self.tui_sender.clone();
-        let guild_name = self.guild_name.clone();
 
         std::thread::spawn(move || {
             let request =
@@ -411,17 +428,8 @@ impl DiscordConn {
                     .header("Authorization", &token)
                     .json(body);
             if let Ok(response) = weeqwest::send(&request) {
-                if let Ok(ack) = serde_json::from_slice::<discord::Message>(response.bytes()) {
-                    sender
-                        .send(ConnEvent::Message(conn::Message {
-                            server: guild_name.clone(),
-                            channel: IString::from(channel),
-                            contents: ack.content.to_string(),
-                            reactions: Vec::new(),
-                            sender: IString::from(ack.author.username),
-                            timestamp: DateTime::now(),
-                        }))
-                        .unwrap();
+                if let Err(e) = serde_json::from_slice::<discord::Message>(response.bytes()) {
+                    error!("{:#?}", e);
                 }
             }
         });
@@ -434,7 +442,7 @@ impl DiscordConn {
         } else {
             self.last_typing_message = now;
         }
-        let id: discord::Snowflake = self.channel_map.get_right(channel).unwrap().clone();
+        let id: discord::Snowflake = self.channel_ids.get_right(channel).unwrap().clone();
         let token = self.token.clone();
         std::thread::spawn(move || {
             let req =
@@ -442,6 +450,25 @@ impl DiscordConn {
                     .unwrap()
                     .header("Content-Length", "0")
                     .header("Authorization", &token);
+            let _ = weeqwest::send(&req).map_err(|e| error!("{:#?}", e));
+        });
+    }
+
+    fn mark_read(&self, channel: &str) {
+        let id = self.channel_ids.get_right(channel).unwrap().clone();
+        let last_message_id = self.last_message_ids.get_right(channel).unwrap().clone();
+        let token = self.token.clone();
+        let body = serde_json::json! {{"token": token}}.to_string();
+        std::thread::spawn(move || {
+            let req = weeqwest::Request::post(&format!(
+                "{}/channels/{}/messages/{}/ack",
+                discord::BASE_URL,
+                id,
+                last_message_id,
+            ))
+            .unwrap()
+            .header("Authorization", &token)
+            .json(body);
             let _ = weeqwest::send(&req).map_err(|e| error!("{:#?}", e));
         });
     }

@@ -198,15 +198,13 @@ impl Tui {
 
     fn reset_current_unreads(&mut self) {
         let server = self.servers.get_mut();
-        if server.channels[server.current_channel].num_unreads() > 0 {
-            server.channels[server.current_channel].read_at = ::chrono::Utc::now().into();
-            let current_channel = &server.channels[server.current_channel];
+        server.channels[server.current_channel].read_at = ::chrono::Utc::now().into();
+        let current_channel = &server.channels[server.current_channel];
 
-            let _ = server.sender.send(TuiEvent::MarkRead {
-                server: server.name.clone(),
-                channel: current_channel.name.clone(),
-            });
-        }
+        let _ = server.sender.send(TuiEvent::MarkRead {
+            server: server.name.clone(),
+            channel: current_channel.name.clone(),
+        });
     }
 
     fn next_server(&mut self) {
@@ -1032,7 +1030,7 @@ impl Tui {
             // Now we have another 16 miliseconds to handle other events before anyone notices
             let start_instant = Instant::now();
             while let Some(remaining_time) =
-                Duration::from_millis(16).checked_sub(start_instant.elapsed())
+                Duration::from_millis(32).checked_sub(start_instant.elapsed())
             {
                 let event = match self.events.recv_timeout(remaining_time) {
                     Ok(ev) => ev,

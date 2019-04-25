@@ -25,41 +25,162 @@ pub enum GatewayCommand {
 }
 
 // Things we get from Discord
-#[derive(Debug, Deserialize)]
-pub struct GatewayMessage {
-    pub op: u64,
-    #[serde(rename = "d")]
-    pub d: GatewayEvent,
-    #[serde(rename = "s")]
+#[derive(Debug)]
+pub struct GatewayEvent {
     pub s: Option<u64>,
-    #[serde(rename = "t")]
-    pub t: Option<String>,
+    pub d: Option<Event>,
+    pub op: u64,
+}
+
+// Values of the d field in a GatewayEvent
+#[derive(Debug)]
+pub enum Event {
+    Hello(Hello),
+    MessageCreate(Message),
+    MessageDelete(MessageDelete),
+    MessageUpdate(Message),
+    MessageReactionAdd(MessageReactionAdd),
+    PresenceUpdate(PresenceUpdate),
+    SessionsReplace(Vec<SessionsReplace>),
+    MessageAck(MessageAck),
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum GatewayEvent {
-    Hello {
-        heartbeat_interval: u32,
-        _trace: Vec<String>,
-    },
-    MessageCreate {
-        tts: bool,
-        timestamp: String,
-        pinned: bool,
-        nonce: String,
-        // mentions stuff
-        content: String,
-        author: User,
-        channel_id: Snowflake,
-        guild_id: Snowflake,
-    },
+pub struct MessageAck {
+    pub channel_id: String,
+    pub guild_id: Option<String>,
+    pub message_id: Option<String>,
 }
 
-/*
-use serde::de::{Deserialize, Deserializer, Visitor};
-impl<'de> Deserialize<'de> for GatewayMessage {
-    fn deserialize<D>(deserializer: D) -> Result<GatewayMessage, D::Error>
+#[derive(Debug, Deserialize)]
+pub struct Hello {
+    pub _trace: Vec<String>,
+    pub heartbeat_interval: u64,
+}
+
+// TODO: I've omitted a lot of fields from here for now
+#[derive(Debug, Deserialize)]
+pub struct Message {
+    pub id: Snowflake,
+    pub channel_id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+    pub author: Option<User>,
+    //pub member: Option<GuildMember>,
+    pub content: Option<String>,
+    pub timestamp: Option<String>,
+    pub edited_timestamp: Option<String>,
+    pub tts: Option<bool>,
+    pub mention_everyone: Option<bool>,
+}
+#[derive(Debug, Deserialize)]
+pub struct MessageDelete {
+    pub id: Snowflake,
+    pub channel_id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MessageReactionAdd {
+    pub user_id: Snowflake,
+    pub channel_id: Snowflake,
+    pub message_id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+    pub emoji: crate::Emoji,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PresenceUpdate {
+    pub user: PartialUser,
+    pub roles: Option<Vec<Snowflake>>,
+    pub game: Option<Activity>,
+    pub guild_id: Option<Snowflake>,
+    pub status: String, // this looks more like an enum
+    pub activities: Vec<Activity>,
+    pub client_status: ClientStatus,
+}
+
+// TODO No documentation at all?
+#[derive(Debug, Deserialize)]
+pub struct SessionsReplace {}
+
+#[derive(Debug, Deserialize)]
+pub struct ClientInfo {
+    client: String,
+    os: String,
+    version: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PartialUser {
+    pub id: Snowflake,
+    pub username: Option<String>,
+    pub discriminator: Option<String>,
+    pub avatar: Option<String>,
+    pub bot: Option<bool>,
+    pub mfa_enabled: Option<bool>,
+    pub locale: Option<String>,
+    pub verified: Option<bool>,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub flags: Option<u64>,
+    pub premium_type: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Activity {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub ty: u64,
+    pub url: Option<String>,
+    pub timestamps: Option<Timestamps>,
+    pub application_id: Option<Snowflake>,
+    pub details: Option<String>,
+    pub state: Option<String>,
+    pub party: Option<Party>,
+    pub assets: Option<Assets>,
+    pub secrets: Option<Secrets>,
+    pub instance: Option<bool>,
+    pub flags: Option<u8>, // Actually an ActivityFlags bitflag object
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Party {
+    pub id: Option<String>,
+    pub size: Option<[u64; 2]>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Assets {
+    pub large_image: Option<String>,
+    pub large_text: Option<String>,
+    pub small_image: Option<String>,
+    pub small_text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Secrets {
+    pub join: Option<String>,
+    pub spectate: Option<String>,
+    #[serde(rename = "match")]
+    pub mtch: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClientStatus {
+    pub desktop: Option<String>,
+    pub mobile: Option<String>,
+    pub web: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Timestamps {
+    start: Option<u64>,
+    end: Option<u64>,
+}
+
+use serde::de::{Deserializer, Visitor};
+impl<'de> Deserialize<'de> for GatewayEvent {
+    fn deserialize<D>(deserializer: D) -> Result<GatewayEvent, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -75,18 +196,18 @@ impl<'de> Deserialize<'de> for GatewayMessage {
         struct GatewayVisitor;
 
         impl<'de> Visitor<'de> for GatewayVisitor {
-            type Value = GatewayMessage;
+            type Value = GatewayEvent;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a map")
             }
 
-            fn visit_map<M>(self, mut map: M) -> Result<GatewayMessage, M::Error>
+            fn visit_map<M>(self, mut map: M) -> Result<GatewayEvent, M::Error>
             where
                 M: ::serde::de::MapAccess<'de>,
             {
                 let mut op = None;
-                let mut d = None;
+                let mut d: Option<serde_json::Value> = None;
                 let mut s = None;
                 let mut t = None;
 
@@ -100,18 +221,87 @@ impl<'de> Deserialize<'de> for GatewayMessage {
                 }
 
                 let op = op.ok_or_else(|| serde::de::Error::missing_field("op"))?;
-                let d = d.ok_or_else(|| serde::de::Error::missing_field("d"))?;
-                let s = s.ok_or_else(|| serde::de::Error::missing_field("s"))?;
                 let t = t.ok_or_else(|| serde::de::Error::missing_field("t"))?;
-                Ok(GatewayMessage { op, d, s, t })
+                let d: Option<Event> = match op {
+                    0 => match (t, d) {
+                        (Some("MESSAGE_CREATE"), Some(d)) => {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::MessageCreate(inner))
+                        }
+                        (Some("MESSAGE_REACTION_ADD"), Some(d)) => {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::MessageReactionAdd(inner))
+                        }
+                        (Some("MESSAGE_UPDATE"), Some(d)) => {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::MessageUpdate(inner))
+                        }
+                        (Some("MESSAGE_DELETE"), Some(d)) => {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::MessageDelete(inner))
+                        }
+                        (Some("MESSAGE_ACK"), Some(d)) => {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::MessageAck(inner))
+                        }
+                        (Some("PRESENCE_UPDATE"), Some(d)) => {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::PresenceUpdate(inner))
+                        }
+                        (Some("SESSIONS_REPLACE"), Some(d)) => {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::SessionsReplace(inner))
+                        }
+                        _ => {
+                            return Err(serde::de::Error::custom(format!(
+                                "Unable to deserialize message with type {:?}",
+                                t
+                            )))
+                        }
+                    },
+                    10 => {
+                        if let Some(d) = d {
+                            let inner = serde_json::from_value(d)
+                                .map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::Hello(inner))
+                        } else {
+                            None
+                        }
+                    }
+                    11 => None,
+                    /*
+                    1 => {
+                        if let Some(d) = d {
+                            let inner = serde_json::from_value::<Heartbeat>(d).map_err(|e| serde::de::Error::custom(e))?;
+                            Some(Event::Heartbeat(inner))
+                        } else {
+                            None
+                        }
+                    }
+                    */
+                    _ => {
+                        return Err(serde::de::Error::custom(format!(
+                            "Unrecognized opcode {}",
+                            op
+                        )))
+                    }
+                };
+                let s = s.ok_or_else(|| serde::de::Error::missing_field("s"))?;
+                Ok(GatewayEvent { d, s, op })
             }
         }
 
         const FIELDS: &'static [&'static str] = &["op", "d", "s", "t"];
-        deserializer.deserialize_struct("GatewayMessage", FIELDS, GatewayVisitor)
+        deserializer.deserialize_struct("GatewayEvent", FIELDS, GatewayVisitor)
     }
 }
-*/
 
 #[derive(Serialize)]
 pub struct GatewayIdentify {

@@ -265,19 +265,19 @@ pub struct Attachment {
 #[serde(deny_unknown_fields)]
 pub struct Embed {
     pub title: Option<String>,
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     pub ty: Option<String>,
     pub description: Option<String>,
     pub url: Option<String>,
     pub timestamp: Option<String>,
     pub color: Option<u32>,
-    pub author: Option<EmbedAuthor>, // undocumented
-    pub video: Option<Video>, // undocumented
-    pub provider: Option<Provider>, // undocumented
-    pub thumbnail: Option<Image>, //undocumented
+    pub author: Option<EmbedAuthor>,     // undocumented
+    pub video: Option<Video>,            // undocumented
+    pub provider: Option<Provider>,      // undocumented
+    pub thumbnail: Option<Image>,        //undocumented
     pub fields: Option<Vec<EmbedField>>, // undocumented
-    pub footer: Option<Footer>, // undocumented
-    pub image: Option<Image>, // undocumented
+    pub footer: Option<Footer>,          // undocumented
+    pub image: Option<Image>,            // undocumented
 }
 
 #[derive(Clone, Debug, Deserialize)]
