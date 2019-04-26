@@ -1,8 +1,6 @@
 use crate::bimap::BiMap;
-use crate::conn;
-use crate::conn::{ConnEvent, DateTime};
+use crate::conn::{self, ConnEvent, DateTime};
 use log::error;
-use std::borrow::Borrow;
 use std::sync::mpsc::SyncSender;
 
 use futures::{Future, Stream};
@@ -180,7 +178,7 @@ impl DiscordConn {
 
         let mut history_responses = Vec::new();
         for channel in channels.into_iter().filter(|c| c.name.is_some()) {
-            let channel_name = String::from(channel.name.unwrap().borrow());
+            let channel_name = channel.name.unwrap();
             let token = token.to_string();
 
             history_responses.push((
@@ -280,7 +278,6 @@ impl DiscordConn {
 
             let resp = deserialize_or_log!(url_resp, ::discord::GatewayResponse).unwrap();
 
-            //use websocket::result::WebSocketError;
             use futures::sink::Sink;
             use websocket::result::WebSocketError;
             use websocket::OwnedMessage::{Close, Ping, Pong, Text};
