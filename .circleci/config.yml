@@ -16,12 +16,12 @@ jobs:
     steps:
       - checkout
       - restore_cache:
-          key: project-cache
+          key: the-cache
       - run:
           name: Stable Build
           command: cargo build --target=x86_64-unknown-linux-musl
       - save_cache:
-          key: project-cache
+          key: the-cache
           paths:
             - "./target"
             - "/usr/local/cargo"
