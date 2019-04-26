@@ -107,6 +107,10 @@ impl SlackConn {
             text = text.replace(mention, &replacement);
         }
 
+        text = text.replace("<!here>", "@here");
+        text = text.replace("<!channel>", "@channel");
+        text = text.replace("<!everyone>", "@everyone");
+
         text
     }
 
@@ -122,6 +126,10 @@ impl SlackConn {
             let slack_mention = format!("<#{}|{}>", id, name);
             text = text.replace(&name_mention, &slack_mention);
         }
+
+        text = text.replace("@here", "<!here>");
+        text = text.replace("@channel", "<!channel>");
+        text = text.replace("@everyone", "<!everyone>");
 
         text
     }
@@ -381,6 +389,8 @@ impl SlackConn {
             });
         }
 
+        tui_channels.sort_by(|c1, c2| c1.name.cmp(&c2.name));
+
         let connect_response = connect_recv.wait().map_err(|e| error!("{:#?}", e))?;
         let connect_response = deserialize_or_log!(connect_response, rtm::ConnectResponse)
             .map_err(|e| error!("{:#?}", e))?;
@@ -494,7 +504,6 @@ impl SlackConn {
                             }
                             Ping(m) => Some(Pong(m)),
                             Text(text) => {
-                                error!("Slack message: {}", format_json(text.as_bytes()));
                                 thread_conn.write().unwrap().process_slack_message(&text);
                                 None
                             }
@@ -510,7 +519,6 @@ impl SlackConn {
 
         // Launch all the history requests
         for (conversation_id, conversation_name) in channels.clone() {
-
             let url = format!(
                 "https://slack.com/api/conversations.info?token={}&{}",
                 token,
@@ -599,7 +607,12 @@ impl SlackConn {
             Some('@') => self
                 .users
                 .iter()
-                .map(|(_id, name)| name)
+                .map(|(_, name)| name)
+                .chain(&[
+                    IString::from("channel"),
+                    IString::from("here"),
+                    IString::from("everyone"),
+                ])
                 .filter(|name| name.starts_with(&word[1..]))
                 .map(|s| String::from("@") + s)
                 .collect(),
