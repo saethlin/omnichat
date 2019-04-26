@@ -37,16 +37,6 @@ pub struct Tui {
     ),
     previous_terminal_height: u16,
     truncate_buffer_to: usize,
-    regions: DirtyIndicators,
-}
-
-pub struct DirtyIndicators {
-    current_server: usize,
-    current_channel: usize,
-    message_scroll_offset: usize,
-    latest_message: crate::conn::DateTime,
-    message_buffer_lines: usize,
-    message_buffer_len: usize,
 }
 
 pub struct Server {
@@ -171,14 +161,6 @@ impl Tui {
             _guards: (screenguard, rawguard),
             truncate_buffer_to: 0,
             previous_terminal_height: 0,
-            regions: DirtyIndicators {
-                current_server: 0,
-                current_channel: 0,
-                message_scroll_offset: 0,
-                latest_message: crate::conn::DateTime::now(),
-                message_buffer_lines: 0,
-                message_buffer_len: 0,
-            },
         }
     }
 
@@ -220,19 +202,13 @@ impl Tui {
     }
 
     fn next_channel_unread(&mut self) {
-        //NLL HACK
-        let index = {
-            let server = self.servers.get_mut();
-            (0..server.channels.len())
-                .map(|i| (server.current_channel + i) % server.channels.len())
-                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
-        };
-        match index {
-            None => {}
-            Some(index) => {
-                self.reset_current_unreads();
-                self.servers.get_mut().current_channel = index;
-            }
+        let server = self.servers.get_mut();
+        if let Some(index) = (0..server.channels.len())
+            .map(|i| (server.current_channel + i) % server.channels.len())
+            .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+        {
+            self.reset_current_unreads();
+            self.servers.get_mut().current_channel = index;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
     }

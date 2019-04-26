@@ -30,6 +30,7 @@ macro_rules! deserialize_or_log {
     }};
 }
 
+/*
 pub fn permissions_in(
     chan: &::discord::Channel,
     guild: Option<&::discord::Guild>,
@@ -59,6 +60,7 @@ pub fn permissions_in(
 
     perms
 }
+*/
 
 impl DiscordConn {
     pub fn create_on(token: &str, sender: SyncSender<ConnEvent>, server: &str) -> Result<(), ()> {
@@ -84,7 +86,6 @@ impl DiscordConn {
 
         let guild = guilds.into_iter().find(|g| g.name == server).unwrap();
         let guild_name = String::from(guild.name.as_str());
-        let guild_id = guild.id.clone();
 
         let me_resp = client
             .get(&format!(
@@ -151,9 +152,8 @@ impl DiscordConn {
         let mut last_message_ids: BiMap<String, discord::Snowflake> = BiMap::new();
         for channel in &channels {
             let name = channel.name.clone().unwrap();
-            let name = String::from(name);
-            channel_ids.insert(name.clone(), channel.id.clone());
-            last_message_ids.insert(name, channel.last_message_id.clone().unwrap());
+            channel_ids.insert(name.clone(), channel.id);
+            last_message_ids.insert(name, channel.last_message_id.unwrap());
         }
 
         // This is how the TUI sends me events
@@ -164,7 +164,7 @@ impl DiscordConn {
                 .iter()
                 .map(|c| crate::tui::Channel {
                     messages: Vec::new(),
-                    name: String::from(c.name.clone().unwrap_or(String::from("NONAME"))),
+                    name: c.name.clone().unwrap_or_else(|| String::from("NONAME")),
                     read_at: crate::conn::DateTime::now(),
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
@@ -182,7 +182,6 @@ impl DiscordConn {
         for channel in channels.into_iter().filter(|c| c.name.is_some()) {
             let channel_name = String::from(channel.name.unwrap().borrow());
             let token = token.to_string();
-            let id = channel.id.clone();
 
             history_responses.push((
                 channel_name,
@@ -190,7 +189,7 @@ impl DiscordConn {
                     .get(&format!(
                         "{}/channels/{}/messages?limit=100",
                         ::discord::BASE_URL,
-                        id
+                        channel.id
                     ))
                     .unwrap()
                     .header("Authorization", token.as_str())
@@ -211,7 +210,7 @@ impl DiscordConn {
                             .unwrap_or_else(|_| DateTime::now());
 
                         crate::conn::Message {
-                            sender: String::from(message.author.username),
+                            sender: message.author.username,
                             server: guild_name.clone(),
                             timestamp,
                             contents: String::from(message.content),
@@ -236,7 +235,7 @@ impl DiscordConn {
         let connection = Arc::new(RwLock::new(DiscordConn {
             token: token.to_string(),
             guild_name: guild_name.clone(),
-            guild_id: guild_id.clone(),
+            guild_id: guild.id,
             channel_ids: channel_ids.clone(),
             last_message_ids,
             tui_sender: sender.clone(),
@@ -390,7 +389,7 @@ impl DiscordConn {
                                     channel: channel.clone(),
                                     contents: content,
                                     reactions: Vec::new(),
-                                    sender: String::from(username.clone()),
+                                    sender: username.clone(),
                                     timestamp: DateTime::now(),
                                 }))
                                 .unwrap();
@@ -411,11 +410,7 @@ impl DiscordConn {
 
     fn send_message(&self, channel: &str, content: &str) {
         let channel = channel.to_string();
-        let id: discord::Snowflake = self
-            .channel_ids
-            .get_right(channel.as_str())
-            .unwrap()
-            .clone();
+        let id = *self.channel_ids.get_right(channel.as_str()).unwrap();
         let token = self.token.clone();
         let body = serde_json::json! {{
             "content": content,
@@ -444,7 +439,7 @@ impl DiscordConn {
         } else {
             self.last_typing_message = now;
         }
-        let id: discord::Snowflake = self.channel_ids.get_right(channel).unwrap().clone();
+        let id = *self.channel_ids.get_right(channel).unwrap();
         let token = self.token.clone();
         std::thread::spawn(move || {
             let req =
@@ -457,8 +452,8 @@ impl DiscordConn {
     }
 
     fn mark_read(&self, channel: &str) {
-        let id = self.channel_ids.get_right(channel).unwrap().clone();
-        let last_message_id = self.last_message_ids.get_right(channel).unwrap().clone();
+        let id = *self.channel_ids.get_right(channel).unwrap();
+        let last_message_id = *self.last_message_ids.get_right(channel).unwrap();
         let token = self.token.clone();
         let body = serde_json::json! {{"token": token}}.to_string();
         std::thread::spawn(move || {

@@ -1,5 +1,4 @@
-#![deny(clippy::same_adjacent_type)]
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 mod bimap;
 mod chan_message;

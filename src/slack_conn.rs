@@ -6,7 +6,7 @@ use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
 use log::error;
 use regex_automata::DenseDFA;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -175,7 +175,7 @@ impl SlackConn {
                         server: self.team_name.clone(),
                         channel: channel.clone(),
                         timestamp: timestamp.into(),
-                        reaction: reaction.into(),
+                        reaction,
                     });
                 }
             }
@@ -189,7 +189,7 @@ impl SlackConn {
                         server: self.team_name.clone(),
                         channel: channel.clone(),
                         timestamp: timestamp.into(),
-                        reaction: reaction.into(),
+                        reaction,
                     });
                 }
             }
@@ -213,64 +213,62 @@ impl SlackConn {
                                 .channels
                                 .get_right(&channel)
                                 .cloned()
-                                .unwrap_or_else(|| channel.to_string().into()),
+                                .unwrap_or_else(|| channel.to_string()),
                             contents: edited_message.text.unwrap_or_default(),
                             timestamp: edited_message.ts.into(),
                         });
                     }
-                } else {
-                    if let Some(sender) = user
-                        .and_then(|id| self.users.get_right(&id))
-                        .cloned()
-                        .or_else(|| username.map(String::from))
-                        .or_else(|| bot_id.map(|id| String::from(id.as_str())))
-                    {
-                        use std::fmt::Write;
-                        let mut body = match text {
-                            Some(ref t) => self.convert_mentions(t),
-                            None => String::new(),
-                        };
+                } else if let Some(sender) = user
+                    .and_then(|id| self.users.get_right(&id))
+                    .cloned()
+                    .or_else(|| username.map(String::from))
+                    .or_else(|| bot_id.map(|id| String::from(id.as_str())))
+                {
+                    use std::fmt::Write;
+                    let mut body = match text {
+                        Some(ref t) => self.convert_mentions(t),
+                        None => String::new(),
+                    };
 
-                        for f in &files {
+                    for f in &files {
+                        let _ = write!(body, "\n{}", f.url_private);
+                    }
+
+                    for a in &attachments {
+                        if let Some(ref title) = a.title {
+                            let _ = write!(body, "\n{}", title);
+                        }
+                        if let Some(ref pretext) = a.pretext {
+                            let _ = write!(body, "\n{}", pretext);
+                        }
+                        if let Some(ref text) = a.text {
+                            let _ = write!(body, "\n{}", text);
+                        }
+                        for f in &a.files {
                             let _ = write!(body, "\n{}", f.url_private);
                         }
-
-                        for a in &attachments {
-                            if let Some(ref title) = a.title {
-                                let _ = write!(body, "\n{}", title);
-                            }
-                            if let Some(ref pretext) = a.pretext {
-                                let _ = write!(body, "\n{}", pretext);
-                            }
-                            if let Some(ref text) = a.text {
-                                let _ = write!(body, "\n{}", text);
-                            }
-                            for f in &a.files {
-                                let _ = write!(body, "\n{}", f.url_private);
-                            }
-                        }
-
-                        body = body.replace("&amp;", "&");
-                        body = body.replace("&lt;", "<");
-                        body = body.replace("&gt;", ">");
-
-                        let contents = body.trim().to_string();
-
-                        error!("got a message");
-
-                        let _ = self.tui_sender.send(ConnEvent::Message(Message {
-                            server: self.team_name.clone(),
-                            channel: self
-                                .channels
-                                .get_right(&channel)
-                                .cloned()
-                                .unwrap_or_else(|| channel.to_string().into()),
-                            sender,
-                            timestamp: ts.into(),
-                            reactions: Vec::new(),
-                            contents,
-                        }));
                     }
+
+                    body = body.replace("&amp;", "&");
+                    body = body.replace("&lt;", "<");
+                    body = body.replace("&gt;", ">");
+
+                    let contents = body.trim().to_string();
+
+                    error!("got a message");
+
+                    let _ = self.tui_sender.send(ConnEvent::Message(Message {
+                        server: self.team_name.clone(),
+                        channel: self
+                            .channels
+                            .get_right(&channel)
+                            .cloned()
+                            .unwrap_or_else(|| channel.to_string()),
+                        sender,
+                        timestamp: ts.into(),
+                        reactions: Vec::new(),
+                        contents,
+                    }));
                 }
             }
             Ok(rtm::Event::ChannelMarked { channel, ts, .. }) => {
@@ -358,7 +356,7 @@ impl SlackConn {
 
         let mut users: BiMap<::slack::UserId, String> = BiMap::new();
         for user in users_response.members {
-            users.insert(user.id, String::from(user.name));
+            users.insert(user.id, user.name);
         }
 
         let conversations_response = conversations_recv.wait().map_err(|e| error!("{:#?}", e))?;
@@ -382,7 +380,7 @@ impl SlackConn {
                         is_mpim: false,
                         is_archived: false,
                         ..
-                    } => Some((id, name.into(), ChannelType::Normal)),
+                    } => Some((id, name, ChannelType::Normal)),
                     Group {
                         id,
                         name,
@@ -391,7 +389,7 @@ impl SlackConn {
                         is_mpim: false,
                         is_archived: false,
                         ..
-                    } => Some((id, name.into(), ChannelType::Normal)),
+                    } => Some((id, name, ChannelType::Normal)),
                     DirectMessage { id, user, .. } => users
                         .get_right(&user)
                         .map(|name| (id, name.clone(), ChannelType::DirectMessage)),
@@ -418,8 +416,8 @@ impl SlackConn {
 
         let websocket_url = connect_response.url.clone();
 
-        let my_name = String::from(connect_response.slf.name);
-        let team_name = String::from(connect_response.team.name);
+        let my_name = connect_response.slf.name;
+        let team_name = connect_response.team.name;
         let (input_sender, input_channel) = mpsc::channel(0);
 
         // Give the emoji handle as long as possible to complete
@@ -596,7 +594,7 @@ impl SlackConn {
                         .user
                         .and_then(|name| handle.users.get_right(&name).cloned())
                         .or_else(|| msg.username.clone())
-                        .or_else(|| msg.bot_id.map(|b| String::from(b.to_string())))
+                        .or_else(|| msg.bot_id.map(|b| b.to_string()))
                         .unwrap_or_else(|| "UNKNOWNUSER".into());
                     Message {
                         server: team_name.clone(),
