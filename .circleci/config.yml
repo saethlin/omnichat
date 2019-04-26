@@ -24,7 +24,7 @@ jobs:
           key: project-cache
           paths:
             - "./target"
-            - "~/.cargo"
+            - "/usr/local/cargo"
             - "./tiny_slack/target"
             - "./discord/target"
 
