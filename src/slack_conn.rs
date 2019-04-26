@@ -161,7 +161,6 @@ impl SlackConn {
         }
 
         let msg = serde_json::from_str::<slack::rtm::Event>(&message);
-        error!("{:#?}", msg);
 
         use slack::rtm;
         match msg {
@@ -254,8 +253,6 @@ impl SlackConn {
                     body = body.replace("&gt;", ">");
 
                     let contents = body.trim().to_string();
-
-                    error!("got a message");
 
                     let _ = self.tui_sender.send(ConnEvent::Message(Message {
                         server: self.team_name.clone(),
@@ -523,7 +520,6 @@ impl SlackConn {
                             }
                             Ping(m) => Some(Pong(m)),
                             Text(text) => {
-                                //error!("{}", format_json(text.as_bytes()));
                                 thread_conn.write().unwrap().process_slack_message(&text);
                                 None
                             }
