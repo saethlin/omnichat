@@ -1,6 +1,6 @@
 use crate::bimap::BiMap;
 use crate::conn;
-use crate::conn::{ConnEvent, DateTime, IString};
+use crate::conn::{ConnEvent, DateTime};
 use log::error;
 use std::borrow::Borrow;
 use std::sync::mpsc::SyncSender;
@@ -9,10 +9,10 @@ use futures::{Future, Stream};
 
 pub struct DiscordConn {
     token: String,
-    guild_name: IString,
+    guild_name: String,
     guild_id: discord::Snowflake,
-    channel_ids: BiMap<IString, discord::Snowflake>,
-    last_message_ids: BiMap<IString, discord::Snowflake>,
+    channel_ids: BiMap<String, discord::Snowflake>,
+    last_message_ids: BiMap<String, discord::Snowflake>,
     tui_sender: std::sync::mpsc::SyncSender<ConnEvent>,
     last_typing_message: chrono::DateTime<chrono::Utc>,
 }
@@ -83,7 +83,7 @@ impl DiscordConn {
         let guilds = deserialize_or_log!(guild_resp, Vec<::discord::Guild>)?;
 
         let guild = guilds.into_iter().find(|g| g.name == server).unwrap();
-        let guild_name = IString::from(guild.name.as_str());
+        let guild_name = String::from(guild.name.as_str());
         let guild_id = guild.id.clone();
 
         let me_resp = client
@@ -147,11 +147,11 @@ impl DiscordConn {
             .filter(|c| c.name.is_some())
             .collect();
 
-        let mut channel_ids: BiMap<IString, discord::Snowflake> = BiMap::new();
-        let mut last_message_ids: BiMap<IString, discord::Snowflake> = BiMap::new();
+        let mut channel_ids: BiMap<String, discord::Snowflake> = BiMap::new();
+        let mut last_message_ids: BiMap<String, discord::Snowflake> = BiMap::new();
         for channel in &channels {
             let name = channel.name.clone().unwrap();
-            let name = IString::from(name);
+            let name = String::from(name);
             channel_ids.insert(name.clone(), channel.id.clone());
             last_message_ids.insert(name, channel.last_message_id.clone().unwrap());
         }
@@ -164,7 +164,7 @@ impl DiscordConn {
                 .iter()
                 .map(|c| crate::tui::Channel {
                     messages: Vec::new(),
-                    name: IString::from(c.name.clone().unwrap_or(String::from("NONAME"))),
+                    name: String::from(c.name.clone().unwrap_or(String::from("NONAME"))),
                     read_at: crate::conn::DateTime::now(),
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
@@ -180,7 +180,7 @@ impl DiscordConn {
 
         let mut history_responses = Vec::new();
         for channel in channels.into_iter().filter(|c| c.name.is_some()) {
-            let channel_name = IString::from(channel.name.unwrap().borrow());
+            let channel_name = String::from(channel.name.unwrap().borrow());
             let token = token.to_string();
             let id = channel.id.clone();
 
@@ -211,7 +211,7 @@ impl DiscordConn {
                             .unwrap_or_else(|_| DateTime::now());
 
                         crate::conn::Message {
-                            sender: IString::from(message.author.username),
+                            sender: String::from(message.author.username),
                             server: guild_name.clone(),
                             timestamp,
                             contents: String::from(message.content),
@@ -325,9 +325,11 @@ impl DiscordConn {
                                             "d": {
                                                 "token": i_token,
                                                 "properties": {
-                                                    "$os": ::std::env::consts::OS,
-                                                    "$browser": "other",
-                                                    "$device": "other",
+                                                    "$os": "Linux",
+                                                    "$browser": "Discord Client",
+                                                    "$device": "Firefox",
+                                                    "$client_version": "0.0.9",
+                                                    "$release_channel": "unknown",
                                                 },
                                                 "large_threshold": 250,
                                                 "compress": true,
@@ -388,7 +390,7 @@ impl DiscordConn {
                                     channel: channel.clone(),
                                     contents: content,
                                     reactions: Vec::new(),
-                                    sender: IString::from(username.clone()),
+                                    sender: String::from(username.clone()),
                                     timestamp: DateTime::now(),
                                 }))
                                 .unwrap();

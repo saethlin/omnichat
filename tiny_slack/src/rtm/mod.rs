@@ -1,7 +1,7 @@
 use crate::id::*;
 use crate::timestamp::Timestamp;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 pub enum Event {
@@ -28,6 +28,7 @@ pub enum Event {
         attachments: Vec<Attachment>,
         #[serde(default)]
         files: Vec<File>,
+        message: Option<Message>,
     },
     ReactionAdded {
         item: Reactable,
@@ -42,7 +43,21 @@ pub enum Event {
     UserTyping {},
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
+pub struct Message {
+    pub edited: Option<Edit>,
+    pub text: Option<String>,
+    pub ts: Timestamp,
+    pub user: UserId,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Edit {
+    pub user: UserId,
+    pub ts: Timestamp,
+}
+
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type")]
 pub enum Reactable {
@@ -52,18 +67,18 @@ pub enum Reactable {
     },
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Reaction {
     pub name: String,
     pub count: u32,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct File {
     pub url_private: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Attachment {
     pub pretext: Option<String>,
     pub text: Option<String>,

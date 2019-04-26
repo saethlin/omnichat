@@ -1,4 +1,3 @@
-pub use inlinable_string::InlinableString as IString;
 use termion;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -48,12 +47,12 @@ impl DateTime {
 }
 
 pub struct Message {
-    pub server: IString,
-    pub channel: IString,
-    pub sender: IString,
+    pub server: String,
+    pub channel: String,
+    pub sender: String,
     pub contents: String,
     pub timestamp: DateTime,
-    pub reactions: Vec<(IString, usize)>,
+    pub reactions: Vec<(String, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialOrd, PartialEq, Eq, Ord)]
@@ -65,17 +64,15 @@ pub enum ChannelType {
 /// Events that a connection can send to a frontend
 pub enum ConnEvent {
     Message(Message),
-    /*
     MessageEdited {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
         contents: String,
         timestamp: DateTime,
     },
-    */
     HistoryLoaded {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
         messages: Vec<Message>,
         read_at: DateTime,
     },
@@ -83,21 +80,21 @@ pub enum ConnEvent {
     Error(String),
     ServerConnected(crate::tui::Server),
     MarkChannelRead {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
         read_at: DateTime,
     },
     ReactionAdded {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
         timestamp: DateTime,
-        reaction: IString,
+        reaction: String,
     },
     ReactionRemoved {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
         timestamp: DateTime,
-        reaction: IString,
+        reaction: String,
     },
     Resize,
 }
@@ -106,28 +103,28 @@ pub enum ConnEvent {
 #[derive(Debug)]
 pub enum TuiEvent {
     SendMessage {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
         contents: String,
     },
     MarkRead {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
     },
     Command {
-        server: IString,
-        channel: IString,
-        command: IString,
+        server: String,
+        channel: String,
+        command: String,
     },
     AddReaction {
-        server: IString,
-        channel: IString,
-        reaction: IString,
+        server: String,
+        channel: String,
+        reaction: String,
         timestamp: DateTime,
     },
     SendTyping {
-        server: IString,
-        channel: IString,
+        server: String,
+        channel: String,
     },
 }
 

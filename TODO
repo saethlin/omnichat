@@ -1,8 +1,0 @@
-Use unicode-width to deduce the length of a message as printed to the console
-
-include default emoji in autocomplete results
-
-Support for muted channels
-Make sure all users are loaded
-
-Wrap or scroll server names

@@ -1,5 +1,4 @@
-use crate::conn;
-use crate::conn::{DateTime, IString};
+use crate::conn::{self, DateTime};
 use chrono::Timelike;
 
 lazy_static::lazy_static! {
@@ -31,9 +30,9 @@ pub struct ChanMessage {
     formatted_width: Option<usize>,
     pub raw: String,
     formatted: String,
-    sender: IString,
+    sender: String,
     timestamp: DateTime,
-    reactions: Vec<(IString, usize)>,
+    reactions: Vec<(String, usize)>,
 }
 
 impl From<conn::Message> for ChanMessage {
@@ -76,12 +75,10 @@ impl ChanMessage {
     }
 
     // TODO: This should probably just go away if we have immutable message history
-    /*
     pub fn edit_to(&mut self, contents: String) {
         self.raw = contents;
         self.formatted_width = None;
     }
-    */
 
     pub fn formatted_to(&mut self, width: usize) -> &str {
         use std::fmt::Write;

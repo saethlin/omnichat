@@ -6,12 +6,11 @@ build = "build.rs"
 edition = "2018"
 
 [dependencies]
-inlinable_string = { version = "0.1", features = ["serde"] }
 websocket = "0.22"
 serde = "1.0"
 serde_json = "1.0"
 serde_derive = "1.0"
-toml = "0.4"
+toml = "0.5"
 lazy_static = "1.0"
 regex-automata = "0.1"
 futures = "0.1"

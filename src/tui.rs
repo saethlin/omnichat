@@ -1,5 +1,5 @@
 use crate::chan_message::ChanMessage;
-use crate::conn::{ChannelType, Completer, ConnEvent, DateTime, IString, Message, TuiEvent};
+use crate::conn::{ChannelType, Completer, ConnEvent, DateTime, Message, TuiEvent};
 use crate::cursor_vec::CursorVec;
 use crate::DFAExtension;
 use log::error;
@@ -52,7 +52,7 @@ pub struct DirtyIndicators {
 pub struct Server {
     pub channels: Vec<Channel>,
     pub completer: Option<Box<Completer>>,
-    pub name: IString,
+    pub name: String,
     pub current_channel: usize,
     pub channel_scroll_offset: usize,
     pub sender: SyncSender<TuiEvent>,
@@ -66,7 +66,7 @@ impl Server {
 
 pub struct Channel {
     pub messages: Vec<ChanMessage>,
-    pub name: IString,
+    pub name: String,
     pub read_at: DateTime,
     pub message_scroll_offset: usize,
     pub message_buffer: String,
@@ -445,7 +445,7 @@ impl Tui {
             let _ = self.servers.get_mut().sender.send(TuiEvent::Command {
                 server: current_server_name,
                 channel: current_channel_name,
-                command: IString::from(&contents[1..]),
+                command: String::from(&contents[1..]),
             });
         } else {
             let _ = self.servers.get_mut().sender.send(TuiEvent::SendMessage {
@@ -877,8 +877,6 @@ impl Tui {
             ConnEvent::Message(message) => {
                 self.add_message(message);
             }
-            // TODO: Rebuild this around an immutable message history
-            /*
             ConnEvent::MessageEdited {
                 server,
                 channel,
@@ -911,10 +909,10 @@ impl Tui {
                         );
                         None
                     }) {
+                    error!("got edit to {:?}", contents);
                     msg.edit_to(contents);
                     }
             }
-            */
             ConnEvent::ReactionAdded {
                 server,
                 channel,

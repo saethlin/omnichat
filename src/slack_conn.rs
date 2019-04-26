@@ -1,6 +1,6 @@
 use crate::bimap::BiMap;
 use crate::conn;
-use crate::conn::{ChannelType, Completer, ConnEvent, IString, Message, TuiEvent};
+use crate::conn::{ChannelType, Completer, ConnEvent, Message, TuiEvent};
 use crate::DFAExtension;
 use futures::sync::mpsc;
 use futures::{Future, Sink, Stream};
@@ -84,7 +84,7 @@ struct MessageAck {
 
 struct PendingMessage {
     id: u32,
-    channel: IString,
+    channel: String,
 }
 
 impl SlackConn {
@@ -160,8 +160,11 @@ impl SlackConn {
             }
         }
 
+        let msg = serde_json::from_str::<slack::rtm::Event>(&message);
+        error!("{:#?}", msg);
+
         use slack::rtm;
-        match ::serde_json::from_str::<::slack::rtm::Event>(&message) {
+        match msg {
             Ok(rtm::Event::ReactionAdded { item, reaction, .. }) => {
                 use slack::rtm::Reactable;
                 let (channel_id, timestamp) = match item {
@@ -199,56 +202,75 @@ impl SlackConn {
                 attachments,
                 files,
                 bot_id,
+                message: edited_message,
             }) => {
-                if let Some(sender) = user
-                    .and_then(|id| self.users.get_right(&id))
-                    .cloned()
-                    .or_else(|| username.map(IString::from))
-                    .or_else(|| bot_id.map(|id| IString::from(id.as_str())))
-                {
-                    use std::fmt::Write;
-                    let mut body = match text {
-                        Some(ref t) => self.convert_mentions(t),
-                        None => String::new(),
-                    };
-
-                    for f in &files {
-                        let _ = write!(body, "\n{}", f.url_private);
+                if let Some(edited_message) = edited_message {
+                    // This check is how we verify that this is _actually_ an edit
+                    if edited_message.edited.is_some() {
+                        let _ = self.tui_sender.send(ConnEvent::MessageEdited {
+                            server: self.team_name.clone(),
+                            channel: self
+                                .channels
+                                .get_right(&channel)
+                                .cloned()
+                                .unwrap_or_else(|| channel.to_string().into()),
+                            contents: edited_message.text.unwrap_or_default(),
+                            timestamp: edited_message.ts.into(),
+                        });
                     }
+                } else {
+                    if let Some(sender) = user
+                        .and_then(|id| self.users.get_right(&id))
+                        .cloned()
+                        .or_else(|| username.map(String::from))
+                        .or_else(|| bot_id.map(|id| String::from(id.as_str())))
+                    {
+                        use std::fmt::Write;
+                        let mut body = match text {
+                            Some(ref t) => self.convert_mentions(t),
+                            None => String::new(),
+                        };
 
-                    for a in &attachments {
-                        if let Some(ref title) = a.title {
-                            let _ = write!(body, "\n{}", title);
-                        }
-                        if let Some(ref pretext) = a.pretext {
-                            let _ = write!(body, "\n{}", pretext);
-                        }
-                        if let Some(ref text) = a.text {
-                            let _ = write!(body, "\n{}", text);
-                        }
-                        for f in &a.files {
+                        for f in &files {
                             let _ = write!(body, "\n{}", f.url_private);
                         }
+
+                        for a in &attachments {
+                            if let Some(ref title) = a.title {
+                                let _ = write!(body, "\n{}", title);
+                            }
+                            if let Some(ref pretext) = a.pretext {
+                                let _ = write!(body, "\n{}", pretext);
+                            }
+                            if let Some(ref text) = a.text {
+                                let _ = write!(body, "\n{}", text);
+                            }
+                            for f in &a.files {
+                                let _ = write!(body, "\n{}", f.url_private);
+                            }
+                        }
+
+                        body = body.replace("&amp;", "&");
+                        body = body.replace("&lt;", "<");
+                        body = body.replace("&gt;", ">");
+
+                        let contents = body.trim().to_string();
+
+                        error!("got a message");
+
+                        let _ = self.tui_sender.send(ConnEvent::Message(Message {
+                            server: self.team_name.clone(),
+                            channel: self
+                                .channels
+                                .get_right(&channel)
+                                .cloned()
+                                .unwrap_or_else(|| channel.to_string().into()),
+                            sender,
+                            timestamp: ts.into(),
+                            reactions: Vec::new(),
+                            contents,
+                        }));
                     }
-
-                    body = body.replace("&amp;", "&");
-                    body = body.replace("&lt;", "<");
-                    body = body.replace("&gt;", ">");
-
-                    let contents = body.trim().to_string();
-
-                    let _ = self.tui_sender.send(ConnEvent::Message(Message {
-                        server: self.team_name.clone(),
-                        channel: self
-                            .channels
-                            .get_right(&channel)
-                            .cloned()
-                            .unwrap_or_else(|| channel.to_string().into()),
-                        sender,
-                        timestamp: ts.into(),
-                        reactions: Vec::new(),
-                        contents,
-                    }));
                 }
             }
             Ok(rtm::Event::ChannelMarked { channel, ts, .. }) => {
@@ -269,12 +291,11 @@ impl SlackConn {
                     channel: self
                         .channels
                         .get_right(&channel.into())
-                        .unwrap_or(&IString::from(channel.as_str()))
+                        .unwrap_or(&String::from(channel.as_str()))
                         .clone(),
                     read_at: ts.into(),
                 });
             }
-
             _ => {}
         }
     }
@@ -282,12 +303,12 @@ impl SlackConn {
 
 pub struct SlackConn {
     token: String,
-    team_name: IString,
-    users: BiMap<::slack::UserId, IString>,
-    channels: BiMap<::slack::ConversationId, IString>,
-    emoji: Vec<IString>,
+    team_name: String,
+    users: BiMap<::slack::UserId, String>,
+    channels: BiMap<::slack::ConversationId, String>,
+    emoji: Vec<String>,
     last_typing_message: chrono::DateTime<chrono::Utc>,
-    my_name: IString,
+    my_name: String,
     input_sender: ::futures::sync::mpsc::Sender<::websocket::OwnedMessage>,
     tui_sender: SyncSender<ConnEvent>,
     pending_messages: Vec<PendingMessage>,
@@ -335,9 +356,9 @@ impl SlackConn {
         let users_response = deserialize_or_log!(users_response, users::ListResponse)
             .map_err(|e| error!("{:#?}", e))?;
 
-        let mut users: BiMap<::slack::UserId, IString> = BiMap::new();
+        let mut users: BiMap<::slack::UserId, String> = BiMap::new();
         for user in users_response.members {
-            users.insert(user.id, IString::from(user.name));
+            users.insert(user.id, String::from(user.name));
         }
 
         let conversations_response = conversations_recv.wait().map_err(|e| error!("{:#?}", e))?;
@@ -377,7 +398,7 @@ impl SlackConn {
                     _ => None,
                 })
         {
-            let name: IString = name;
+            let name: String = name;
             channels.insert(id, name.clone());
             tui_channels.push(crate::tui::Channel {
                 messages: Vec::new(),
@@ -397,8 +418,8 @@ impl SlackConn {
 
         let websocket_url = connect_response.url.clone();
 
-        let my_name = IString::from(connect_response.slf.name);
-        let team_name = IString::from(connect_response.team.name);
+        let my_name = String::from(connect_response.slf.name);
+        let team_name = String::from(connect_response.team.name);
         let (input_sender, input_channel) = mpsc::channel(0);
 
         // Give the emoji handle as long as possible to complete
@@ -410,7 +431,7 @@ impl SlackConn {
             .emoji
             .unwrap_or_default()
             .keys()
-            .map(|e| IString::from(e.as_str()))
+            .map(|e| String::from(e.as_str()))
             .collect::<Vec<_>>();
         emoji.sort();
 
@@ -504,6 +525,7 @@ impl SlackConn {
                             }
                             Ping(m) => Some(Pong(m)),
                             Text(text) => {
+                                //error!("{}", format_json(text.as_bytes()));
                                 thread_conn.write().unwrap().process_slack_message(&text);
                                 None
                             }
@@ -574,7 +596,7 @@ impl SlackConn {
                         .user
                         .and_then(|name| handle.users.get_right(&name).cloned())
                         .or_else(|| msg.username.clone())
-                        .or_else(|| msg.bot_id.map(|b| IString::from(b.to_string())))
+                        .or_else(|| msg.bot_id.map(|b| String::from(b.to_string())))
                         .unwrap_or_else(|| "UNKNOWNUSER".into());
                     Message {
                         server: team_name.clone(),
@@ -609,9 +631,9 @@ impl SlackConn {
                 .iter()
                 .map(|(_, name)| name)
                 .chain(&[
-                    IString::from("channel"),
-                    IString::from("here"),
-                    IString::from("everyone"),
+                    String::from("channel"),
+                    String::from("here"),
+                    String::from("everyone"),
                 ])
                 .filter(|name| name.starts_with(&word[1..]))
                 .map(|s| String::from("@") + s)
@@ -664,7 +686,7 @@ impl SlackConn {
             id += 1;
         }
         self.pending_messages.push(PendingMessage {
-            channel: IString::from(channel),
+            channel: String::from(channel),
             id,
         });
 
@@ -700,7 +722,7 @@ impl SlackConn {
             id += 1;
         }
         self.pending_messages.push(PendingMessage {
-            channel: IString::from(channel),
+            channel: String::from(channel),
             id,
         });
 
@@ -772,7 +794,7 @@ impl SlackConn {
 
     fn add_reaction(&self, channel: &str, reaction: &str, timestamp: conn::DateTime) {
         let token = self.token.clone();
-        let name = IString::from(reaction);
+        let name = String::from(reaction);
 
         let channel = match self.channels.get_left(channel) {
             Some(c) => *c,
@@ -853,7 +875,7 @@ impl SlackConn {
 
 #[derive(Deserialize)]
 struct Reaction {
-    name: IString,
+    name: String,
     count: u32,
 }
 
@@ -875,7 +897,7 @@ struct File {
 struct HistoryMessage {
     text: Option<String>,
     user: Option<slack::UserId>,
-    username: Option<IString>,
+    username: Option<String>,
     bot_id: Option<slack::BotId>,
     ts: slack::Timestamp,
     #[serde(default)]
