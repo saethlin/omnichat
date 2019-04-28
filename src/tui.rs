@@ -286,6 +286,10 @@ impl Tui {
 
         let previous_server_name = self.servers.get().name.clone();
         self.servers.sort_by_key(|s| s.name.clone());
+        // TODO properly pin the client tab to the far-left position
+        // This is a temporary hack, and may suggest that instead of a CursorVec I should have
+        // functions like current_server() as I have current_channel()
+        self.servers.sort_by_key(|s| &s.name != "Client");
         while self.servers.get().name != previous_server_name {
             self.servers.next();
         }
