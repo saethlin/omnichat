@@ -405,8 +405,6 @@ impl SlackConn {
             });
         }
 
-        tui_channels.sort_by(|c1, c2| c1.name.cmp(&c2.name));
-
         let connect_response = connect_recv.wait().map_err(|e| error!("{:#?}", e))?;
         let connect_response = deserialize_or_log!(connect_response, rtm::ConnectResponse)
             .map_err(|e| error!("{:#?}", e))?;
@@ -444,11 +442,9 @@ impl SlackConn {
         }));
 
         let (tui_send, tui_recv) = std::sync::mpsc::sync_channel(100);
+
         let _ = sender.send(ConnEvent::ServerConnected(crate::tui::Server {
-            current_channel: tui_channels
-                .iter()
-                .position(|c| c.name == "general")
-                .unwrap_or(0),
+            current_channel: 0,
             channels: tui_channels,
             completer: Some(Box::new(SlackCompleter {
                 inner: connection.clone(),

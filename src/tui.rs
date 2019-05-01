@@ -274,6 +274,12 @@ impl Tui {
             .channels
             .sort_by_key(|c| c.channel_type == ChannelType::DirectMessage);
 
+        server.current_channel = server
+            .channels
+            .iter()
+            .position(|c| c.name == "general")
+            .unwrap_or(0);
+
         self.servers.push(server);
 
         self.longest_channel_name = self
@@ -889,7 +895,6 @@ impl Tui {
                         );
                         None
                     }) {
-                    error!("got edit to {:?}", contents);
                     msg.edit_to(contents);
                     }
             }
