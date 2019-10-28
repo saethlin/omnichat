@@ -75,7 +75,7 @@ pub struct Reaction {
 
 #[derive(Deserialize, Debug)]
 pub struct File {
-    pub url_private: String,
+    pub url_private: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]

@@ -41,7 +41,7 @@ pub struct Tui {
 
 pub struct Server {
     pub channels: Vec<Channel>,
-    pub completer: Option<Box<Completer>>,
+    pub completer: Option<Box<dyn Completer>>,
     pub name: String,
     pub current_channel: usize,
     pub channel_scroll_offset: usize,

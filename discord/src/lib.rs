@@ -42,7 +42,6 @@ pub struct User {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct GuildMember {
     pub user: User,
     pub nick: Option<String>,

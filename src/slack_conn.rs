@@ -110,6 +110,9 @@ impl SlackConn {
         text = text.replace("<!here>", "@here");
         text = text.replace("<!channel>", "@channel");
         text = text.replace("<!everyone>", "@everyone");
+        text = text.replace("&amp;", "&");
+        text = text.replace("&lt;", "<");
+        text = text.replace("&gt;", ">");
 
         text
     }
@@ -142,14 +145,9 @@ impl SlackConn {
                 .iter()
                 .position(|m| m.id == ack.reply_to)
             {
-                let mut body = ack.text.clone();
-                body = body.replace("&amp;", "&");
-                body = body.replace("&lt;", "<");
-                body = body.replace("&gt;", ">");
-
                 let _ = self.tui_sender.send(ConnEvent::Message(Message {
                     channel: self.pending_messages[index].channel.clone(),
-                    contents: self.convert_mentions(&body),
+                    contents: self.convert_mentions(&ack.text),
                     reactions: Vec::new(),
                     sender: self.my_name.clone(),
                     server: self.team_name.clone(),
@@ -213,7 +211,8 @@ impl SlackConn {
                                 .get_right(&channel)
                                 .cloned()
                                 .unwrap_or_else(|| channel.to_string()),
-                            contents: edited_message.text.unwrap_or_default(),
+                            contents: self
+                                .convert_mentions(&edited_message.text.unwrap_or_default()),
                             timestamp: edited_message.ts.into(),
                         });
                     }
@@ -230,7 +229,7 @@ impl SlackConn {
                     };
 
                     for f in &files {
-                        let _ = write!(body, "\n{}", f.url_private);
+                        f.url_private.as_ref().map(|url| write!(body, "\n{}", url));
                     }
 
                     for a in &attachments {
@@ -244,7 +243,7 @@ impl SlackConn {
                             let _ = write!(body, "\n{}", text);
                         }
                         for f in &a.files {
-                            let _ = write!(body, "\n{}", f.url_private);
+                            f.url_private.as_ref().map(|url| write!(body, "\n{}", url));
                         }
                     }
 
@@ -880,7 +879,7 @@ struct Attachment {
 
 #[derive(Deserialize)]
 struct File {
-    url_private: String,
+    url_private: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -907,7 +906,9 @@ impl HistoryMessage {
         };
 
         for f in &self.files {
-            let _ = write!(body, "\n{}", f.url_private);
+            if let Some(url) = &f.url_private {
+                let _ = write!(body, "\n{}", url);
+            }
         }
 
         for a in &self.attachments {
@@ -918,10 +919,16 @@ impl HistoryMessage {
                 let _ = write!(body, "\n{}", pretext);
             }
             if let Some(ref text) = a.text {
-                let _ = write!(body, "\n{}", text);
+                let mut it = text.splitn(2, '\n');
+                let _ = write!(body, "\n{}", it.next().unwrap_or_default());
+                if it.next().is_some() {
+                    body.extend("\n...".chars());
+                }
             }
             for f in &a.files {
-                let _ = write!(body, "\n{}", f.url_private);
+                if let Some(url) = &f.url_private {
+                    let _ = write!(body, "\n{}", url);
+                }
             }
         }
 
