@@ -178,11 +178,9 @@ impl Tui {
     }
 
     fn update_history(&mut self) {
-        if self.current_channel().messages.is_empty() {
-            let _ = self.servers.get().sender.send(TuiEvent::GetHistory {
-                channel: self.current_channel().name.clone(),
-            });
-        }
+        let _ = self.servers.get().sender.send(TuiEvent::GetHistory {
+            channel: self.current_channel().name.clone(),
+        });
     }
 
     fn current_channel(&self) -> &Channel {
