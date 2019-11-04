@@ -50,7 +50,9 @@ pub struct Server {
 
 impl Server {
     fn has_unreads(&self) -> bool {
-        self.channels.iter().any(|c| c.num_unreads() > 0)
+        self.channels
+            .iter()
+            .any(|c| c.num_unreads() > 0 || c.is_unread())
     }
 }
 
@@ -58,12 +60,17 @@ pub struct Channel {
     pub messages: Vec<ChanMessage>,
     pub name: String,
     pub read_at: DateTime,
+    pub latest: DateTime,
     pub message_scroll_offset: usize,
     pub message_buffer: String,
     pub channel_type: ChannelType,
 }
 
 impl Channel {
+    fn is_unread(&self) -> bool {
+        self.latest > self.read_at
+    }
+
     fn num_unreads(&self) -> usize {
         self.messages
             .iter()
@@ -132,11 +139,13 @@ impl Tui {
         });
 
         // Initialize with the Client's server which displays an error log
+        let now = DateTime::now();
         let client = Server {
             channels: vec![Channel {
                 messages: Vec::new(),
                 name: "Errors".into(),
-                read_at: DateTime::now(),
+                read_at: now,
+                latest: now,
                 message_scroll_offset: 0,
                 message_buffer: String::new(),
                 channel_type: ChannelType::Normal,
@@ -168,6 +177,14 @@ impl Tui {
         self.sender.clone()
     }
 
+    fn update_history(&mut self) {
+        if self.current_channel().messages.is_empty() {
+            let _ = self.servers.get().sender.send(TuiEvent::GetHistory {
+                channel: self.current_channel().name.clone(),
+            });
+        }
+    }
+
     fn current_channel(&self) -> &Channel {
         let server = self.servers.get();
         &server.channels[server.current_channel]
@@ -193,24 +210,27 @@ impl Tui {
         self.reset_current_unreads();
         self.servers.next();
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
+        self.update_history();
     }
 
     fn previous_server(&mut self) {
         self.reset_current_unreads();
         self.servers.prev();
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
+        self.update_history();
     }
 
     fn next_channel_unread(&mut self) {
         let server = self.servers.get_mut();
         if let Some(index) = (0..server.channels.len())
             .map(|i| (server.current_channel + i) % server.channels.len())
-            .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+            .find(|i| server.channels[*i].is_unread() && *i != server.current_channel)
         {
             self.reset_current_unreads();
             self.servers.get_mut().current_channel = index;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
+        self.update_history();
     }
 
     fn previous_channel_unread(&mut self) {
@@ -221,7 +241,7 @@ impl Tui {
                 .map(|i| {
                     (server.current_channel + server.channels.len() - i) % server.channels.len()
                 })
-                .find(|i| server.channels[*i].num_unreads() > 0 && *i != server.current_channel)
+                .find(|i| server.channels[*i].is_unread() && *i != server.current_channel)
         };
         match index {
             None => {}
@@ -231,6 +251,7 @@ impl Tui {
             }
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
+        self.update_history();
     }
 
     fn next_channel(&mut self) {
@@ -241,6 +262,7 @@ impl Tui {
             server.current_channel = 0;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
+        self.update_history();
     }
 
     fn previous_channel(&mut self) {
@@ -252,6 +274,7 @@ impl Tui {
             server.current_channel = server.channels.len() - 1;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
+        self.update_history();
     }
 
     // Take by value because we need to own the allocation
@@ -386,6 +409,9 @@ impl Tui {
                 {
                     self.reset_current_unreads();
                     self.servers.get_mut().current_channel = index;
+                    self.cursor_pos =
+                        min(self.cursor_pos, self.current_channel().message_buffer.len());
+                    self.update_history();
                 } else {
                     error!("unknown channel {}", requested_channel);
                 }
@@ -399,6 +425,9 @@ impl Tui {
                     while self.servers.tell() != index {
                         self.servers.next();
                     }
+                    self.cursor_pos =
+                        min(self.cursor_pos, self.current_channel().message_buffer.len());
+                    self.update_history();
                 } else {
                     error!("unknown server {}", requested_server);
                 }
@@ -489,7 +518,7 @@ impl Tui {
 
         // Draw all the messages by looping over them in reverse
         let num_unreads = self.current_channel().num_unreads();
-        let mut draw_unread_marker = num_unreads > 0;
+        let mut draw_unread_marker = self.current_channel().is_unread();
 
         let offset = self.current_channel().message_scroll_offset;
 
@@ -617,7 +646,7 @@ impl Tui {
                     let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), style::Bold);
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
                     let _ = write!(render_buffer, "{}", style::Reset);
-                } else if channel.num_unreads() > 0 {
+                } else if channel.is_unread() {
                     let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), Fg(color::Red));
                     write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
                     let _ = write!(render_buffer, "{}", style::Reset);
@@ -957,7 +986,6 @@ impl Tui {
                 messages,
                 server,
                 channel,
-                read_at,
             } => {
                 if let Some(c) = self
                     .servers
@@ -970,7 +998,6 @@ impl Tui {
                     }
                     c.messages
                         .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
-                    c.read_at = read_at;
                 } else {
                     error!(
                         "Got history for an unknown channel {} in server {}",
@@ -985,6 +1012,7 @@ impl Tui {
                 server,
                 channel,
                 read_at,
+                latest,
             } => {
                 let current_channel_name = self.current_channel().name.clone();
                 if let Some(c) = self
@@ -994,7 +1022,8 @@ impl Tui {
                     .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
                 {
                     if current_channel_name != c.name {
-                        c.read_at = read_at;
+                        read_at.map(|t| c.read_at = t);
+                        latest.map(|t| c.latest = t);
                     }
                 }
             }

@@ -158,6 +158,8 @@ pub enum Conversation {
         is_pending_ext_shared: bool,
         is_private: bool,
         is_shared: bool,
+        is_thread_only: Option<bool>,
+        last_read: Option<Timestamp>,
         name: String,
         name_normalized: String,
         num_members: u32,
@@ -208,7 +210,7 @@ pub enum Conversation {
     },
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ConversationPurpose {
     #[serde(deserialize_with = "deserialize_userid_or_empty")]
     pub creator: Option<UserId>,
@@ -216,7 +218,7 @@ pub struct ConversationPurpose {
     pub value: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ConversationTopic {
     #[serde(deserialize_with = "deserialize_userid_or_empty")]
     pub creator: Option<UserId>,
@@ -274,6 +276,7 @@ pub enum ConversationInfo {
         name: String,
         name_normalized: String,
         parent_conversation: Option<ConversationId>,
+        pending_connected_teamp_id: Vec<TeamId>,
         pending_shared: Vec<String>,
         previous_names: Vec<String>,
         purpose: ConversationPurpose,
@@ -308,25 +311,30 @@ pub enum ConversationInfo {
         topic: ConversationTopic,
         unlinked: u32,
     },
-    OpenDirectMessage {
+    DirectMessage {
         created: Timestamp,
         id: ConversationId,
+        is_archived: Option<bool>,
         is_im: bool,
         is_open: bool,
         is_org_shared: bool,
         last_read: Timestamp,
+        latest: Option<LatestInfo>,
         priority: f32,
         unread_count: u32,
         unread_count_display: u32,
         user: UserId,
     },
-    ClosedDirectMessage {
-        created: Timestamp,
-        id: ConversationId,
-        is_im: bool,
-        is_org_shared: bool,
-        is_user_deleted: bool,
-        priority: f32,
-        user: UserId,
-    },
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct LatestInfo {
+    pub client_msg_id: Option<String>,
+    pub team: Option<TeamId>,
+    pub text: String,
+    pub ts: Timestamp,
+    #[serde(rename = "type")]
+    pub ty: String,
+    pub user: Option<UserId>,
+    pub username: Option<String>,
 }

@@ -26,12 +26,10 @@ openssl = { version = "0.10", features = ["vendored"] }
 serde_urlencoded = "0.6"
 slack = {path = "tiny_slack"}
 discord = {path = "discord"}
-weeqwest = {git = "https://github.com/saethlin/weeqwest"}
+weeqwest = {git = "https://github.com/saethlin/weeqwest", features=["client"]}
 
 [build-dependencies]
 regex-automata = "0.1"
 
 [profile.release]
-lto = true
 debug = 2
-panic = 'abort'

@@ -275,7 +275,8 @@ impl SlackConn {
                         .get_right(&channel.into())
                         .unwrap_or(&channel.as_str().into())
                         .clone(),
-                    read_at: ts.into(),
+                    read_at: Some(ts.into()),
+                    latest: None,
                 });
             }
 
@@ -287,7 +288,8 @@ impl SlackConn {
                         .get_right(&channel.into())
                         .unwrap_or(&String::from(channel.as_str()))
                         .clone(),
-                    read_at: ts.into(),
+                    read_at: Some(ts.into()),
+                    latest: None,
                 });
             }
             _ => {}
@@ -324,26 +326,18 @@ impl SlackConn {
         // Launch all of the requests
         use slack::http::{conversations, emoji, rtm, users};
 
-        let emoji_recv = client
-            .get(&slack_url("emoji.list", &token, &()))
-            .unwrap()
-            .send();
-        let connect_recv = client
-            .get(&slack_url("rtm.connect", &token, &()))
-            .unwrap()
-            .send();
+        let emoji_recv = client.get(&slack_url("emoji.list", &token, &())).unwrap();
+        let connect_recv = client.get(&slack_url("rtm.connect", &token, &())).unwrap();
         let users_recv = client
             .get(&slack_url("users.list", &token, users::ListRequest::new()))
-            .unwrap()
-            .send();
+            .unwrap();
 
         use slack::http::conversations::ChannelType::*;
         let mut req = conversations::ListRequest::new();
         req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
         let conversations_recv = client
             .get(&slack_url("conversations.list", &token, req))
-            .unwrap()
-            .send();
+            .unwrap();
 
         // We need to know about the users first so that we can digest the list of conversations
         let users_response = users_recv.wait().map_err(|e| error!("{:#?}", e))?;
@@ -392,12 +386,13 @@ impl SlackConn {
                     _ => None,
                 })
         {
-            let name: String = name;
             channels.insert(id, name.clone());
+            let now = conn::DateTime::now();
             tui_channels.push(crate::tui::Channel {
                 messages: Vec::new(),
                 name,
-                read_at: conn::DateTime::now(),
+                read_at: now,
+                latest: now,
                 message_scroll_offset: 0,
                 message_buffer: String::new(),
                 channel_type,
@@ -452,19 +447,6 @@ impl SlackConn {
             channel_scroll_offset: 0,
             sender: tui_send,
         }));
-        /*
-            name: team_name.clone(),
-            channels: channel_names
-                .iter()
-                .cloned()
-                .zip(channel_types.into_iter())
-                .collect(),
-            completer: Some(Box::new(SlackCompleter {
-                inner: connection.clone(),
-            })),
-            sender: tui_send,
-        });
-        */
 
         let conn = connection.clone();
         // Create a background thread that will handle events from the TUI
@@ -493,6 +475,7 @@ impl SlackConn {
                         .read()
                         .unwrap()
                         .add_reaction(&channel, &reaction, timestamp),
+                    TuiEvent::GetHistory { channel } => conn.read().unwrap().get_history(&channel),
                 }
             }
         });
@@ -530,83 +513,77 @@ impl SlackConn {
 
         // Launch all the history requests
         for (conversation_id, conversation_name) in channels.clone() {
-            let url = format!(
-                "https://slack.com/api/conversations.info?token={}&{}",
-                token,
-                ::serde_urlencoded::to_string(&conversations::InfoRequest::new(conversation_id))
-                    .unwrap_or_default()
-            );
+            use slack::http::{channels, groups};
 
-            let info_response = client.get(&url).unwrap().send();
+            let url = match conversation_id {
+                ::slack::ConversationId::Channel(channel_id) => {
+                    let req = channels::InfoRequest::new(channel_id);
+                    slack_url("channels.info", &token, req)
+                }
+                ::slack::ConversationId::Group(group_id) => {
+                    let req = groups::InfoRequest::new(group_id);
+                    slack_url("groups.info", &token, req)
+                }
+                ::slack::ConversationId::DirectMessage(_) => {
+                    let req = conversations::InfoRequest::new(conversation_id);
+                    slack_url("conversations.info", &token, req)
+                }
+            };
 
-            let mut request = conversations::HistoryRequest::new(conversation_id);
-            request.limit = Some(1000);
-            let url = format!(
-                "https://slack.com/api/conversations.history?token={}&{}",
-                token,
-                ::serde_urlencoded::to_string(request).unwrap_or_default()
-            );
+            let info_response = client.get(&url).unwrap();
 
-            let history_response = client.get(&url).unwrap().send();
-
-            pending_requests.push((info_response, history_response, conversation_name));
+            pending_requests.push((info_response, conversation_id, conversation_name));
         }
 
         // Handle all the launched requests
-        for (info_response, history_response, conversation_name) in pending_requests {
-            use slack::http::conversations::ConversationInfo;
+        for (info_response, conversation_id, conversation_name) in pending_requests {
+            use slack::http::{channels, groups};
+            use slack::ConversationId::*;
 
             let info_response = info_response.wait().unwrap();
-            let read_at = deserialize_or_log!(info_response, conversations::InfoResponse)
-                .map(|info| match info.channel {
-                    ConversationInfo::Channel { last_read, .. } => last_read
-                        .map(|t| t.into())
-                        .unwrap_or_else(conn::DateTime::now),
-                    ConversationInfo::Group { last_read, .. } => last_read.into(),
-                    ConversationInfo::ClosedDirectMessage { .. } => conn::DateTime::now(),
-                    ConversationInfo::OpenDirectMessage { last_read, .. } => last_read.into(),
-                })
-                .unwrap_or_else(|_| conn::DateTime::now());
 
-            let handle = connection.read().unwrap();
-            // TODO: This is sometimes an error because url_private is missing???
-            // The error message is awful and shouldn't even happen
-            // TODO: replace the deserialize_or_log macro with something that reports errors
-            // better?
-            let history_response = history_response.wait().unwrap();
-            let history_messages = deserialize_or_log!(history_response, HistoryResponse)
-                .map(|h| h.messages)
-                .unwrap_or_default();
-
-            let messages = history_messages
-                .into_iter()
-                .map(|msg| {
-                    let name = msg
-                        .user
-                        .and_then(|name| handle.users.get_right(&name).cloned())
-                        .or_else(|| msg.username.clone())
-                        .or_else(|| msg.bot_id.map(|b| b.to_string()))
-                        .unwrap_or_else(|| "UNKNOWNUSER".into());
-                    Message {
-                        server: team_name.clone(),
-                        channel: conversation_name.clone(),
-                        sender: name.clone(),
-                        timestamp: msg.ts.into(),
-                        reactions: msg
-                            .reactions
-                            .iter()
-                            .map(|r| (r.name.clone(), r.count as usize))
-                            .collect(),
-                        contents: msg.to_omni(&handle),
+            let (read_at, latest) = match conversation_id {
+                Channel(_) => {
+                    let info = deserialize_or_log!(info_response, channels::InfoResponse)?;
+                    (
+                        info.channel.last_read.unwrap().into(),
+                        info.channel.latest.ts.into(),
+                    )
+                }
+                Group(_) => {
+                    let info = deserialize_or_log!(info_response, groups::InfoResponse)?;
+                    (
+                        info.group.last_read.unwrap().into(),
+                        info.group.latest.ts.into(),
+                    )
+                }
+                DirectMessage(_) => {
+                    let info = deserialize_or_log!(info_response, conversations::InfoResponse)?;
+                    match info.channel {
+                        slack::http::conversations::ConversationInfo::DirectMessage {
+                            last_read,
+                            latest,
+                            ..
+                        } => {
+                            let last_read = last_read.into();
+                            let latest = latest.map(|l| l.ts.into()).unwrap_or(last_read);
+                            (last_read, latest)
+                        }
+                        _ => {
+                            error!(
+                                "Tried to get info about a DM but got info about something else"
+                            );
+                            continue;
+                        }
                     }
-                })
-                .collect();
+                }
+            };
 
-            let _ = sender.send(ConnEvent::HistoryLoaded {
-                messages,
+            let _ = sender.send(ConnEvent::MarkChannelRead {
                 server: team_name.clone(),
                 channel: conversation_name.clone(),
-                read_at,
+                read_at: Some(read_at),
+                latest: Some(latest),
             });
         }
 
@@ -653,6 +630,54 @@ impl SlackConn {
             }
             _ => Vec::new(),
         }
+    }
+
+    fn get_history(&self, channel: &str) {
+        let mut request = slack::http::conversations::HistoryRequest::new(
+            *self.channels.get_left(channel).unwrap(),
+        );
+        request.limit = Some(1000);
+        let url = format!(
+            "https://slack.com/api/conversations.history?token={}&{}",
+            self.token,
+            ::serde_urlencoded::to_string(request).unwrap_or_default()
+        );
+
+        let history_response = weeqwest::get(&url).unwrap();
+
+        let history_messages = deserialize_or_log!(history_response, HistoryResponse)
+            .map(|h| h.messages)
+            .unwrap_or_default();
+
+        let messages = history_messages
+            .into_iter()
+            .map(|msg| {
+                let name = msg
+                    .user
+                    .and_then(|name| self.users.get_right(&name).cloned())
+                    .or_else(|| msg.username.clone())
+                    .or_else(|| msg.bot_id.map(|b| b.to_string()))
+                    .unwrap_or_else(|| "UNKNOWNUSER".into());
+                Message {
+                    server: self.team_name.clone(),
+                    channel: channel.to_string(),
+                    sender: name.clone(),
+                    timestamp: msg.ts.into(),
+                    reactions: msg
+                        .reactions
+                        .iter()
+                        .map(|r| (r.name.clone(), r.count as usize))
+                        .collect(),
+                    contents: msg.to_omni(self),
+                }
+            })
+            .collect();
+
+        let _ = self.tui_sender.send(ConnEvent::HistoryLoaded {
+            messages,
+            server: self.team_name.clone(),
+            channel: channel.to_string(),
+        });
     }
 
     fn send_typing(&mut self, channel: &str) {

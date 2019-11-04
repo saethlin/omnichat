@@ -60,24 +60,28 @@ pub fn permissions_in(
 }
 */
 
+use weeqwest::Request;
+
 impl DiscordConn {
     pub fn create_on(token: &str, sender: SyncSender<ConnEvent>, server: &str) -> Result<(), ()> {
         let mut client = weeqwest::Client::new();
 
         let me_resp = client
-            .get(&format!("{}/users/@me", ::discord::BASE_URL))
-            .unwrap()
-            .header("Authorization", token)
-            .send()
+            .send(
+                Request::get(&format!("{}/users/@me", ::discord::BASE_URL))
+                    .unwrap()
+                    .header("Authorization", token),
+            )
             .wait()
             .map_err(|e| error!("{:#?}", e))?;
         let me = deserialize_or_log!(me_resp, ::discord::User)?;
 
         let guild_resp = client
-            .get(&format!("{}{}", ::discord::BASE_URL, "/users/@me/guilds"))
-            .unwrap()
-            .header("Authorization", token)
-            .send()
+            .send(
+                Request::get(&format!("{}{}", ::discord::BASE_URL, "/users/@me/guilds"))
+                    .unwrap()
+                    .header("Authorization", token),
+            )
             .wait()
             .map_err(|e| error!("{:#?}", e))?;
         let guilds = deserialize_or_log!(guild_resp, Vec<::discord::Guild>)?;
@@ -86,15 +90,16 @@ impl DiscordConn {
         let guild_name = String::from(guild.name.as_str());
 
         let me_resp = client
-            .get(&format!(
-                "{}/guilds/{}/members/{}",
-                ::discord::BASE_URL,
-                guild.id,
-                me.id
-            ))
-            .unwrap()
-            .header("Authorization", token)
-            .send()
+            .send(
+                Request::get(&format!(
+                    "{}/guilds/{}/members/{}",
+                    ::discord::BASE_URL,
+                    guild.id,
+                    me.id
+                ))
+                .unwrap()
+                .header("Authorization", token),
+            )
             .wait()
             .map_err(|e| error!("{:#?}", e))?;
 
@@ -102,27 +107,29 @@ impl DiscordConn {
         let mut my_roles = me.roles;
 
         let channels_resp = client
-            .get(&format!(
-                "{}/guilds/{}/channels",
-                ::discord::BASE_URL,
-                guild.id
-            ))
-            .unwrap()
-            .header("Authorization", token)
-            .send()
+            .send(
+                Request::get(&format!(
+                    "{}/guilds/{}/channels",
+                    ::discord::BASE_URL,
+                    guild.id
+                ))
+                .unwrap()
+                .header("Authorization", token),
+            )
             .wait()
             .map_err(|e| error!("{:#?}", e))?;
         let channels = deserialize_or_log!(channels_resp, Vec<::discord::Channel>)?;
 
         let roles_resp = client
-            .get(&format!(
-                "{}/guilds/{}/roles",
-                ::discord::BASE_URL,
-                guild.id
-            ))
-            .unwrap()
-            .header("Authorization", token)
-            .send()
+            .send(
+                Request::get(&format!(
+                    "{}/guilds/{}/roles",
+                    ::discord::BASE_URL,
+                    guild.id
+                ))
+                .unwrap()
+                .header("Authorization", token),
+            )
             .wait()
             .map_err(|e| error!("{:#?}", e))?;
         let roles = deserialize_or_log!(roles_resp, Vec<::discord::Role>)?;
@@ -157,13 +164,15 @@ impl DiscordConn {
         // This is how the TUI sends me events
         let (tx, events_from_tui) = std::sync::mpsc::sync_channel(100);
 
+        let now = crate::conn::DateTime::now();
         let _ = sender.send(ConnEvent::ServerConnected(crate::tui::Server {
             channels: channels
                 .iter()
                 .map(|c| crate::tui::Channel {
                     messages: Vec::new(),
                     name: c.name.clone().unwrap_or_else(|| String::from("NONAME")),
-                    read_at: crate::conn::DateTime::now(),
+                    read_at: now,
+                    latest: now,
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
                     channel_type: crate::conn::ChannelType::Normal,
@@ -183,15 +192,15 @@ impl DiscordConn {
 
             history_responses.push((
                 channel_name,
-                client
-                    .get(&format!(
+                client.send(
+                    Request::get(&format!(
                         "{}/channels/{}/messages?limit=100",
                         ::discord::BASE_URL,
                         channel.id
                     ))
                     .unwrap()
-                    .header("Authorization", token.as_str())
-                    .send(),
+                    .header("Authorization", token.as_str()),
+                ),
             ));
         }
 
@@ -221,7 +230,6 @@ impl DiscordConn {
                 let _ = sender.send(ConnEvent::HistoryLoaded {
                     server: guild_name.clone(),
                     channel,
-                    read_at: DateTime::now(),
                     messages,
                 });
             });
@@ -268,10 +276,11 @@ impl DiscordConn {
             use discord::gateway::{Event, GatewayEvent, Hello};
 
             let url_resp = client
-                .get(&format!("{}{}", ::discord::BASE_URL, "/gateway"))
-                .unwrap()
-                .header("Authorization", &i_token)
-                .send()
+                .send(
+                    Request::get(&format!("{}{}", ::discord::BASE_URL, "/gateway"))
+                        .unwrap()
+                        .header("Authorization", &i_token),
+                )
                 .wait()
                 .map_err(|e| error!("{:#?}", e))
                 .unwrap();

@@ -74,7 +74,6 @@ pub enum ConnEvent {
         server: String,
         channel: String,
         messages: Vec<Message>,
-        read_at: DateTime,
     },
     Input(termion::event::Event),
     Error(String),
@@ -82,7 +81,8 @@ pub enum ConnEvent {
     MarkChannelRead {
         server: String,
         channel: String,
-        read_at: DateTime,
+        read_at: Option<DateTime>,
+        latest: Option<DateTime>,
     },
     ReactionAdded {
         server: String,
@@ -124,6 +124,9 @@ pub enum TuiEvent {
     },
     SendTyping {
         server: String,
+        channel: String,
+    },
+    GetHistory {
         channel: String,
     },
 }

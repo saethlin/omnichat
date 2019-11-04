@@ -488,6 +488,7 @@ pub enum Conversation {
     DirectMessage {
         created: Timestamp,
         id: ConversationId,
+        is_archived: tbool,
         is_im: bool,
         is_org_shared: bool,
         is_user_deleted: bool,
