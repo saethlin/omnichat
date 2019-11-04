@@ -24,6 +24,7 @@ dirs = "2.0"
 tokio = "0.1"
 openssl = { version = "0.10", features = ["vendored"] }
 serde_urlencoded = "0.6"
+libflate = "0.1"
 slack = {path = "tiny_slack"}
 discord = {path = "discord"}
 weeqwest = {git = "https://github.com/saethlin/weeqwest", features=["client"]}
@@ -32,4 +33,4 @@ weeqwest = {git = "https://github.com/saethlin/weeqwest", features=["client"]}
 regex-automata = "0.1"
 
 [profile.release]
-debug = 2
+debug = 1
