@@ -4,7 +4,7 @@ mod bimap;
 mod chan_message;
 mod conn;
 mod cursor_vec;
-mod discord_conn;
+//mod discord_conn;
 mod logger;
 mod slack_conn;
 mod tui;
@@ -14,29 +14,29 @@ struct SlackConfig {
     token: String,
 }
 
+/*
 #[derive(Deserialize)]
 struct DiscordConfig {
     name: String,
 }
+*/
 
 #[derive(Deserialize)]
 struct Config {
     slack: Option<Vec<SlackConfig>>,
-    discord_token: Option<String>,
-    discord: Option<Vec<DiscordConfig>>,
+    //discord_token: Option<String>,
+    //discord: Option<Vec<DiscordConfig>>,
 }
 
-fn main() {
-    use crate::discord_conn::DiscordConn;
+#[tokio::main]
+async fn main() {
+    //use crate::discord_conn::DiscordConn;
     use crate::slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
     use std::path::PathBuf;
-    use std::thread;
 
     std::env::set_var("RUST_BACKTRACE", "1");
-
-    openssl_probe::init_ssl_cert_env_vars();
 
     let homedir = std::env::var("HOME").unwrap_or_else(|_| {
         println!("You don't even have a $HOME? :'(");
@@ -74,12 +74,12 @@ fn main() {
     if let Some(slack) = config.slack {
         for c in slack {
             let sender = tui.sender();
-            thread::spawn(move || {
-                let _ = SlackConn::create_on(&c.token, sender.clone());
-            });
+            let token = c.token.clone();
+            tokio::spawn(async move { SlackConn::create_on(&token, sender).await });
         }
     }
 
+    /*
     if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
         for d in discord {
             let sender = tui.sender();
@@ -89,8 +89,9 @@ fn main() {
             });
         }
     }
+    */
 
-    tui.run();
+    tui.run().await
 }
 
 use regex_automata::{DenseDFA, DFA};

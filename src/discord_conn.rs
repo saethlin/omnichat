@@ -173,6 +173,7 @@ impl DiscordConn {
                     name: c.name.clone().unwrap_or_else(|| String::from("NONAME")),
                     read_at: now,
                     latest: now,
+                    has_history: false,
                     message_scroll_offset: 0,
                     message_buffer: String::new(),
                     channel_type: crate::conn::ChannelType::Normal,

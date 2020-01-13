@@ -2,14 +2,15 @@ use crate::bimap::BiMap;
 use crate::conn;
 use crate::conn::{ChannelType, Completer, ConnEvent, Message, TuiEvent};
 use crate::DFAExtension;
-use futures::sync::mpsc;
-use futures::{Future, Sink, Stream};
 use log::error;
 use regex_automata::DenseDFA;
 use serde::Deserialize;
-use std::sync::mpsc::SyncSender;
-use std::sync::{Arc, RwLock};
-use std::thread;
+use std::sync::Arc;
+
+use futures::channel::mpsc::UnboundedSender;
+use futures::sink::SinkExt;
+use futures::stream::StreamExt;
+use futures_util::lock::Mutex;
 
 lazy_static::lazy_static! {
     static ref MENTION_REGEX_DATA: Vec<u16> = {
@@ -36,10 +37,10 @@ lazy_static::lazy_static! {
 macro_rules! deserialize_or_log {
     ($response:expr, $type:ty) => {{
         if $response.status().is_success() {
-            ::serde_json::from_slice::<$type>(&$response.bytes())
-                .map_err(|e| error!("{}\n{:#?}", format_json(&$response.bytes()), e))
+            ::serde_json::from_slice::<$type>(&$response.body())
+                .map_err(|e| error!("{}\n{:#?}", format_json(&$response.body()), e))
         } else {
-            match ::serde_json::from_slice::<::slack::http::Error>(&$response.bytes()) {
+            match ::serde_json::from_slice::<::slack::http::Error>(&$response.body()) {
                 Ok(e) => {
                     error!("{:#?}", e);
                     Err(())
@@ -47,7 +48,7 @@ macro_rules! deserialize_or_log {
                 Err(e) => {
                     error!(
                         "{}\n{:#?}",
-                        std::str::from_utf8($response.bytes()).unwrap(),
+                        std::str::from_utf8($response.body()).unwrap(),
                         e
                     );
                     Err(())
@@ -137,7 +138,7 @@ impl SlackConn {
         text
     }
 
-    pub fn process_slack_message(&mut self, message: &str) {
+    pub async fn process_slack_message(&mut self, message: &str) {
         if let Ok(ack) = ::serde_json::from_str::<MessageAck>(&message) {
             // Remove the message from pending messages
             if let Some(index) = self
@@ -145,14 +146,17 @@ impl SlackConn {
                 .iter()
                 .position(|m| m.id == ack.reply_to)
             {
-                let _ = self.tui_sender.send(ConnEvent::Message(Message {
-                    channel: self.pending_messages[index].channel.clone(),
-                    contents: self.convert_mentions(&ack.text),
-                    reactions: Vec::new(),
-                    sender: self.my_name.clone(),
-                    server: self.team_name.clone(),
-                    timestamp: ack.ts.into(),
-                }));
+                self.tui_sender
+                    .send(ConnEvent::Message(Message {
+                        channel: self.pending_messages[index].channel.clone(),
+                        contents: self.convert_mentions(&ack.text),
+                        reactions: Vec::new(),
+                        sender: self.my_name.clone(),
+                        server: self.team_name.clone(),
+                        timestamp: ack.ts.into(),
+                    }))
+                    .await
+                    .unwrap();
                 self.pending_messages.swap_remove(index);
                 return;
             }
@@ -168,12 +172,16 @@ impl SlackConn {
                     Reactable::Message { channel, ts } => (channel, ts),
                 };
                 if let Some(channel) = self.channels.get_right(&channel_id) {
-                    let _ = self.tui_sender.send(ConnEvent::ReactionAdded {
-                        server: self.team_name.clone(),
-                        channel: channel.clone(),
-                        timestamp: timestamp.into(),
-                        reaction,
-                    });
+                    let _ = self
+                        .tui_sender
+                        .send(ConnEvent::ReactionAdded {
+                            server: self.team_name.clone(),
+                            channel: channel.clone(),
+                            timestamp: timestamp.into(),
+                            reaction,
+                        })
+                        .await
+                        .unwrap();
                 }
             }
             Ok(rtm::Event::ReactionRemoved { item, reaction, .. }) => {
@@ -182,12 +190,15 @@ impl SlackConn {
                     Reactable::Message { channel, ts } => (channel, ts),
                 };
                 if let Some(channel) = self.channels.get_right(&channel_id) {
-                    let _ = self.tui_sender.send(ConnEvent::ReactionRemoved {
-                        server: self.team_name.clone(),
-                        channel: channel.clone(),
-                        timestamp: timestamp.into(),
-                        reaction,
-                    });
+                    self.tui_sender
+                        .send(ConnEvent::ReactionRemoved {
+                            server: self.team_name.clone(),
+                            channel: channel.clone(),
+                            timestamp: timestamp.into(),
+                            reaction,
+                        })
+                        .await
+                        .unwrap();
                 }
             }
             Ok(rtm::Event::Message {
@@ -204,17 +215,20 @@ impl SlackConn {
                 if let Some(edited_message) = edited_message {
                     // This check is how we verify that this is _actually_ an edit
                     if edited_message.edited.is_some() {
-                        let _ = self.tui_sender.send(ConnEvent::MessageEdited {
-                            server: self.team_name.clone(),
-                            channel: self
-                                .channels
-                                .get_right(&channel)
-                                .cloned()
-                                .unwrap_or_else(|| channel.to_string()),
-                            contents: self
-                                .convert_mentions(&edited_message.text.unwrap_or_default()),
-                            timestamp: edited_message.ts.into(),
-                        });
+                        self.tui_sender
+                            .send(ConnEvent::MessageEdited {
+                                server: self.team_name.clone(),
+                                channel: self
+                                    .channels
+                                    .get_right(&channel)
+                                    .cloned()
+                                    .unwrap_or_else(|| channel.to_string()),
+                                contents: self
+                                    .convert_mentions(&edited_message.text.unwrap_or_default()),
+                                timestamp: edited_message.ts.into(),
+                            })
+                            .await
+                            .unwrap();
                     }
                 } else if let Some(sender) = user
                     .and_then(|id| self.users.get_right(&id))
@@ -253,44 +267,53 @@ impl SlackConn {
 
                     let contents = body.trim().to_string();
 
-                    let _ = self.tui_sender.send(ConnEvent::Message(Message {
-                        server: self.team_name.clone(),
-                        channel: self
-                            .channels
-                            .get_right(&channel)
-                            .cloned()
-                            .unwrap_or_else(|| channel.to_string()),
-                        sender,
-                        timestamp: ts.into(),
-                        reactions: Vec::new(),
-                        contents,
-                    }));
+                    self.tui_sender
+                        .send(ConnEvent::Message(Message {
+                            server: self.team_name.clone(),
+                            channel: self
+                                .channels
+                                .get_right(&channel)
+                                .cloned()
+                                .unwrap_or_else(|| channel.to_string()),
+                            sender,
+                            timestamp: ts.into(),
+                            reactions: Vec::new(),
+                            contents,
+                        }))
+                        .await
+                        .unwrap();
                 }
             }
             Ok(rtm::Event::ChannelMarked { channel, ts, .. }) => {
-                let _ = self.tui_sender.send(ConnEvent::MarkChannelRead {
-                    server: self.team_name.clone(),
-                    channel: self
-                        .channels
-                        .get_right(&channel.into())
-                        .unwrap_or(&channel.as_str().into())
-                        .clone(),
-                    read_at: Some(ts.into()),
-                    latest: None,
-                });
+                self.tui_sender
+                    .send(ConnEvent::MarkChannelRead {
+                        server: self.team_name.clone(),
+                        channel: self
+                            .channels
+                            .get_right(&channel.into())
+                            .unwrap_or(&channel.as_str().into())
+                            .clone(),
+                        read_at: Some(ts.into()),
+                        latest: None,
+                    })
+                    .await
+                    .unwrap();
             }
 
             Ok(::slack::rtm::Event::GroupMarked { channel, ts, .. }) => {
-                let _ = self.tui_sender.send(ConnEvent::MarkChannelRead {
-                    server: self.team_name.clone(),
-                    channel: self
-                        .channels
-                        .get_right(&channel.into())
-                        .unwrap_or(&String::from(channel.as_str()))
-                        .clone(),
-                    read_at: Some(ts.into()),
-                    latest: None,
-                });
+                self.tui_sender
+                    .send(ConnEvent::MarkChannelRead {
+                        server: self.team_name.clone(),
+                        channel: self
+                            .channels
+                            .get_right(&channel.into())
+                            .unwrap_or(&String::from(channel.as_str()))
+                            .clone(),
+                        read_at: Some(ts.into()),
+                        latest: None,
+                    })
+                    .await
+                    .unwrap();
             }
             _ => {}
         }
@@ -305,42 +328,44 @@ pub struct SlackConn {
     emoji: Vec<String>,
     last_typing_message: chrono::DateTime<chrono::Utc>,
     my_name: String,
-    input_sender: ::futures::sync::mpsc::Sender<::websocket::OwnedMessage>,
-    tui_sender: SyncSender<ConnEvent>,
+    input_sender: weebsocket::async_client::Sender,
+    tui_sender: UnboundedSender<ConnEvent>,
     pending_messages: Vec<PendingMessage>,
 }
 
 pub struct SlackCompleter {
-    inner: Arc<RwLock<SlackConn>>,
+    inner: Arc<Mutex<SlackConn>>,
 }
 
 impl Completer for SlackCompleter {
-    fn autocomplete(&self, word: &str) -> Vec<String> {
-        self.inner.read().unwrap().autocomplete(word)
+    fn autocomplete(&self, _word: &str) -> Vec<String> {
+        error!("Autocompleter was stubbed out!");
+        Vec::new()
+        //self.inner.unwrap().autocomplete(word)
     }
 }
 
 impl SlackConn {
-    pub fn create_on(token: &str, sender: SyncSender<ConnEvent>) -> Result<(), ()> {
-        let mut client = ::weeqwest::Client::new();
+    pub async fn create_on(token: &str, mut sender: UnboundedSender<ConnEvent>) -> Result<(), ()> {
+        let token = token.to_string();
         // Launch all of the requests
         use slack::http::{conversations, emoji, rtm, users};
 
-        let emoji_recv = client.get(&slack_url("emoji.list", &token, &())).unwrap();
-        let connect_recv = client.get(&slack_url("rtm.connect", &token, &())).unwrap();
-        let users_recv = client
-            .get(&slack_url("users.list", &token, users::ListRequest::new()))
-            .unwrap();
+        let url = slack_url("emoji.list", &token, &());
+        let emoji_recv = tokio::spawn(async move { weeqwest::get(&url).await });
+        let url = slack_url("rtm.connect", &token, &());
+        let connect_recv = tokio::spawn(async move { weeqwest::get(&url).await });
+        let url = slack_url("users.list", &token, users::ListRequest::new());
+        let users_recv = tokio::spawn(async move { weeqwest::get(&url).await });
 
         use slack::http::conversations::ChannelType::*;
         let mut req = conversations::ListRequest::new();
         req.types = vec![PublicChannel, PrivateChannel, Mpim, Im];
-        let conversations_recv = client
-            .get(&slack_url("conversations.list", &token, req))
-            .unwrap();
+        let url = slack_url("conversations.list", &token, req);
+        let conversations_recv = tokio::spawn(async move { weeqwest::get(&url).await });
 
         // We need to know about the users first so that we can digest the list of conversations
-        let users_response = users_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let users_response = users_recv.await.unwrap().map_err(|e| error!("{:#?}", e))?;
         let users_response = deserialize_or_log!(users_response, users::ListResponse)
             .map_err(|e| error!("{:#?}", e))?;
 
@@ -349,7 +374,10 @@ impl SlackConn {
             users.insert(user.id, user.name);
         }
 
-        let conversations_response = conversations_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let conversations_response = conversations_recv
+            .await
+            .unwrap()
+            .map_err(|e| error!("{:#?}", e))?;
         let response_channels =
             deserialize_or_log!(conversations_response, conversations::ListResponse)
                 .map_err(|e| error!("{:#?}", e))?;
@@ -393,24 +421,29 @@ impl SlackConn {
                 name,
                 read_at: now,
                 latest: now,
+                has_history: false,
                 message_scroll_offset: 0,
                 message_buffer: String::new(),
                 channel_type,
             });
         }
 
-        let connect_response = connect_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let connect_response = connect_recv
+            .await
+            .unwrap()
+            .map_err(|e| error!("{:#?}", e))?;
         let connect_response = deserialize_or_log!(connect_response, rtm::ConnectResponse)
             .map_err(|e| error!("{:#?}", e))?;
 
         let websocket_url = connect_response.url.clone();
+        let (tx, mut rx) =
+            weebsocket::async_client::connect(&websocket_url).map_err(|e| error!("{:#?}", e))?;
 
         let my_name = connect_response.slf.name;
         let team_name = connect_response.team.name;
-        let (input_sender, input_channel) = mpsc::channel(0);
 
         // Give the emoji handle as long as possible to complete
-        let emoji_response = emoji_recv.wait().map_err(|e| error!("{:#?}", e))?;
+        let emoji_response = emoji_recv.await.unwrap().map_err(|e| error!("{:#?}", e))?;
         let emoji = deserialize_or_log!(emoji_response, emoji::ListResponse)
             .map_err(|e| error!("{:#?}", e))?;
 
@@ -422,91 +455,92 @@ impl SlackConn {
             .collect::<Vec<_>>();
         emoji.sort();
 
-        let connection = Arc::new(RwLock::new(SlackConn {
-            token: String::from(token),
+        let connection = Arc::new(Mutex::new(SlackConn {
+            token: token.clone(),
             users,
             channels: channels.clone(),
             team_name: team_name.clone(),
             emoji,
             last_typing_message: chrono::Utc::now(),
             my_name: my_name.clone(),
-            input_sender,
+            input_sender: tx.clone(),
             tui_sender: sender.clone(),
             pending_messages: Vec::new(),
         }));
 
-        let (tui_send, tui_recv) = std::sync::mpsc::sync_channel(100);
+        let (tui_send, mut tui_recv) = futures::channel::mpsc::unbounded();
 
-        let _ = sender.send(ConnEvent::ServerConnected(crate::tui::Server {
-            current_channel: 0,
-            channels: tui_channels,
-            completer: Some(Box::new(SlackCompleter {
-                inner: connection.clone(),
-            })),
-            name: team_name.clone(),
-            channel_scroll_offset: 0,
-            sender: tui_send,
-        }));
+        sender
+            .send(ConnEvent::ServerConnected(crate::tui::Server {
+                current_channel: 0,
+                channels: tui_channels,
+                completer: Some(Box::new(SlackCompleter {
+                    inner: connection.clone(),
+                })),
+                name: team_name.clone(),
+                channel_scroll_offset: 0,
+                sender: tui_send,
+            }))
+            .await
+            .unwrap();
 
         let conn = connection.clone();
         // Create a background thread that will handle events from the TUI
-        thread::spawn(move || {
-            while let Ok(event) = tui_recv.recv() {
+        tokio::spawn(async move {
+            while let Some(event) = tui_recv.next().await {
                 match event {
                     TuiEvent::SendMessage {
                         channel, contents, ..
-                    } => conn
-                        .write()
-                        .unwrap()
-                        .send_channel_message(&channel, &contents),
-                    TuiEvent::SendTyping { channel, .. } => {
-                        conn.write().unwrap().send_typing(&channel)
+                    } => {
+                        conn.lock()
+                            .await
+                            .send_channel_message(&channel, &contents)
+                            .await
                     }
-                    TuiEvent::MarkRead { channel, .. } => conn.read().unwrap().mark_read(&channel),
+                    TuiEvent::SendTyping { channel, .. } => {
+                        conn.lock().await.send_typing(&channel).await
+                    }
+                    TuiEvent::MarkRead { channel, .. } => conn.lock().await.mark_read(&channel),
                     TuiEvent::Command {
                         channel, command, ..
-                    } => conn.read().unwrap().handle_cmd(&channel, &command),
+                    } => conn.lock().await.handle_cmd(&channel, &command),
                     TuiEvent::AddReaction {
                         channel,
                         reaction,
                         timestamp,
                         ..
                     } => conn
-                        .read()
-                        .unwrap()
+                        .lock()
+                        .await
                         .add_reaction(&channel, &reaction, timestamp),
-                    TuiEvent::GetHistory { channel } => conn.read().unwrap().get_history(&channel),
+                    TuiEvent::GetHistory { channel } => {
+                        conn.lock().await.get_history(&channel).await
+                    }
                 }
             }
         });
 
         let thread_conn = connection.clone();
 
-        thread::spawn(move || {
-            use websocket::result::WebSocketError;
-            use websocket::OwnedMessage::{Close, Ping, Pong, Text};
-            let runner = ::websocket::ClientBuilder::new(&websocket_url)
-                .unwrap()
-                .async_connect_secure(None)
-                .and_then(|(duplex, _)| {
-                    let (sink, stream) = duplex.split();
-                    stream
-                        .filter_map(|message| match message {
-                            Close(_) => {
-                                error!("websocket closed");
-                                None
-                            }
-                            Ping(m) => Some(Pong(m)),
-                            Text(text) => {
-                                thread_conn.write().unwrap().process_slack_message(&text);
-                                None
-                            }
-                            _ => None,
-                        })
-                        .select(input_channel.map_err(|_| WebSocketError::NoDataAvailable))
-                        .forward(sink)
-                });
-            ::tokio::runtime::current_thread::block_on_all(runner).unwrap();
+        let mut t_tx = tx.clone();
+        tokio::task::spawn_blocking(move || {
+            use weebsocket::Message;
+            loop {
+                match rx.recv() {
+                    Message::Close(_) => {
+                        error!("websocket closed");
+                        // TODO: Restart
+                    }
+                    Message::Ping(data) => t_tx.send(Message::Pong(data)),
+                    Message::Text(text) => {
+                        let thread_conn = thread_conn.clone();
+                        tokio::spawn(async move {
+                            thread_conn.lock().await.process_slack_message(&text).await
+                        });
+                    }
+                    Message::Pong(_) | Message::Binary(_) => error!("unrecognized message"),
+                }
+            }
         });
 
         let mut pending_requests = Vec::new();
@@ -530,7 +564,17 @@ impl SlackConn {
                 }
             };
 
-            let info_response = client.get(&url).unwrap();
+            let name = conversation_name.clone();
+            let info_response = tokio::spawn(async move {
+                let mut res = weeqwest::get(&url).await;
+                // TODO: This is not a serious retry loop, should eventually be exponential backoff
+                while res.is_err() {
+                    error!("retrying info for {:?}", name);
+                    tokio::time::delay_for(std::time::Duration::from_millis(500)).await;
+                    res = weeqwest::get(&url).await;
+                }
+                res
+            });
 
             pending_requests.push((info_response, conversation_id, conversation_name));
         }
@@ -540,7 +584,7 @@ impl SlackConn {
             use slack::http::{channels, groups};
             use slack::ConversationId::*;
 
-            let info_response = info_response.wait().unwrap();
+            let info_response = info_response.await.unwrap().unwrap();
 
             let (read_at, latest) = match conversation_id {
                 Channel(_) => {
@@ -579,12 +623,15 @@ impl SlackConn {
                 }
             };
 
-            let _ = sender.send(ConnEvent::MarkChannelRead {
-                server: team_name.clone(),
-                channel: conversation_name.clone(),
-                read_at: Some(read_at),
-                latest: Some(latest),
-            });
+            sender
+                .send(ConnEvent::MarkChannelRead {
+                    server: team_name.clone(),
+                    channel: conversation_name.clone(),
+                    read_at: Some(read_at),
+                    latest: Some(latest),
+                })
+                .await
+                .unwrap();
         }
 
         Ok(())
@@ -632,7 +679,7 @@ impl SlackConn {
         }
     }
 
-    fn get_history(&self, channel: &str) {
+    async fn get_history(&self, channel: &str) {
         let mut request = slack::http::conversations::HistoryRequest::new(
             *self.channels.get_left(channel).unwrap(),
         );
@@ -643,7 +690,7 @@ impl SlackConn {
             ::serde_urlencoded::to_string(request).unwrap_or_default()
         );
 
-        let history_response = weeqwest::get(&url).unwrap();
+        let history_response = weeqwest::get(&url).await.unwrap();
 
         let history_messages = deserialize_or_log!(history_response, HistoryResponse)
             .map(|h| h.messages)
@@ -673,14 +720,18 @@ impl SlackConn {
             })
             .collect();
 
-        let _ = self.tui_sender.send(ConnEvent::HistoryLoaded {
-            messages,
-            server: self.team_name.clone(),
-            channel: channel.to_string(),
-        });
+        let mut tui_send = self.tui_sender.clone();
+        tui_send
+            .send(ConnEvent::HistoryLoaded {
+                messages,
+                server: self.team_name.clone(),
+                channel: channel.to_string(),
+            })
+            .await
+            .unwrap();
     }
 
-    fn send_typing(&mut self, channel: &str) {
+    async fn send_typing(&mut self, channel: &str) {
         let now = chrono::Utc::now();
         if (now - self.last_typing_message) < chrono::Duration::seconds(3) {
             return;
@@ -710,18 +761,13 @@ impl SlackConn {
             "channel": channel_id,
         });
 
-        let _ = ::serde_json::to_string(&message)
+        serde_json::to_string(&message)
             .map_err(|e| error!("{:#?}", e))
-            .and_then(|the_json| {
-                self.input_sender
-                    .clone()
-                    .send(::websocket::OwnedMessage::Text(the_json))
-                    .wait()
-                    .map_err(|e| error!("{:#?}", e))
-            });
+            .map(|the_json| self.input_sender.send(weebsocket::Message::Text(the_json)))
+            .unwrap()
     }
 
-    fn send_channel_message(&mut self, channel: &str, contents: &str) {
+    async fn send_channel_message(&mut self, channel: &str, contents: &str) {
         let contents = self.to_slack(contents.to_string());
         let channel_id = match self.channels.get_left(channel) {
             Some(id) => *id,
@@ -747,15 +793,10 @@ impl SlackConn {
             "text": contents,
         });
 
-        let _ = ::serde_json::to_string(&message)
+        serde_json::to_string(&message)
             .map_err(|e| error!("{:#?}", e))
-            .and_then(|the_json| {
-                self.input_sender
-                    .clone()
-                    .send(::websocket::OwnedMessage::Text(the_json))
-                    .wait()
-                    .map_err(|e| error!("{:#?}", e))
-            });
+            .map(|the_json| self.input_sender.send(weebsocket::Message::Text(the_json)))
+            .unwrap()
     }
 
     fn mark_read(&self, channel: &str) {
@@ -791,10 +832,10 @@ impl SlackConn {
         };
 
         let channel = channel.to_string();
-        std::thread::spawn(move || {
-            if let Ok(r) = ::weeqwest::post(&url).map_err(|e| error!("{:#?}", e)) {
+        tokio::spawn(async move {
+            if let Ok(r) = weeqwest::post(&url).await.map_err(|e| error!("{:#?}", e)) {
                 use slack::http::Error;
-                if let Ok(Error { ok: false, error }) = ::serde_json::from_slice::<Error>(r.bytes())
+                if let Ok(Error { ok: false, error }) = ::serde_json::from_slice::<Error>(r.body())
                 {
                     error!(
                         "Couldn't mark {} as read: {}",
@@ -821,6 +862,7 @@ impl SlackConn {
             }
         };
 
+        // TODO: Pretty sure I can just call slack_url here
         use slack::http::reactions::Reactable;
         let req = ::slack::http::reactions::AddRequest::new(
             &name,
@@ -837,8 +879,8 @@ impl SlackConn {
             ::serde_urlencoded::to_string(req).unwrap_or_default()
         );
 
-        thread::spawn(move || {
-            let _ = ::weeqwest::post(&url).map_err(|e| error!("{:#?}", e));
+        tokio::spawn(async move {
+            let _ = weeqwest::post(&url).await.map_err(|e| error!("{:#?}", e));
         });
     }
 
@@ -867,18 +909,13 @@ impl SlackConn {
                     }
                 };
 
-                let req = ::weeqwest::Request::post(&url)
+                let req = weeqwest::Request::post(&url)
                     .unwrap()
                     .file_form(path, &content);
 
-                match ::weeqwest::send(&req) {
-                    Ok(response) => {
-                        if !response.status().is_success() {
-                            error!("{:?}", std::str::from_utf8(response.bytes()))
-                        }
-                    }
-                    Err(e) => error!("{:#?}", e),
-                }
+                tokio::spawn(
+                    async move { weeqwest::send(&req).await.map_err(|e| error!("{:#?}", e)) },
+                );
             }
             _ => {
                 error!("unsupported command: {}", cmd);

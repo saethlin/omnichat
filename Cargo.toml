@@ -6,14 +6,11 @@ build = "build.rs"
 edition = "2018"
 
 [dependencies]
-websocket = "0.23"
 serde = {version="1.0", features=["derive"]}
 serde_json = "1.0"
 toml = "0.5"
 lazy_static = "1.0"
 regex-automata = "0.1"
-futures = "0.1"
-openssl-probe = "0.1"
 chrono = "0.4"
 log = {version="0.4", features=["std"]}
 termion = "1.0"
@@ -21,16 +18,21 @@ libc = "0.2"
 signal-hook = "0.1"
 textwrap = "0.11"
 dirs = "2.0"
-tokio = "0.1"
-openssl = { version = "0.10", features = ["vendored"] }
 serde_urlencoded = "0.6"
-libflate = "0.1"
+tokio = {version = "0.2", features = ["full"]}
+futures-util = {version = "0.3", default-features = false, features=["std"]}
+futures = "0.3"
 slack = {path = "tiny_slack"}
 discord = {path = "discord"}
-weeqwest = {git = "https://github.com/saethlin/weeqwest", features=["client"]}
+weeqwest = {path = "../weeqwest"}
+#weeqwest = {git = "https://github.com/saethlin/weeqwest"}
+weebsocket = {git = "https://github.com/saethlin/weebsocket"}
 
 [build-dependencies]
 regex-automata = "0.1"
+
+[profile.dev.package."*"]
+opt-level = 3
 
 [profile.release]
 debug = 1

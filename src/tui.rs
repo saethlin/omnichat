@@ -2,10 +2,13 @@ use crate::chan_message::ChanMessage;
 use crate::conn::{ChannelType, Completer, ConnEvent, DateTime, Message, TuiEvent};
 use crate::cursor_vec::CursorVec;
 use crate::DFAExtension;
+
+use std::cmp::{max, min};
+
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::prelude::*;
 use log::error;
 use regex_automata::DenseDFA;
-use std::cmp::{max, min};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 
 lazy_static::lazy_static! {
     static ref URL_REGEX_DATA: Vec<u16> = {
@@ -25,15 +28,15 @@ pub struct Tui {
     servers: CursorVec<Server>,
     longest_channel_name: u16,
     shutdown: bool,
-    events: Receiver<ConnEvent>,
-    sender: SyncSender<ConnEvent>, // Tui can send events to itself, this is also cloned and sent to backend connections
+    events: UnboundedReceiver<ConnEvent>,
+    sender: UnboundedSender<ConnEvent>, // Tui can send events to itself, this is also cloned and sent to backend connections
     server_scroll_offset: usize,
     autocompletions: Vec<String>,
     autocomplete_index: usize,
     cursor_pos: usize,
     _guards: (
-        ::termion::screen::AlternateScreen<::std::io::Stdout>,
-        ::termion::raw::RawTerminal<::std::io::Stdout>,
+        termion::screen::AlternateScreen<::std::io::Stdout>,
+        termion::raw::RawTerminal<::std::io::Stdout>,
     ),
     previous_terminal_height: u16,
     truncate_buffer_to: usize,
@@ -45,14 +48,12 @@ pub struct Server {
     pub name: String,
     pub current_channel: usize,
     pub channel_scroll_offset: usize,
-    pub sender: SyncSender<TuiEvent>,
+    pub sender: UnboundedSender<TuiEvent>,
 }
 
 impl Server {
     fn has_unreads(&self) -> bool {
-        self.channels
-            .iter()
-            .any(|c| c.num_unreads() > 0 || c.is_unread())
+        self.channels.iter().any(Channel::is_unread)
     }
 }
 
@@ -61,6 +62,7 @@ pub struct Channel {
     pub name: String,
     pub read_at: DateTime,
     pub latest: DateTime,
+    pub has_history: bool,
     pub message_scroll_offset: usize,
     pub message_buffer: String,
     pub channel_type: ChannelType,
@@ -82,58 +84,62 @@ impl Channel {
 
 impl Tui {
     pub fn new() -> Self {
-        use std::thread;
         use termion::input::TermRead;
         use termion::raw::IntoRawMode;
 
-        let screenguard = ::termion::screen::AlternateScreen::from(::std::io::stdout());
-        let rawguard = ::std::io::stdout()
+        let screenguard = termion::screen::AlternateScreen::from(::std::io::stdout());
+        let rawguard = std::io::stdout()
             .into_raw_mode()
             .expect("Couldn't put the terminal in raw mode");
 
-        let (sender, reciever) = sync_channel(100);
+        let (sender, reciever) = futures::channel::mpsc::unbounded();
 
         // Set up a signal handler so we get notified when the terminal is resized
         // Must be called before any threads are launched
         let winch_send = sender.clone();
-        let signals = ::signal_hook::iterator::Signals::new(&[::libc::SIGWINCH])
+        let signals = signal_hook::iterator::Signals::new(&[::libc::SIGWINCH])
             .expect("Couldn't register resize signal handler");
-        thread::spawn(move || {
+        tokio::task::spawn_blocking(move || {
             for _ in &signals {
-                let _ = winch_send.send(ConnEvent::Resize);
+                let mut winch_send = winch_send.clone();
+                tokio::spawn(async move { winch_send.send(ConnEvent::Resize).await });
             }
         });
 
         // Launch a background thread to feed input from stdin
         // Note this isn't raw keyboard events, it's termion's opinion of an event
         let send = sender.clone();
-        thread::spawn(move || {
-            for event in ::std::io::stdin().events() {
+        tokio::task::spawn_blocking(move || {
+            for event in std::io::stdin().events() {
                 if let Ok(ev) = event {
-                    let _ = send.send(ConnEvent::Input(ev));
+                    let mut send = send.clone();
+                    tokio::spawn(async move { send.send(ConnEvent::Input(ev)).await });
                 }
             }
         });
 
-        // Launch a background thread to ping back attempts to type in the errors tab
+        // Launch a task to ping back attempts to type in the errors tab
         // This is pretty stupid, but otherwise we have to special-case the Client
         // tab in other parts of the code
-        let to_tui = sender.clone();
-        let (to_client, from_client) = sync_channel(100);
-        thread::spawn(move || {
-            while let Ok(ev) = from_client.recv() {
+        let mut to_tui = sender.clone();
+        let (to_client, mut from_client) = futures::channel::mpsc::unbounded();
+        tokio::spawn(async move {
+            while let Some(ev) = from_client.next().await {
                 if let TuiEvent::SendMessage {
                     contents, channel, ..
                 } = ev
                 {
-                    let _ = to_tui.send(ConnEvent::Message(Message {
-                        server: "Client".into(),
-                        channel,
-                        sender: "You".into(),
-                        contents,
-                        timestamp: DateTime::now(),
-                        reactions: Vec::new(),
-                    }));
+                    to_tui
+                        .send(ConnEvent::Message(Message {
+                            server: "Client".into(),
+                            channel,
+                            sender: "You".into(),
+                            contents,
+                            timestamp: DateTime::now(),
+                            reactions: Vec::new(),
+                        }))
+                        .await
+                        .unwrap();
                 }
             }
         });
@@ -146,6 +152,7 @@ impl Tui {
                 name: "Errors".into(),
                 read_at: now,
                 latest: now,
+                has_history: false,
                 message_scroll_offset: 0,
                 message_buffer: String::new(),
                 channel_type: ChannelType::Normal,
@@ -173,14 +180,23 @@ impl Tui {
         }
     }
 
-    pub fn sender(&self) -> SyncSender<ConnEvent> {
+    pub fn sender(&self) -> UnboundedSender<ConnEvent> {
         self.sender.clone()
     }
 
     fn update_history(&mut self) {
-        let _ = self.servers.get().sender.send(TuiEvent::GetHistory {
-            channel: self.current_channel().name.clone(),
-        });
+        if !self.current_channel().has_history {
+            let channel_to_update = self.current_channel().name.clone();
+            let mut sender = self.servers.get().sender.clone();
+            tokio::spawn(async move {
+                sender
+                    .send(TuiEvent::GetHistory {
+                        channel: channel_to_update,
+                    })
+                    .await
+                    .unwrap()
+            });
+        }
     }
 
     fn current_channel(&self) -> &Channel {
@@ -195,13 +211,15 @@ impl Tui {
 
     fn reset_current_unreads(&mut self) {
         let server = self.servers.get_mut();
-        server.channels[server.current_channel].read_at = ::chrono::Utc::now().into();
+        server.channels[server.current_channel].read_at = chrono::Utc::now().into();
         let current_channel = &server.channels[server.current_channel];
 
-        let _ = server.sender.send(TuiEvent::MarkRead {
+        let mut sender = server.sender.clone();
+        let event = TuiEvent::MarkRead {
             server: server.name.clone(),
             channel: current_channel.name.clone(),
-        });
+        };
+        tokio::spawn(async move { sender.send(event).await.unwrap() });
     }
 
     fn next_server(&mut self) {
@@ -283,7 +301,7 @@ impl Tui {
                 server: "Client".into(),
                 channel: "Errors".into(),
                 contents: message,
-                timestamp: ::chrono::Utc::now().into(),
+                timestamp: chrono::Utc::now().into(),
                 sender: "Client".into(),
                 reactions: Vec::new(),
             }));
@@ -361,9 +379,14 @@ impl Tui {
                 .messages
                 .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
         }
+        channel.latest = channel
+            .messages
+            .last()
+            .map(|m| *m.timestamp())
+            .unwrap_or(channel.latest);
     }
 
-    fn send_message(&mut self) {
+    async fn send_message(&mut self) {
         let contents = self.current_channel().message_buffer.clone();
         self.current_channel_mut().message_buffer.clear();
         if self.servers.tell() == 0 && !contents.starts_with('/') {
@@ -380,12 +403,17 @@ impl Tui {
                 .map(|m| *m.timestamp())
             {
                 let reaction = &contents[2..contents.len() - 1];
-                let _ = self.servers.get().sender.send(TuiEvent::AddReaction {
-                    reaction: reaction.into(),
-                    server: current_server_name,
-                    channel: current_channel_name,
-                    timestamp: ts,
-                });
+                self.servers
+                    .get_mut()
+                    .sender
+                    .send(TuiEvent::AddReaction {
+                        reaction: reaction.into(),
+                        server: current_server_name,
+                        channel: current_channel_name,
+                        timestamp: ts,
+                    })
+                    .await
+                    .unwrap()
             } else {
                 self.add_client_message(
                     "Can't react to most recent message if there are no messages in this channel!"
@@ -455,17 +483,27 @@ impl Tui {
                     .map_err(|e| error!("{:#?}", e));
             }
         } else if contents.starts_with('/') {
-            let _ = self.servers.get_mut().sender.send(TuiEvent::Command {
-                server: current_server_name,
-                channel: current_channel_name,
-                command: String::from(&contents[1..]),
-            });
+            self.servers
+                .get_mut()
+                .sender
+                .send(TuiEvent::Command {
+                    server: current_server_name,
+                    channel: current_channel_name,
+                    command: String::from(&contents[1..]),
+                })
+                .await
+                .unwrap();
         } else {
-            let _ = self.servers.get_mut().sender.send(TuiEvent::SendMessage {
-                server: current_server_name,
-                channel: current_channel_name,
-                contents,
-            });
+            self.servers
+                .get_mut()
+                .sender
+                .send(TuiEvent::SendMessage {
+                    server: current_server_name,
+                    channel: current_channel_name,
+                    contents,
+                })
+                .await
+                .unwrap();
         }
     }
 
@@ -476,11 +514,11 @@ impl Tui {
         use termion::{color, style};
 
         let (terminal_width, terminal_height) =
-            ::termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
 
         if terminal_height != self.previous_terminal_height {
             render_buffer.clear();
-            let _ = write!(render_buffer, "{}", ::termion::clear::All);
+            let _ = write!(render_buffer, "{}", termion::clear::All);
 
             for i in 1..=terminal_height {
                 let _ = write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i));
@@ -668,15 +706,15 @@ impl Tui {
         );
         {
             use std::io::Write;
-            let out = ::std::io::stdout();
+            let out = std::io::stdout();
             let mut lock = out.lock();
             lock.write_all(render_buffer.as_bytes())
                 .expect("Unable to write to stdout");
-            let _ = lock.flush();
+            lock.flush().unwrap();
         }
     }
 
-    fn handle_input(&mut self, event: &::termion::event::Event) {
+    async fn handle_input(&mut self, event: &::termion::event::Event) {
         use termion::event::Event::*;
         use termion::event::Key::*;
         use termion::event::{MouseButton, MouseEvent};
@@ -684,7 +722,7 @@ impl Tui {
         match *event {
             Key(Char('\n')) => {
                 if !self.current_channel().message_buffer.is_empty() {
-                    self.send_message();
+                    self.send_message().await;
                     self.cursor_pos = 0;
                 }
             }
@@ -702,7 +740,10 @@ impl Tui {
                     self.current_channel_mut().message_buffer.remove(remove_pos);
                 }
             }
-            Key(Ctrl('c')) => self.shutdown = true,
+            Key(Ctrl('c')) => {
+                error!("got shutdown request");
+                self.shutdown = true;
+            }
             Key(Up) => {
                 self.previous_channel();
             }
@@ -847,10 +888,15 @@ impl Tui {
             Key(Char(c)) => {
                 let current_server_name = self.servers.get().name.clone();
                 let current_channel_name = self.current_channel().name.clone();
-                let _ = self.servers.get_mut().sender.send(TuiEvent::SendTyping {
-                    server: current_server_name,
-                    channel: current_channel_name,
-                });
+                self.servers
+                    .get_mut()
+                    .sender
+                    .send(TuiEvent::SendTyping {
+                        server: current_server_name,
+                        channel: current_channel_name,
+                    })
+                    .await
+                    .unwrap();
                 self.autocompletions.clear();
                 self.autocomplete_index = 0;
                 let current_pos = self.cursor_pos as usize;
@@ -861,18 +907,24 @@ impl Tui {
             }
             Unsupported(ref bytes) => match bytes.as_slice() {
                 [27, 79, 65] => {
-                    let _ = self.sender.send(ConnEvent::Input(Mouse(MouseEvent::Press(
-                        MouseButton::WheelUp,
-                        1,
-                        1,
-                    ))));
+                    self.sender
+                        .send(ConnEvent::Input(Mouse(MouseEvent::Press(
+                            MouseButton::WheelUp,
+                            1,
+                            1,
+                        ))))
+                        .await
+                        .unwrap();
                 }
                 [27, 79, 66] => {
-                    let _ = self.sender.send(ConnEvent::Input(Mouse(MouseEvent::Press(
-                        MouseButton::WheelDown,
-                        1,
-                        1,
-                    ))));
+                    self.sender
+                        .send(ConnEvent::Input(Mouse(MouseEvent::Press(
+                            MouseButton::WheelDown,
+                            1,
+                            1,
+                        ))))
+                        .await
+                        .unwrap();
                 }
 
                 _ => {}
@@ -881,11 +933,11 @@ impl Tui {
         }
     }
 
-    fn handle_event(&mut self, event: ConnEvent) {
+    async fn handle_event(&mut self, event: ConnEvent) {
         match event {
             ConnEvent::Resize => {} // Will be redrawn because we got an event
             ConnEvent::Input(event) => {
-                self.handle_input(&event);
+                self.handle_input(&event).await;
             }
             ConnEvent::Message(message) => {
                 self.add_message(message);
@@ -991,11 +1043,16 @@ impl Tui {
                     .find(|s| s.name == server)
                     .and_then(|server| server.channels.iter_mut().find(|c| c.name == channel))
                 {
-                    for m in messages {
-                        c.messages.push(m.into());
+                    // TODO: This duplicate check is quadratic and maybe not what we even want;
+                    // duplicate timestamps might be okay. Should we compare everything instead?
+                    for new_message in messages {
+                        if !c.messages.iter().any(|m| *m.timestamp() == new_message.timestamp) {
+                            c.messages.push(new_message.into());
+                        }
                     }
                     c.messages
                         .sort_unstable_by(|m1, m2| m1.timestamp().cmp(&m2.timestamp()));
+                    c.has_history = true;
                 } else {
                     error!(
                         "Got history for an unknown channel {} in server {}",
@@ -1028,36 +1085,16 @@ impl Tui {
         }
     }
 
-    // This is basically a game loop, we could use a temporary storage allocator
-    // If that were possible
-    pub fn run(mut self) {
-        use std::time::{Duration, Instant};
+    pub async fn run(mut self) {
         let mut render_buffer = String::new();
         self.draw(&mut render_buffer);
-        while let Ok(event) = self.events.recv() {
-            self.handle_event(event);
-
-            // Now we have another 16 miliseconds to handle other events before anyone notices
-            let start_instant = Instant::now();
-            while let Some(remaining_time) =
-                Duration::from_millis(32).checked_sub(start_instant.elapsed())
-            {
-                let event = match self.events.recv_timeout(remaining_time) {
-                    Ok(ev) => ev,
-                    Err(RecvTimeoutError::Timeout) => break,
-                    Err(_) => {
-                        self.shutdown = true;
-                        break;
-                    }
-                };
-
-                self.handle_event(event);
-            }
+        while let Some(event) = self.events.next().await {
+            self.handle_event(event).await;
 
             self.draw(&mut render_buffer);
 
             if self.shutdown {
-                break;
+                return;
             }
         }
     }

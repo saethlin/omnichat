@@ -2,17 +2,19 @@ use crate::conn::ConnEvent;
 use log::{Log, Metadata, Record};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::sync::mpsc::SyncSender;
 use std::sync::Mutex;
+
+use futures::channel::mpsc::UnboundedSender;
+use futures::sink::SinkExt;
 
 pub struct Logger {
     file_output: Mutex<File>,
-    sender: SyncSender<ConnEvent>,
+    sender: UnboundedSender<ConnEvent>,
 }
 
 impl Logger {
-    pub fn new(sender: SyncSender<ConnEvent>) -> Self {
-        let log_path = ::dirs::home_dir()
+    pub fn new(sender: UnboundedSender<ConnEvent>) -> Self {
+        let log_path = dirs::home_dir()
             .expect("You must have a home directory")
             .join(".omnichat_log");
 
@@ -46,7 +48,8 @@ impl Log for Logger {
             let _ = writeln!(file_handle, "{}", message);
             let _ = file_handle.flush();
         }
-        let _ = self.sender.send(ConnEvent::Error(message));
+        let mut send = self.sender.clone();
+        tokio::spawn(async move { send.send(ConnEvent::Error(message)).await });
     }
 
     fn flush(&self) {
