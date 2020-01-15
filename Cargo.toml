@@ -13,19 +13,16 @@ lazy_static = "1.0"
 regex-automata = "0.1"
 chrono = "0.4"
 log = {version="0.4", features=["std"]}
-termion = "1.0"
+termion = "1.5"
 libc = "0.2"
-signal-hook = "0.1"
 textwrap = "0.11"
 dirs = "2.0"
 serde_urlencoded = "0.6"
 tokio = {version = "0.2", features = ["full"]}
-futures-util = {version = "0.3", default-features = false, features=["std"]}
-futures = "0.3"
+futures = {version = "0.3", default-features = false, features = ["std", "async-await"]}
 slack = {path = "tiny_slack"}
 discord = {path = "discord"}
-weeqwest = {path = "../weeqwest"}
-#weeqwest = {git = "https://github.com/saethlin/weeqwest"}
+weeqwest = {git = "https://github.com/saethlin/weeqwest"}
 weebsocket = {git = "https://github.com/saethlin/weebsocket"}
 
 [build-dependencies]

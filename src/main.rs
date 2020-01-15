@@ -1,3 +1,5 @@
+#![recursion_limit = "1024"]
+
 use serde::Deserialize;
 
 mod bimap;
@@ -28,7 +30,7 @@ struct Config {
     //discord: Option<Vec<DiscordConfig>>,
 }
 
-#[tokio::main]
+#[tokio::main(core_threads = 4)]
 async fn main() {
     //use crate::discord_conn::DiscordConn;
     use crate::slack_conn::SlackConn;

@@ -84,7 +84,6 @@ impl Channel {
 
 impl Tui {
     pub fn new() -> Self {
-        use termion::input::TermRead;
         use termion::raw::IntoRawMode;
 
         let screenguard = termion::screen::AlternateScreen::from(::std::io::stdout());
@@ -94,26 +93,23 @@ impl Tui {
 
         let (sender, reciever) = futures::channel::mpsc::unbounded();
 
-        // Set up a signal handler so we get notified when the terminal is resized
-        // Must be called before any threads are launched
-        let winch_send = sender.clone();
-        let signals = signal_hook::iterator::Signals::new(&[::libc::SIGWINCH])
-            .expect("Couldn't register resize signal handler");
-        tokio::task::spawn_blocking(move || {
-            for _ in &signals {
-                let mut winch_send = winch_send.clone();
-                tokio::spawn(async move { winch_send.send(ConnEvent::Resize).await });
-            }
-        });
-
         // Launch a background thread to feed input from stdin
         // Note this isn't raw keyboard events, it's termion's opinion of an event
-        let send = sender.clone();
-        tokio::task::spawn_blocking(move || {
-            for event in std::io::stdin().events() {
-                if let Ok(ev) = event {
-                    let mut send = send.clone();
-                    tokio::spawn(async move { send.send(ConnEvent::Input(ev)).await });
+        let mut stdin_sender = sender.clone();
+        tokio::spawn(async move {
+            use tokio::io::AsyncReadExt;
+            let mut stdin = tokio::io::stdin();
+            loop {
+                let mut bytes = [0u8; 4];
+                let n = stdin.read(&mut bytes).await.unwrap();
+                if n == 0 {
+                    continue;
+                }
+                if let Ok(event) = termion::event::parse_event(
+                    bytes[0],
+                    &mut bytes[1..].iter().take(n - 1).map(|b| Ok(*b)),
+                ) {
+                    stdin_sender.send(ConnEvent::Input(event)).await.unwrap();
                 }
             }
         });
@@ -184,18 +180,16 @@ impl Tui {
         self.sender.clone()
     }
 
-    fn update_history(&mut self) {
+    async fn update_history(&mut self) {
         if !self.current_channel().has_history {
             let channel_to_update = self.current_channel().name.clone();
             let mut sender = self.servers.get().sender.clone();
-            tokio::spawn(async move {
-                sender
-                    .send(TuiEvent::GetHistory {
-                        channel: channel_to_update,
-                    })
-                    .await
-                    .unwrap()
-            });
+            sender
+                .send(TuiEvent::GetHistory {
+                    channel: channel_to_update,
+                })
+                .await
+                .unwrap();
         }
     }
 
@@ -209,7 +203,7 @@ impl Tui {
         &mut server.channels[server.current_channel]
     }
 
-    fn reset_current_unreads(&mut self) {
+    async fn reset_current_unreads(&mut self) {
         let server = self.servers.get_mut();
         server.channels[server.current_channel].read_at = chrono::Utc::now().into();
         let current_channel = &server.channels[server.current_channel];
@@ -219,37 +213,37 @@ impl Tui {
             server: server.name.clone(),
             channel: current_channel.name.clone(),
         };
-        tokio::spawn(async move { sender.send(event).await.unwrap() });
+        sender.send(event).await.unwrap();
     }
 
-    fn next_server(&mut self) {
-        self.reset_current_unreads();
+    async fn next_server(&mut self) {
+        self.reset_current_unreads().await;
         self.servers.next();
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
-        self.update_history();
+        self.update_history().await;
     }
 
-    fn previous_server(&mut self) {
-        self.reset_current_unreads();
+    async fn previous_server(&mut self) {
+        self.reset_current_unreads().await;
         self.servers.prev();
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
-        self.update_history();
+        self.update_history().await;
     }
 
-    fn next_channel_unread(&mut self) {
+    async fn next_channel_unread(&mut self) {
         let server = self.servers.get_mut();
         if let Some(index) = (0..server.channels.len())
             .map(|i| (server.current_channel + i) % server.channels.len())
             .find(|i| server.channels[*i].is_unread() && *i != server.current_channel)
         {
-            self.reset_current_unreads();
+            self.reset_current_unreads().await;
             self.servers.get_mut().current_channel = index;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
-        self.update_history();
+        self.update_history().await;
     }
 
-    fn previous_channel_unread(&mut self) {
+    async fn previous_channel_unread(&mut self) {
         //NLL HACK
         let index = {
             let server = self.servers.get_mut();
@@ -262,27 +256,27 @@ impl Tui {
         match index {
             None => {}
             Some(index) => {
-                self.reset_current_unreads();
+                self.reset_current_unreads().await;
                 self.servers.get_mut().current_channel = index;
             }
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
-        self.update_history();
+        self.update_history().await;
     }
 
-    fn next_channel(&mut self) {
-        self.reset_current_unreads();
+    async fn next_channel(&mut self) {
+        self.reset_current_unreads().await;
         let server = self.servers.get_mut();
         server.current_channel += 1;
         if server.current_channel >= server.channels.len() {
             server.current_channel = 0;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
-        self.update_history();
+        self.update_history().await;
     }
 
-    fn previous_channel(&mut self) {
-        self.reset_current_unreads();
+    async fn previous_channel(&mut self) {
+        self.reset_current_unreads().await;
         let server = self.servers.get_mut();
         if server.current_channel > 0 {
             server.current_channel -= 1;
@@ -290,7 +284,7 @@ impl Tui {
             server.current_channel = server.channels.len() - 1;
         }
         self.cursor_pos = min(self.cursor_pos, self.current_channel().message_buffer.len());
-        self.update_history();
+        self.update_history().await;
     }
 
     // Take by value because we need to own the allocation
@@ -422,7 +416,7 @@ impl Tui {
             }
         } else if contents == "/mark" || contents == "/m" {
             // Mark current channel as read
-            self.reset_current_unreads();
+            self.reset_current_unreads().await;
         } else if contents.starts_with("/c") {
             // Find and switch to the specified channel
             if let Some(requested_channel) = contents.splitn(2, ' ').nth(1) {
@@ -433,11 +427,11 @@ impl Tui {
                     .iter()
                     .position(|c| c.name == requested_channel)
                 {
-                    self.reset_current_unreads();
+                    self.reset_current_unreads().await;
                     self.servers.get_mut().current_channel = index;
                     self.cursor_pos =
                         min(self.cursor_pos, self.current_channel().message_buffer.len());
-                    self.update_history();
+                    self.update_history().await;
                 } else {
                     error!("unknown channel {}", requested_channel);
                 }
@@ -447,13 +441,13 @@ impl Tui {
             if let Some(requested_server) = contents.splitn(2, ' ').nth(1) {
                 let index = self.servers.iter().position(|s| s.name == requested_server);
                 if let Some(index) = index {
-                    self.reset_current_unreads();
+                    self.reset_current_unreads().await;
                     while self.servers.tell() != index {
                         self.servers.next();
                     }
                     self.cursor_pos =
                         min(self.cursor_pos, self.current_channel().message_buffer.len());
-                    self.update_history();
+                    self.update_history().await;
                 } else {
                     error!("unknown server {}", requested_server);
                 }
@@ -745,22 +739,22 @@ impl Tui {
                 self.shutdown = true;
             }
             Key(Up) => {
-                self.previous_channel();
+                self.previous_channel().await;
             }
             Key(Down) => {
-                self.next_channel();
+                self.next_channel().await;
             }
             Key(Ctrl('d')) => {
-                self.next_server();
+                self.next_server().await;
             }
             Key(Ctrl('a')) => {
-                self.previous_server();
+                self.previous_server().await;
             }
             Key(PageDown) | Key(Ctrl('s')) => {
-                self.next_channel_unread();
+                self.next_channel_unread().await;
             }
             Key(PageUp) | Key(Ctrl('w')) => {
-                self.previous_channel_unread();
+                self.previous_channel_unread().await;
             }
             Key(Ctrl('q')) | Mouse(MouseEvent::Press(MouseButton::WheelUp, ..)) => {
                 self.current_channel_mut().message_scroll_offset += 1;
@@ -935,7 +929,8 @@ impl Tui {
 
     async fn handle_event(&mut self, event: ConnEvent) {
         match event {
-            ConnEvent::Resize => {} // Will be redrawn because we got an event
+            ConnEvent::Resize => {
+            } // Will be redrawn because we got an event
             ConnEvent::Input(event) => {
                 self.handle_input(&event).await;
             }
@@ -1094,7 +1089,7 @@ impl Tui {
             self.draw(&mut render_buffer);
 
             if self.shutdown {
-                return;
+                break;
             }
         }
     }

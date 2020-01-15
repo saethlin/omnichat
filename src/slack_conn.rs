@@ -8,9 +8,10 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use futures::channel::mpsc::UnboundedSender;
+use futures::future::FutureExt;
+use futures::lock::Mutex;
 use futures::sink::SinkExt;
 use futures::stream::StreamExt;
-use futures_util::lock::Mutex;
 
 lazy_static::lazy_static! {
     static ref MENTION_REGEX_DATA: Vec<u16> = {
@@ -328,7 +329,7 @@ pub struct SlackConn {
     emoji: Vec<String>,
     last_typing_message: chrono::DateTime<chrono::Utc>,
     my_name: String,
-    input_sender: weebsocket::async_client::Sender,
+    input_sender: UnboundedSender<weebsocket::Message>,
     tui_sender: UnboundedSender<ConnEvent>,
     pending_messages: Vec<PendingMessage>,
 }
@@ -436,8 +437,7 @@ impl SlackConn {
             .map_err(|e| error!("{:#?}", e))?;
 
         let websocket_url = connect_response.url.clone();
-        let (tx, mut rx) =
-            weebsocket::async_client::connect(&websocket_url).map_err(|e| error!("{:#?}", e))?;
+        let mut websocket = weebsocket::Client::connect(&websocket_url).await.unwrap();
 
         let my_name = connect_response.slf.name;
         let team_name = connect_response.team.name;
@@ -455,6 +455,8 @@ impl SlackConn {
             .collect::<Vec<_>>();
         emoji.sort();
 
+        let (input_sender, mut input_reciever) = futures::channel::mpsc::unbounded();
+
         let connection = Arc::new(Mutex::new(SlackConn {
             token: token.clone(),
             users,
@@ -463,7 +465,7 @@ impl SlackConn {
             emoji,
             last_typing_message: chrono::Utc::now(),
             my_name: my_name.clone(),
-            input_sender: tx.clone(),
+            input_sender,
             tui_sender: sender.clone(),
             pending_messages: Vec::new(),
         }));
@@ -522,24 +524,30 @@ impl SlackConn {
 
         let thread_conn = connection.clone();
 
-        let mut t_tx = tx.clone();
-        tokio::task::spawn_blocking(move || {
-            use weebsocket::Message;
+        tokio::spawn(async move {
             loop {
-                match rx.recv() {
-                    Message::Close(_) => {
-                        error!("websocket closed");
-                        // TODO: Restart
+                let mut input_fut = input_reciever.next();
+                futures::select! {
+                    ws_msg = websocket.recv().fuse() => {
+                        match ws_msg.unwrap() {
+                            weebsocket::Message::Close(_) => {
+                                error!("websocket closed");
+                                // TODO: Restart
+                            }
+                            weebsocket::Message::Ping(data) => websocket.send(&weebsocket::Message::Pong(data)).await.unwrap(),
+                            weebsocket::Message::Text(text) => {
+                                thread_conn.lock().await.process_slack_message(&text).await;
+                            }
+                            weebsocket::Message::Pong(_) | weebsocket::Message::Binary(_) => error!("unrecognized message"),
+                        }
                     }
-                    Message::Ping(data) => t_tx.send(Message::Pong(data)),
-                    Message::Text(text) => {
-                        let thread_conn = thread_conn.clone();
-                        tokio::spawn(async move {
-                            thread_conn.lock().await.process_slack_message(&text).await
-                        });
+                    input = input_fut => {
+                        if let Some(input) = input {
+                            websocket.send(&input).await.unwrap();
+                        }
                     }
-                    Message::Pong(_) | Message::Binary(_) => error!("unrecognized message"),
                 }
+                tokio::task::yield_now().await;
             }
         });
 
@@ -761,10 +769,14 @@ impl SlackConn {
             "channel": channel_id,
         });
 
-        serde_json::to_string(&message)
-            .map_err(|e| error!("{:#?}", e))
-            .map(|the_json| self.input_sender.send(weebsocket::Message::Text(the_json)))
-            .unwrap()
+        match serde_json::to_string(&message) {
+            Err(e) => error!("{:#?}", e),
+            Ok(the_json) => self
+                .input_sender
+                .send(weebsocket::Message::Text(the_json))
+                .await
+                .unwrap(),
+        }
     }
 
     async fn send_channel_message(&mut self, channel: &str, contents: &str) {
@@ -793,10 +805,14 @@ impl SlackConn {
             "text": contents,
         });
 
-        serde_json::to_string(&message)
-            .map_err(|e| error!("{:#?}", e))
-            .map(|the_json| self.input_sender.send(weebsocket::Message::Text(the_json)))
-            .unwrap()
+        match serde_json::to_string(&message) {
+            Err(e) => error!("{:#?}", e),
+            Ok(the_json) => self
+                .input_sender
+                .send(weebsocket::Message::Text(the_json))
+                .await
+                .unwrap(),
+        }
     }
 
     fn mark_read(&self, channel: &str) {
