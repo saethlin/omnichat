@@ -747,8 +747,6 @@ impl Tui {
         }
         {
             use std::io::Write;
-
-            eprintln!("Bytes written: {}", diff.len());
             lock.write_all(diff.as_bytes())
                 .expect("Unable to write to stdout");
             lock.flush().unwrap();
