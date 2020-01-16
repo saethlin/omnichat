@@ -54,6 +54,14 @@ impl ChanMessage {
         &self.timestamp
     }
 
+    pub fn sender(&self) -> &str {
+        &self.sender
+    }
+
+    pub fn color(&self) -> termion::color::AnsiValue {
+        COLORS[djb2(&self.sender) as usize % COLORS.len()]
+    }
+
     pub fn add_reaction(&mut self, reaction: &str) {
         let mut found = false;
         if let Some(r) = self.reactions.iter_mut().find(|rxn| rxn.0 == reaction) {
@@ -82,7 +90,6 @@ impl ChanMessage {
 
     pub fn formatted_to(&mut self, width: usize) -> &str {
         use std::fmt::Write;
-        use termion::color::{AnsiValue, Fg, Reset};
         use textwrap::{NoHyphenation, Wrapper};
 
         if Some(width) == self.formatted_width {
@@ -119,18 +126,10 @@ impl ChanMessage {
                     if l == 0 {
                         let _ = write!(
                             self.formatted,
-                            "{}({:02}:{:02}) ",
-                            Fg(AnsiValue::grayscale(8)),
+                            "({:02}:{:02}) {}: ",
                             localtime.time().hour(),
                             localtime.time().minute(),
-                        );
-
-                        let _ = write!(
-                            self.formatted,
-                            "{}{}{}: ",
-                            Fg(COLORS[djb2(&self.sender) as usize % COLORS.len()]),
                             self.sender,
-                            Fg(Reset),
                         );
 
                         self.formatted
@@ -149,8 +148,6 @@ impl ChanMessage {
         }
 
         if !self.reactions.is_empty() {
-            let gray = Fg(AnsiValue::grayscale(10)).to_string();
-
             let mut reactions_string = String::new();
             for (r, count) in &self.reactions {
                 let _ = write!(reactions_string, "{}({}) ", r, count);
@@ -163,7 +160,7 @@ impl ChanMessage {
             for line in wrapper.wrap_iter(&reactions_string) {
                 // Apparently terminal colors are reset by the Goto mechanism I'm using to move
                 // from one line to another
-                self.formatted.push_str(&gray);
+                //self.formatted.push_str(&gray);
                 self.formatted.push_str(&line);
                 self.formatted.push('\n');
             }
@@ -172,8 +169,6 @@ impl ChanMessage {
             while self.formatted.ends_with(char::is_whitespace) {
                 self.formatted.pop();
             }
-
-            let _ = write!(self.formatted, "{}", Fg(Reset));
         }
 
         // Clean trailing whitespace from messages

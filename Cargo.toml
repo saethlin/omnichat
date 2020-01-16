@@ -21,7 +21,6 @@ serde_urlencoded = "0.6"
 tokio = {version = "0.2", features = ["full"]}
 futures = {version = "0.3", default-features = false, features = ["std", "async-await"]}
 slack = {path = "tiny_slack"}
-discord = {path = "discord"}
 weeqwest = {git = "https://github.com/saethlin/weeqwest"}
 weebsocket = {git = "https://github.com/saethlin/weebsocket"}
 
@@ -33,3 +32,4 @@ opt-level = 3
 
 [profile.release]
 debug = 1
+lto = "fat"

@@ -5,8 +5,8 @@ use serde::Deserialize;
 mod bimap;
 mod chan_message;
 mod conn;
+mod curses;
 mod cursor_vec;
-//mod discord_conn;
 mod logger;
 mod slack_conn;
 mod tui;
@@ -16,23 +16,13 @@ struct SlackConfig {
     token: String,
 }
 
-/*
-#[derive(Deserialize)]
-struct DiscordConfig {
-    name: String,
-}
-*/
-
 #[derive(Deserialize)]
 struct Config {
     slack: Option<Vec<SlackConfig>>,
-    //discord_token: Option<String>,
-    //discord: Option<Vec<DiscordConfig>>,
 }
 
 #[tokio::main(core_threads = 4)]
 async fn main() {
-    //use crate::discord_conn::DiscordConn;
     use crate::slack_conn::SlackConn;
     use std::fs::File;
     use std::io::Read;
@@ -72,7 +62,7 @@ async fn main() {
         .expect("Unable to create global logger");
     log::set_max_level(log::LevelFilter::Warn);
 
-    // Start all the slack connections first, because we can't do the Discord stuff fully async
+    // Start all the slack connections
     if let Some(slack) = config.slack {
         for c in slack {
             let sender = tui.sender();
@@ -80,18 +70,6 @@ async fn main() {
             tokio::spawn(async move { SlackConn::create_on(&token, sender).await });
         }
     }
-
-    /*
-    if let (Some(discord_token), Some(discord)) = (config.discord_token, config.discord) {
-        for d in discord {
-            let sender = tui.sender();
-            let token = discord_token.clone();
-            thread::spawn(move || {
-                let _ = DiscordConn::create_on(&token, sender.clone(), &d.name);
-            });
-        }
-    }
-    */
 
     tui.run().await
 }

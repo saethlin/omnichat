@@ -38,8 +38,6 @@ pub struct Tui {
         termion::screen::AlternateScreen<::std::io::Stdout>,
         termion::raw::RawTerminal<::std::io::Stdout>,
     ),
-    previous_terminal_height: u16,
-    truncate_buffer_to: usize,
 }
 
 pub struct Server {
@@ -171,8 +169,6 @@ impl Tui {
             autocomplete_index: 0,
             cursor_pos: 0,
             _guards: (screenguard, rawguard),
-            truncate_buffer_to: 0,
-            previous_terminal_height: 0,
         }
     }
 
@@ -501,50 +497,36 @@ impl Tui {
         }
     }
 
-    fn draw(&mut self, render_buffer: &mut String) {
-        use std::fmt::Write;
-        use termion::color::Fg;
-        use termion::cursor::Goto;
-        use termion::{color, style};
+    fn draw(&mut self, master: &mut crate::curses::Screen) {
+        use crate::curses::Screen;
+        use termion::color::AnsiValue;
 
-        let (terminal_width, terminal_height) =
-            termion::terminal_size().expect("TUI draw couldn't get terminal dimensions");
+        let mut new = Screen::new();
 
-        if terminal_height != self.previous_terminal_height {
-            render_buffer.clear();
-            let _ = write!(render_buffer, "{}", termion::clear::All);
-
-            for i in 1..=terminal_height {
-                let _ = write!(render_buffer, "{}|", Goto(CHAN_WIDTH, i));
-            }
-            self.truncate_buffer_to = render_buffer.len();
-            self.previous_terminal_height = terminal_height;
-        } else {
-            render_buffer.truncate(self.truncate_buffer_to);
+        for r in 1..new.rows() + 1 {
+            new.set_str(
+                r,
+                CHAN_WIDTH,
+                AnsiValue::rgb(5, 5, 5),
+                AnsiValue::rgb(0, 0, 0),
+                false,
+                "|",
+            );
         }
-
-        let remaining_width = (terminal_width - CHAN_WIDTH) as usize;
 
         // Draw the message input area
         // We need this message area height to render the channel messages
-        // More NLL hacking
-        let total_chars = self.current_channel().message_buffer.chars().count();
-        let rows = (total_chars / remaining_width) + 1;
-        for row in (0..rows).rev() {
-            let _ = write!(
-                render_buffer,
-                "{}",
-                Goto(CHAN_WIDTH + 1, terminal_height - (rows - row - 1) as u16)
-            );
-            render_buffer.extend(
-                self.current_channel()
-                    .message_buffer
-                    .chars()
-                    .skip(remaining_width * row)
-                    .take(remaining_width),
-            );
-        }
-        let message_area_height = terminal_height - rows as u16 + 1;
+        // TODO: This shouldn't be .chars().count(), we want to count grapheme clusters
+        let remaining_width = (new.columns() - CHAN_WIDTH) as usize;
+        new.set_str(
+            new.rows(),
+            CHAN_WIDTH + 1,
+            AnsiValue::rgb(5, 5, 5),
+            AnsiValue::rgb(0, 0, 0),
+            false,
+            self.current_channel().message_buffer.as_str(),
+        );
+        let message_area_height = new.rows();
 
         // Draw all the messages by looping over them in reverse
         let num_unreads = self.current_channel().num_unreads();
@@ -563,14 +545,18 @@ impl Tui {
         {
             // Unread marker
             if (draw_unread_marker) && (m == num_unreads) {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}",
-                    Goto(CHAN_WIDTH + 1, row),
-                    Fg(color::Red)
+                new.set_str(
+                    row,
+                    CHAN_WIDTH + 1,
+                    AnsiValue::rgb(5, 0, 0),
+                    AnsiValue::grayscale(0),
+                    false,
+                    std::iter::repeat('-')
+                        .take(remaining_width)
+                        .collect::<String>()
+                        .as_str(),
                 );
-                render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
-                let _ = write!(render_buffer, "{}", Fg(color::Reset));
+
                 row -= 1;
                 draw_unread_marker = false;
                 if row == 1 {
@@ -583,26 +569,54 @@ impl Tui {
                     skipped += 1;
                     continue;
                 }
-                let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, row));
-                render_buffer.push_str(line);
+                new.set_str(
+                    row,
+                    CHAN_WIDTH + 1,
+                    AnsiValue::rgb(5, 5, 5),
+                    AnsiValue::rgb(0, 0, 0),
+                    false,
+                    line,
+                );
                 row -= 1;
                 if row == 1 {
                     break 'outer;
                 }
             }
+            new.set_str(
+                row + 1,
+                CHAN_WIDTH + 1,
+                AnsiValue::grayscale(8),
+                AnsiValue::rgb(0, 0, 0),
+                false,
+                message.formatted_to(remaining_width).split_at(7).0,
+            );
+            new.set_str(
+                row + 1,
+                CHAN_WIDTH + 1 + 7 + 1,
+                message.color(),
+                AnsiValue::rgb(0, 0, 0),
+                false,
+                message.sender(),
+            );
         }
 
         // If we didn't draw the unread marker, put it at the top of the screen
         if draw_unread_marker {
-            let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, max(2, row)));
-            let _ = write!(render_buffer, "{}", Fg(color::Red));
-            render_buffer.extend(::std::iter::repeat('-').take(remaining_width));
-            let _ = write!(render_buffer, "{}", Fg(color::Reset));
+            new.set_str(
+                max(2, row),
+                CHAN_WIDTH + 1,
+                AnsiValue::rgb(5, 0, 0),
+                AnsiValue::grayscale(0),
+                false,
+                std::iter::repeat('-')
+                    .take(remaining_width)
+                    .collect::<String>()
+                    .as_str(),
+            );
         }
 
-        // Draw all the server names across the top
-        let _ = write!(render_buffer, "{}", Goto(CHAN_WIDTH + 1, 1)); // Move to the top-right corner
         let num_servers = self.servers.len();
+        let mut current_col = CHAN_WIDTH + 1;
         for (s, server) in self
             .servers
             .iter()
@@ -610,99 +624,132 @@ impl Tui {
             .skip(self.server_scroll_offset)
         {
             if s == self.servers.tell() {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}{}",
-                    style::Bold,
-                    server.name,
-                    style::Reset
+                new.set_str(
+                    1,
+                    current_col,
+                    AnsiValue::rgb(5, 5, 5),
+                    AnsiValue::rgb(0, 0, 0),
+                    true,
+                    &server.name,
                 );
             } else if server.has_unreads() {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}{}",
-                    Fg(color::Red),
-                    server.name,
-                    Fg(color::Reset),
+                new.set_str(
+                    1,
+                    current_col,
+                    AnsiValue::rgb(5, 0, 0),
+                    AnsiValue::rgb(0, 0, 0),
+                    false,
+                    &server.name,
                 );
             } else {
-                let _ = write!(
-                    render_buffer,
-                    "{}{}{}",
-                    Fg(color::AnsiValue::rgb(3, 3, 3)),
-                    server.name,
-                    Fg(color::Reset),
+                new.set_str(
+                    1,
+                    current_col,
+                    AnsiValue::rgb(3, 3, 3),
+                    AnsiValue::rgb(0, 0, 0),
+                    false,
+                    &server.name,
                 );
             }
+            current_col += server.name.chars().count() as u16;
+            if s != num_servers - 1 {
+                new.set_str(
+                    1,
+                    current_col,
+                    AnsiValue::rgb(5, 5, 5),
+                    AnsiValue::rgb(0, 0, 0),
+                    true,
+                    " • ",
+                );
+                current_col += 3;
+            }
+        }
+
+        // Draw all the channels for the current server down the left side
+        let server = self.servers.get_mut();
+        let height = new.rows() as usize;
+        if server.current_channel + 1 > height + server.channel_scroll_offset {
+            server.channel_scroll_offset = server.current_channel - height + 1
+        } else if server.current_channel < server.channel_scroll_offset {
+            server.channel_scroll_offset = server.current_channel;
+        }
+
+        fn write_shortened_name(f: &mut String, name: &str, max_len: usize) {
+            use std::fmt::Write;
+            if name.chars().count() < max_len {
+                let _ = write!(f, "{}", name);
+            } else {
+                f.extend(name.chars().take(max_len - 4).chain("...".chars()));
+            }
+        }
+
+        let mut short_name = String::new();
+        for (c, channel) in server
+            .channels
+            .iter_mut()
+            .enumerate()
+            .skip(server.channel_scroll_offset)
+            .take(new.rows() as usize)
+        {
+            short_name.clear();
+            write_shortened_name(&mut short_name, &channel.name, CHAN_WIDTH as usize);
+            let draw_at = (c - server.channel_scroll_offset) as u16
+                + 1
+                + ((channel.channel_type == ChannelType::DirectMessage) as u16);
+            // Skip a row if we're transitioning from the normal to DM channels
+            if c == server.current_channel {
+                new.set_str(
+                    draw_at,
+                    1,
+                    AnsiValue::rgb(5, 5, 5),
+                    AnsiValue::rgb(0, 0, 0),
+                    true,
+                    &short_name,
+                );
+            } else if channel.is_unread() {
+                new.set_str(
+                    draw_at,
+                    1,
+                    AnsiValue::rgb(5, 0, 0),
+                    AnsiValue::rgb(0, 0, 0),
+                    true,
+                    &short_name,
+                );
+            } else {
+                new.set_str(
+                    draw_at,
+                    1,
+                    AnsiValue::rgb(3, 3, 3),
+                    AnsiValue::rgb(0, 0, 0),
+                    false,
+                    &short_name,
+                );
+            }
+        }
+
+        let out = std::io::stdout();
+        let mut lock = out.lock();
+        let mut diff = master.update_from(&new);
+
+        {
+            use std::fmt::Write;
+
+            let total_chars = self.current_channel().message_buffer.chars().count();
             let _ = write!(
-                render_buffer,
+                diff,
                 "{}",
-                if s == num_servers - 1 { "" } else { " • " }
+                termion::cursor::Goto(
+                    CHAN_WIDTH + 1 + (self.cursor_pos % remaining_width) as u16,
+                    new.rows() - (total_chars / remaining_width) as u16
+                        + (self.cursor_pos / remaining_width) as u16
+                )
             );
         }
-
-        {
-            // Draw all the channels for the current server down the left side
-            let server = self.servers.get_mut();
-            {
-                let height = terminal_height as usize;
-                if server.current_channel + 1 > height + server.channel_scroll_offset {
-                    server.channel_scroll_offset = server.current_channel - height + 1
-                } else if server.current_channel < server.channel_scroll_offset {
-                    server.channel_scroll_offset = server.current_channel;
-                }
-            }
-
-            fn write_shortened_name(f: &mut String, name: &str, max_len: usize) {
-                if name.chars().count() < max_len {
-                    let _ = write!(f, "{}", name);
-                } else {
-                    f.extend(name.chars().take(max_len - 4).chain("...".chars()));
-                }
-            }
-
-            for (c, channel) in server
-                .channels
-                .iter_mut()
-                .enumerate()
-                .skip(server.channel_scroll_offset)
-                .take(terminal_height as usize)
-            {
-                let draw_at = (c - server.channel_scroll_offset) as u16
-                    + 1
-                    + ((channel.channel_type == ChannelType::DirectMessage) as u16);
-                // Skip a row if we're transitioning from the normal to DM channels
-                if c == server.current_channel {
-                    let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), style::Bold);
-                    write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    let _ = write!(render_buffer, "{}", style::Reset);
-                } else if channel.is_unread() {
-                    let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), Fg(color::Red));
-                    write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    let _ = write!(render_buffer, "{}", style::Reset);
-                } else {
-                    let gray = color::AnsiValue::rgb(3, 3, 3);
-                    let _ = write!(render_buffer, "{}{}", Goto(1, draw_at), Fg(gray));
-                    write_shortened_name(render_buffer, &channel.name, CHAN_WIDTH as usize);
-                    let _ = write!(render_buffer, "{}", style::Reset);
-                }
-            }
-        }
-
-        let _ = write!(
-            render_buffer,
-            "{}",
-            Goto(
-                CHAN_WIDTH + 1 + (self.cursor_pos % remaining_width) as u16,
-                terminal_height - (total_chars / remaining_width) as u16
-                    + (self.cursor_pos / remaining_width) as u16
-            )
-        );
         {
             use std::io::Write;
-            let out = std::io::stdout();
-            let mut lock = out.lock();
-            lock.write_all(render_buffer.as_bytes())
+
+            eprintln!("Bytes written: {}", diff.len());
+            lock.write_all(diff.as_bytes())
                 .expect("Unable to write to stdout");
             lock.flush().unwrap();
         }
@@ -1081,12 +1128,13 @@ impl Tui {
     }
 
     pub async fn run(mut self) {
-        let mut render_buffer = String::new();
-        self.draw(&mut render_buffer);
+        println!("{}", termion::clear::All);
+        let mut master_screen = crate::curses::Screen::new();
+        self.draw(&mut master_screen);
         while let Some(event) = self.events.next().await {
             self.handle_event(event).await;
 
-            self.draw(&mut render_buffer);
+            self.draw(&mut master_screen);
 
             if self.shutdown {
                 break;
