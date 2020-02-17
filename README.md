@@ -7,6 +7,16 @@ I really dislike how much my chromebook lags while trying to use Slack, Discord,
 ![omnichat_slack](omni_small.png)
 
 
+A valid config file which must be placed at `$HOME/.omnichat.toml` looks like this:
+```
+[[slack]]
+token = "slack_user_token_here"
+
+[[slack]]
+token = "slack_user_token_for_another_server"
+```
+To get your slack token for a server, you'll need to visit https://api.slack.com/legacy/custom-integrations/legacy-tokens
+
 Working on: 
 ## Slack
 * More commands like /join and /leave 
